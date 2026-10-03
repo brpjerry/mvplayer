@@ -38,6 +38,11 @@ public:
     qint64 insertVideo(const VideoInfo &v);
     void updateVideoTags(const VideoInfo &v);
     void removeVideo(qint64 id);
+    // Videos imported before their picture was reliably checked for stills.
+    QVector<VideoInfo> videosNotStillChecked();
+    void markStillChecked(qint64 videoId);
+    // Makes the tracks that point at a video pending again.
+    void requeueTracksOfVideo(qint64 videoId);
 
 private:
     QSqlDatabase conn();

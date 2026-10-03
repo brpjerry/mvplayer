@@ -14,8 +14,22 @@ QString tokens(const QString &s)
     QString out;
     out.reserve(f.size() + 2);
     out += QLatin1Char(' ');
-    for (const QChar c : f)
-        out += c.isLetterOrNumber() ? c : QLatin1Char(' ');
+    // Scripts written without spaces run straight into Latin words
+    // ("東京Remix"); split where the script changes so "remix" stays a word.
+    bool prevWide = false, first = true;
+    for (const QChar c : f) {
+        if (!c.isLetterOrNumber()) {
+            out += QLatin1Char(' ');
+            first = true;
+            continue;
+        }
+        const bool wide = c.unicode() >= 0x2E80;
+        if (!first && wide != prevWide)
+            out += QLatin1Char(' ');
+        out += c;
+        prevWide = wide;
+        first = false;
+    }
     out += QLatin1Char(' ');
     return out.simplified().prepend(QLatin1Char(' ')).append(QLatin1Char(' '));
 }

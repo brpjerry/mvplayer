@@ -6,6 +6,8 @@
 //       Prints how the track lines up with the other file's soundtrack.
 //   mvplayer-import mux <track> <video> <out.mkv>
 //       Runs the audio replacement on a local video file.
+//   mvplayer-import check-video <video> [keyframes]
+//       Reports whether the picture is a still image.
 
 #include "core/AudioAlign.h"
 #include "core/ImportManager.h"
@@ -57,7 +59,7 @@ int main(int argc, char **argv)
         {QStringLiteral("retry"), QStringLiteral("Retry tracks that previously failed or had no video.")},
         {QStringLiteral("ytdlp-arg"), QStringLiteral("Extra argument passed to yt-dlp (repeatable)."), QStringLiteral("arg")},
     });
-    parser.addPositionalArgument(QStringLiteral("command"), QStringLiteral("Optional: align <track> <video> | mux <track> <video> <out.mkv>"));
+    parser.addPositionalArgument(QStringLiteral("command"), QStringLiteral("Optional: align <track> <video> | mux <track> <video> <out.mkv> | check-video <video> [keyframes]"));
     parser.process(app);
 
     const QStringList pos = parser.positionalArguments();
@@ -71,6 +73,19 @@ int main(int argc, char **argv)
             return 1;
         }
         out << AudioAlign::align(a, b).summary() << Qt::endl;
+        return 0;
+    }
+
+    if (pos.value(0) == QLatin1String("check-video")) {
+        if (pos.size() < 2 || pos.size() > 3)
+            parser.showHelp(2);
+        const Muxer::StillCheck c = Muxer::checkStill(pos[1], pos.value(2) == QLatin1String("keyframes"), nullptr);
+        if (!c.valid) {
+            out << "error: cannot analyse " << pos[1] << Qt::endl;
+            return 1;
+        }
+        out << (c.still ? "still" : "moving") << ": " << qRound(c.movingShare * 100) << "% of " << c.samples - 1
+            << " sampled frame pairs changed" << Qt::endl;
         return 0;
     }
 

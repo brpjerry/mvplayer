@@ -192,6 +192,22 @@ bool Database::init(QString *error)
             return false;
         }
     }
+
+    // Added after 0.1.0: existing rows keep 0 and are audited once.
+    QSqlQuery info(db);
+    bool hasFlag = false;
+    if (info.exec(QStringLiteral("PRAGMA table_info(videos)"))) {
+        while (info.next())
+            hasFlag |= info.value(1).toString() == QLatin1String("still_checked");
+    }
+    if (!hasFlag) {
+        QSqlQuery q(db);
+        if (!q.exec(QStringLiteral("ALTER TABLE videos ADD COLUMN still_checked INTEGER NOT NULL DEFAULT 0"))) {
+            if (error)
+                *error = q.lastError().text();
+            return false;
+        }
+    }
     return true;
 }
 
@@ -400,7 +416,8 @@ qint64 Database::insertVideo(const VideoInfo &v)
     q.prepare(QStringLiteral(
         "INSERT INTO videos (yt_id, path, thumb, title, artist, album_artist, album, genre, year,"
         " track_no, duration, width, height, fps, vcodec, audio_source, audio_detail, yt_title,"
-        " yt_channel, tags_json, added_at) VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)"));
+        " yt_channel, tags_json, added_at, still_checked)"
+        " VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,1)"));
     q.addBindValue(v.ytId);
     q.addBindValue(v.path);
     q.addBindValue(v.thumb);
@@ -442,6 +459,34 @@ void Database::updateVideoTags(const VideoInfo &v)
     q.addBindValue(v.trackNo);
     q.addBindValue(jsonText(v.tags));
     q.addBindValue(v.id);
+    run(q);
+}
+
+QVector<VideoInfo> Database::videosNotStillChecked()
+{
+    QVector<VideoInfo> out;
+    QSqlQuery q(conn());
+    q.prepare(QStringLiteral("SELECT %1 FROM videos WHERE still_checked = 0 ORDER BY id").arg(QLatin1String(kVideoCols)));
+    if (run(q)) {
+        while (q.next())
+            out << readVideo(q);
+    }
+    return out;
+}
+
+void Database::markStillChecked(qint64 videoId)
+{
+    QSqlQuery q(conn());
+    q.prepare(QStringLiteral("UPDATE videos SET still_checked = 1 WHERE id = ?"));
+    q.addBindValue(videoId);
+    run(q);
+}
+
+void Database::requeueTracksOfVideo(qint64 videoId)
+{
+    QSqlQuery q(conn());
+    q.prepare(QStringLiteral("UPDATE tracks SET state = 'pending', video_id = NULL, message = '' WHERE video_id = ?"));
+    q.addBindValue(videoId);
     run(q);
 }
 

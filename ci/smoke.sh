@@ -48,6 +48,16 @@ STREAMS=$(ffprobe -v error -show_entries stream=codec_type,codec_name -of csv=p=
 echo "streams: $STREAMS"
 [[ "$STREAMS" == *"h264,video"* && "$STREAMS" == *"flac,audio"* && "$STREAMS" == *"opus,audio"* ]]
 
+echo "== still-image detection"
+# A still picture as low-bitrate streams deliver it: the image shimmers by a
+# level or two every few seconds. It must count as a still; real motion must not.
+ffmpeg -v error -y -f lavfi -i "smptebars=s=256x144:r=10:d=40" \
+    -vf "eq=brightness='if(lt(mod(t\,7)\,2)\,0.006\,0)':eval=frame" -c:v libx264 -preset ultrafast "$WORK/still.mkv"
+for mode in "" keyframes; do
+    S=$("$BUILD/mvplayer-import" check-video "$WORK/still.mkv" $mode); echo "still.mkv  ${mode:-full}: $S"; [[ "$S" == still:* ]]
+    M=$("$BUILD/mvplayer-import" check-video "$WORK/mv.mkv" $mode);    echo "mv.mkv     ${mode:-full}: $M"; [[ "$M" == moving:* ]]
+done
+
 echo "== binaries start"
 "$BUILD/mvplayer-import" --help >/dev/null
 QT_QPA_PLATFORM=offscreen "$BUILD/mvplayer" --help >/dev/null

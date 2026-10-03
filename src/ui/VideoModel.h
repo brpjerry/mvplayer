@@ -38,6 +38,7 @@ public:
 
     void reset(const QVector<VideoInfo> &videos);
     void upsert(const VideoInfo &video);
+    void remove(qint64 videoId);
 
     const QVector<VideoInfo> &videos() const { return m_videos; }
     const VideoInfo &at(int row) const { return m_videos.at(row); }

@@ -36,7 +36,19 @@ bool mux(const Plan &plan, const std::atomic<bool> *cancel, QString *audioDetail
 
 bool probe(const QString &file, Probe *out);
 
-// True when the picture never changes (a still image set to music).
+struct StillCheck {
+    bool valid = false;     // false: the file could not be analysed
+    bool still = false;     // the picture is a still image (or a handful of them)
+    double movingShare = 0; // share of sampled frame pairs with real change
+    int samples = 0;
+};
+
+// Decides whether a video's picture is a still image set to music.
+// `keyframesOnly` asks the decoder for keyframes alone, which is much faster
+// on full-quality files where the codec supports it.
+StillCheck checkStill(const QString &file, bool keyframesOnly, const std::atomic<bool> *cancel);
+
+// True when the picture never changes. Unanalysable files count as moving.
 bool isStaticVideo(const QString &file, const std::atomic<bool> *cancel);
 
 } // namespace Muxer
