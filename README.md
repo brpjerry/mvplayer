@@ -50,7 +50,9 @@ For every track without a video (`src/core/ImportManager.cpp`):
 2. **Verify** the best candidates by downloading only their audio and
    comparing Chromaprint fingerprints with the track. A video is accepted only
    if its soundtrack contains the recording, and its picture is not a still
-   image. If nothing passes, nothing is imported for that track.
+   image (judged on YouTube's smallest stream by how many pixels really
+   change between samples). If nothing passes, nothing is imported for that
+   track.
 3. **Download** the best video stream and the YouTube thumbnail.
 4. **Align** the track to the video's soundtrack (`src/core/AudioAlign.cpp`):
    fingerprints find where the track sits, cross-correlation makes that
@@ -76,6 +78,7 @@ Each library lives in its MV folder: videos and thumbnails under
 ./build/mvplayer-import --music-dir ~/Music --music-dir /mnt/nas/music --mv-dir ~/Videos/MVs
 ./build/mvplayer-import align track.flac video.mkv       # show the alignment
 ./build/mvplayer-import mux track.flac video.mkv out.mkv # audio replacement only
+./build/mvplayer-import check-video video.mkv            # still image or real video?
 ```
 
 ## Using it

@@ -335,37 +335,66 @@ bool probe(const QString &file, Probe *out)
     return out->width > 0;
 }
 
-bool isStaticVideo(const QString &file, const std::atomic<bool> *cancel)
+StillCheck checkStill(const QString &file, bool keyframesOnly, const std::atomic<bool> *cancel)
 {
-    constexpr int w = 64, h = 36;
-    const QStringList args = {
-        QStringLiteral("-v"), QStringLiteral("error"), QStringLiteral("-nostdin"),
-        QStringLiteral("-i"), file, QStringLiteral("-an"),
-        QStringLiteral("-vf"), QStringLiteral("fps=1/2,scale=%1:%2,format=gray").arg(w).arg(h),
-        QStringLiteral("-f"), QStringLiteral("rawvideo"), QStringLiteral("-"),
-    };
+    // Thresholds come from measuring real uploads at YouTube's lowest
+    // quality: a still picture is not perfectly still there (the encoder
+    // shimmers by a level or two at every segment boundary), but almost no
+    // pixel moves by much. Real videos change a large share of their pixels
+    // between nearly every pair of samples.
+    constexpr int w = 128, h = 72;
+    constexpr int pixelDelta = 16;        // grey levels a pixel must move to count as changed
+    constexpr double changedShare = 0.004; // share of pixels changed for a pair to count as moving
+    constexpr double movingShare = 0.10;   // share of moving pairs below which the video is a still
+
+    StillCheck res;
+    QStringList args = {QStringLiteral("-v"), QStringLiteral("error"), QStringLiteral("-nostdin")};
+    // Decoding only keyframes makes a 4K AV1 file cost under a second. Not
+    // every decoder honours it (VP9 does not); those files are decoded in
+    // full, which the sample spacing below makes equivalent, just slower.
+    if (keyframesOnly)
+        args << QStringLiteral("-skip_frame") << QStringLiteral("nokey");
+    // Keep frames at least two seconds apart, however many the decoder hands over.
+    args << QStringLiteral("-i") << file << QStringLiteral("-an") << QStringLiteral("-vf")
+         << QStringLiteral("select='isnan(prev_selected_t)+gte(t-prev_selected_t\\,2)',scale=%1:%2,format=gray").arg(w).arg(h)
+         << QStringLiteral("-fps_mode") << QStringLiteral("passthrough")
+         << QStringLiteral("-f") << QStringLiteral("rawvideo") << QStringLiteral("-");
+
     ProcOptions opts;
     opts.cancel = cancel;
     opts.timeoutMs = 5 * 60 * 1000;
     const ProcResult r = runProcess(kFfmpeg, args, opts);
     if (!r.ok())
-        return false; // cannot tell; give the video the benefit of the doubt
+        return res; // cannot tell
+
     const int frameSize = w * h;
     const int frames = int(r.out.size() / frameSize);
-    if (frames < 6)
-        return false;
+    if (frames < 6) {
+        // Too few keyframes to judge by (long keyframe intervals): look at
+        // every frame instead.
+        return keyframesOnly ? checkStill(file, false, cancel) : res;
+    }
     const auto *d = reinterpret_cast<const uchar *>(r.out.constData());
-    // Ignore the first and last frames: fades in and out are common even on stills.
-    double maxDiff = 0;
-    for (int f = 2; f < frames - 1; ++f) {
+    int moving = 0;
+    for (int f = 1; f < frames; ++f) {
         const uchar *a = d + qint64(f - 1) * frameSize;
         const uchar *b = d + qint64(f) * frameSize;
-        qint64 sum = 0;
+        int changed = 0;
         for (int i = 0; i < frameSize; ++i)
-            sum += std::abs(int(a[i]) - int(b[i]));
-        maxDiff = std::max(maxDiff, double(sum) / frameSize);
+            changed += std::abs(int(a[i]) - int(b[i])) > pixelDelta;
+        moving += changed >= frameSize * changedShare;
     }
-    return maxDiff < 1.0;
+    res.valid = true;
+    res.samples = frames;
+    res.movingShare = double(moving) / (frames - 1);
+    res.still = res.movingShare < movingShare;
+    return res;
+}
+
+bool isStaticVideo(const QString &file, const std::atomic<bool> *cancel)
+{
+    const StillCheck c = checkStill(file, false, cancel);
+    return c.valid && c.still;
 }
 
 } // namespace Muxer

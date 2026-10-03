@@ -57,7 +57,7 @@ public:
     bool scanning() const { return m_scanning; }
     int queuedCount() const { return m_queue.size(); }
     int activeCount() const { return m_active; }
-    bool busy() const { return m_scanning || m_active > 0 || !m_queue.isEmpty(); }
+    bool busy() const { return m_scanning || m_auditing || m_active > 0 || !m_queue.isEmpty(); }
 
     static QString dataDir(const QString &mvDir);
 
@@ -65,6 +65,7 @@ signals:
     void jobChanged(const JobStatus &status);
     void videoAdded(qint64 videoId);
     void videoChanged(qint64 videoId);
+    void videoRemoved(qint64 videoId);
     void activityChanged();
     void idle();
 
@@ -74,6 +75,7 @@ private:
     void onScanFinished(const LibraryScanner::Result &r);
     void onJobFinished(qint64 trackId);
     void runJob(qint64 trackId, const ImportSettings &cfg);
+    void auditStills();
     bool claimVideo(const QString &ytId);
     void releaseVideo(const QString &ytId);
 
@@ -83,12 +85,14 @@ private:
 
     QThreadPool m_jobPool;
     QThreadPool m_scanPool;
+    QThreadPool m_auditPool;
     std::atomic<bool> m_cancel{false};
 
     QQueue<qint64> m_queue;
     QSet<qint64> m_pending; // queued or running
     int m_active = 0;
     bool m_scanning = false;
+    bool m_auditing = false;
     bool m_rescanWanted = false;
     bool m_started = false;
 

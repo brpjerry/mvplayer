@@ -63,6 +63,7 @@ ImportManager::ImportManager(Database *db, QObject *parent)
 {
     qRegisterMetaType<JobStatus>();
     m_scanPool.setMaxThreadCount(1);
+    m_auditPool.setMaxThreadCount(1);
     m_jobPool.setMaxThreadCount(2);
 
     m_debounce.setSingleShot(true);
@@ -112,6 +113,12 @@ void ImportManager::start()
         enqueue(t.id);
 
     m_periodic.start();
+    // Earlier versions let some still-image uploads through; look at those
+    // imports once, in the background.
+    if (cfg.skipStillImages) {
+        m_auditing = true;
+        m_auditPool.start([this] { auditStills(); });
+    }
     rescan();
     pump();
 }
@@ -126,10 +133,12 @@ void ImportManager::stop()
     m_periodic.stop();
     m_queue.clear();
     m_scanPool.waitForDone();
+    m_auditPool.waitForDone();
     m_jobPool.waitForDone();
     m_pending.clear();
     m_active = 0;
     m_scanning = false;
+    m_auditing = false;
 }
 
 void ImportManager::rescan()
@@ -147,6 +156,45 @@ void ImportManager::rescan()
         const LibraryScanner::Result r = LibraryScanner::scan(roots, *m_db, &m_cancel);
         QMetaObject::invokeMethod(this, [this, r] { onScanFinished(r); }, Qt::QueuedConnection);
     });
+}
+
+void ImportManager::auditStills()
+{
+    QVector<qint64> removed;
+    const QVector<VideoInfo> videos = m_db->videosNotStillChecked();
+    for (const VideoInfo &v : videos) {
+        if (m_cancel)
+            return;
+        if (!QFile::exists(v.path))
+            continue;
+        const Muxer::StillCheck check = Muxer::checkStill(v.path, true, &m_cancel);
+        if (m_cancel || !check.valid)
+            continue;
+        if (!check.still) {
+            m_db->markStillChecked(v.id);
+            continue;
+        }
+        qInfo().noquote() << QStringLiteral("[audit] removing still-image video “%1” (%2); its track will be looked up again")
+                                 .arg(v.title, v.ytTitle);
+        m_db->requeueTracksOfVideo(v.id);
+        m_db->removeVideo(v.id);
+        QFile::remove(v.path);
+        if (!v.thumb.isEmpty())
+            QFile::remove(v.thumb);
+        removed << v.id;
+    }
+    QMetaObject::invokeMethod(this, [this, removed] {
+        m_auditing = false;
+        if (!m_started)
+            return;
+        for (qint64 id : removed)
+            emit videoRemoved(id);
+        if (!removed.isEmpty()) {
+            for (const TrackInfo &t : m_db->tracksInState({QStringLiteral("pending")}))
+                enqueue(t.id);
+        }
+        pump();
+    }, Qt::QueuedConnection);
 }
 
 void ImportManager::retryUnmatched()

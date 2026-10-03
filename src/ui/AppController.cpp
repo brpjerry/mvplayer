@@ -119,6 +119,7 @@ AppController::AppController(const AppOptions &options, QObject *parent)
     connect(&m_facetTimer, &QTimer::timeout, this, &AppController::rebuildFacets);
     auto scheduleFacets = [this] { m_facetTimer.start(); };
     connect(m_model, &QAbstractItemModel::rowsInserted, this, scheduleFacets);
+    connect(m_model, &QAbstractItemModel::rowsRemoved, this, scheduleFacets);
     connect(m_model, &QAbstractItemModel::dataChanged, this, scheduleFacets);
     connect(m_model, &QAbstractItemModel::modelReset, this, &AppController::rebuildFacets);
 
@@ -193,6 +194,10 @@ void AppController::openLibrary()
     connect(m_manager.get(), &ImportManager::videoChanged, this, [this](qint64 id) {
         if (const auto v = m_db->video(id))
             m_model->upsert(*v);
+    });
+    connect(m_manager.get(), &ImportManager::videoRemoved, this, [this](qint64 id) {
+        m_model->remove(id);
+        refreshCounts();
     });
     connect(m_manager.get(), &ImportManager::activityChanged, this, [this] {
         if (!m_manager->busy())

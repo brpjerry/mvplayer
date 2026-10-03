@@ -138,6 +138,19 @@ void VideoModel::upsert(const VideoInfo &video)
     endInsertRows();
 }
 
+void VideoModel::remove(qint64 videoId)
+{
+    for (int i = 0; i < m_videos.size(); ++i) {
+        if (m_videos[i].id != videoId)
+            continue;
+        beginRemoveRows(QModelIndex(), i, i);
+        m_videos.removeAt(i);
+        m_search.removeAt(i);
+        endRemoveRows();
+        return;
+    }
+}
+
 // ---------------------------------------------------------------------------
 
 VideoFilterModel::VideoFilterModel(VideoModel *source, QObject *parent)
