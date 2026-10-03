@@ -1,5 +1,5 @@
 cmake_minimum_required(VERSION 3.21)
-set(MV_VERSION "0.1.1" CACHE STRING "Version recorded in the build")
+set(MV_VERSION "0.1.2" CACHE STRING "Version recorded in the build")
 project(mvplayer VERSION ${MV_VERSION} LANGUAGES CXX)
 
 set(CMAKE_CXX_STANDARD 20)

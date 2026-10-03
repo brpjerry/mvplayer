@@ -13,6 +13,7 @@
 #include "core/ImportManager.h"
 #include "core/Muxer.h"
 #include "core/TagReader.h"
+#include "core/Util.h"
 
 #include <QCommandLineParser>
 #include <QCoreApplication>
@@ -22,7 +23,6 @@
 #include <QTemporaryDir>
 #include <QTextStream>
 
-#include <csignal>
 #include <cstdio>
 
 // Qt may route log output to the system journal; a CLI wants it on stderr.
@@ -31,11 +31,6 @@ static void logToStderr(QtMsgType type, const QMessageLogContext &, const QStrin
     const char *tag = type == QtWarningMsg ? "warning: "
                     : type == QtCriticalMsg || type == QtFatalMsg ? "error: " : "";
     std::fprintf(stderr, "%s%s\n", tag, msg.toLocal8Bit().constData());
-}
-
-static void onSignal(int)
-{
-    QMetaObject::invokeMethod(qApp, [] { QCoreApplication::exit(130); }, Qt::QueuedConnection);
 }
 
 int main(int argc, char **argv)
@@ -159,8 +154,7 @@ int main(int argc, char **argv)
         QCoreApplication::exit(0);
     }, Qt::QueuedConnection);
 
-    std::signal(SIGINT, onSignal);
-    std::signal(SIGTERM, onSignal);
+    quitOnTerminationSignals([] { QCoreApplication::exit(130); });
 
     mgr.start();
     if (parser.isSet(QStringLiteral("retry")))

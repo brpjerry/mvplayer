@@ -9,8 +9,11 @@
 #include <QDateTime>
 #include <QDebug>
 #include <QDir>
+#include <QDirIterator>
 #include <QFile>
 #include <QThread>
+
+#include <functional>
 
 namespace {
 
@@ -73,7 +76,10 @@ ImportManager::ImportManager(Database *db, QObject *parent)
 
     // Catches what directory watching cannot see, such as tags edited in place.
     m_periodic.setInterval(10 * 60 * 1000);
-    connect(&m_periodic, &QTimer::timeout, this, &ImportManager::rescan);
+    connect(&m_periodic, &QTimer::timeout, this, [this] {
+        requeueRetryable();
+        rescan();
+    });
 }
 
 ImportManager::~ImportManager()
@@ -105,12 +111,14 @@ void ImportManager::start()
     m_cancel = false;
     m_started = true;
 
-    // Leftovers from a previous run that was interrupted.
+    // Leftovers from a previous run that was interrupted: scratch files, and
+    // half-written outputs if the process was killed outright mid-mux.
     QDir(QDir(dataDir(cfg.mvDir)).filePath(QStringLiteral("tmp"))).removeRecursively();
+    QDirIterator partials(cfg.mvDir, {QStringLiteral("*.mkv.part.mkv")}, QDir::Files, QDirIterator::Subdirectories);
+    while (partials.hasNext())
+        QFile::remove(partials.next());
 
-    m_db->requeueStale(30 * 60, qint64(cfg.retryNotFoundDays) * 86400);
-    for (const TrackInfo &t : m_db->tracksInState({QStringLiteral("pending")}))
-        enqueue(t.id);
+    requeueRetryable();
 
     m_periodic.start();
     // Earlier versions let some still-image uploads through; look at those
@@ -156,6 +164,17 @@ void ImportManager::rescan()
         const LibraryScanner::Result r = LibraryScanner::scan(roots, *m_db, &m_cancel);
         QMetaObject::invokeMethod(this, [this, r] { onScanFinished(r); }, Qt::QueuedConnection);
     });
+}
+
+void ImportManager::requeueRetryable()
+{
+    // Failed lookups come back after 30 minutes, doubling each time; "no
+    // video" verdicts after a couple of weeks, in case one has been published.
+    m_db->requeueStale(30 * 60, qint64(settings().retryNotFoundDays) * 86400);
+    for (const TrackInfo &t : m_db->tracksInState({QStringLiteral("pending")}))
+        enqueue(t.id);
+    // The caller starts the work: reporting "idle" from here would end a
+    // headless run before its first scan.
 }
 
 void ImportManager::auditStills()
@@ -403,6 +422,17 @@ void ImportManager::runJob(qint64 trackId, const ImportSettings &cfg)
     AudioAlign::Result alignment;
     QStringList reasons;
     bool anyChecked = false;
+    bool undecided = false; // some candidate could not be examined
+
+    // Downloads fail transiently (throttling, expired stream URLs); one more
+    // try after a short pause settles most of them.
+    auto withRetry = [&](const std::function<bool()> &attempt) {
+        if (attempt())
+            return true;
+        for (int i = 0; i < 30 && !m_cancel; ++i)
+            QThread::msleep(100);
+        return !m_cancel && attempt();
+    };
 
     for (const YtCandidate &c : std::as_const(shortlist)) {
         if (m_cancel)
@@ -440,9 +470,11 @@ void ImportManager::runJob(qint64 trackId, const ImportSettings &cfg)
 
         QString audioFile;
         QJsonObject info;
-        if (!yt.downloadAudio(c.id, dir, &audioFile, &info, &error)) {
+        if (!withRetry([&] { return yt.downloadAudio(c.id, dir, &audioFile, &info, &error); })) {
             if (m_cancel)
                 return cleanup();
+            // Could not listen to it: that says nothing about the video.
+            undecided = true;
             reasons << QStringLiteral("%1: %2").arg(c.id, error);
             continue;
         }
@@ -465,16 +497,29 @@ void ImportManager::runJob(qint64 trackId, const ImportSettings &cfg)
         if (cfg.skipStillImages) {
             report(QStringLiteral("Checking video"), -1, c.title);
             QString preview;
-            if (yt.downloadPreview(c.id, dir, &preview, &error)) {
-                const bool still = Muxer::isStaticVideo(preview, &m_cancel);
-                QFile::remove(preview);
-                if (still) {
-                    reasons << QStringLiteral("“%1” is a still image").arg(c.title);
-                    QDir(dir).removeRecursively();
-                    continue;
-                }
-            } else if (m_cancel) {
+            if (!withRetry([&] { return yt.downloadPreview(c.id, dir, &preview, &error); })) {
+                if (m_cancel)
+                    return cleanup();
+                // Never accept a video whose picture could not be looked at.
+                undecided = true;
+                reasons << QStringLiteral("%1: %2").arg(c.id, error);
+                QDir(dir).removeRecursively();
+                continue;
+            }
+            const Muxer::StillCheck check = Muxer::checkStill(preview, false, &m_cancel);
+            QFile::remove(preview);
+            if (m_cancel)
                 return cleanup();
+            if (!check.valid) {
+                undecided = true;
+                reasons << QStringLiteral("“%1”: could not analyse the picture").arg(c.title);
+                QDir(dir).removeRecursively();
+                continue;
+            }
+            if (check.still) {
+                reasons << QStringLiteral("“%1” is a still image").arg(c.title);
+                QDir(dir).removeRecursively();
+                continue;
             }
         }
 
@@ -488,10 +533,11 @@ void ImportManager::runJob(qint64 trackId, const ImportSettings &cfg)
     }
 
     if (chosen.id.isEmpty()) {
-        if (!anyChecked)
-            finish(QStringLiteral("failed"), 0, reasons.join(QStringLiteral("; ")));
-        else
-            finish(QStringLiteral("not_found"), 0, reasons.join(QStringLiteral("; ")));
+        // "Not found" is a verdict and is not revisited for weeks. If any
+        // candidate could not be examined (a download error, typically
+        // YouTube throttling), the answer is still open: retry later.
+        const bool open = undecided || !anyChecked;
+        finish(open ? QStringLiteral("failed") : QStringLiteral("not_found"), 0, reasons.join(QStringLiteral("; ")));
         return;
     }
     auto releaseChosen = qScopeGuard([&] { releaseVideo(chosen.id); });
@@ -500,12 +546,15 @@ void ImportManager::runJob(qint64 trackId, const ImportSettings &cfg)
     report(QStringLiteral("Downloading"), 0, chosen.title);
     QString videoFile, thumbFile;
     double lastShown = -1;
-    const bool got = yt.downloadVideo(chosen.id, chosenDir, [&](double p) {
-        if (p - lastShown >= 0.01 || p >= 1.0) {
-            lastShown = p;
-            report(QStringLiteral("Downloading"), p, chosen.title);
-        }
-    }, &videoFile, &thumbFile, &error);
+    const bool got = withRetry([&] {
+        lastShown = -1;
+        return yt.downloadVideo(chosen.id, chosenDir, [&](double p) {
+            if (p - lastShown >= 0.01 || p >= 1.0) {
+                lastShown = p;
+                report(QStringLiteral("Downloading"), p, chosen.title);
+            }
+        }, &videoFile, &thumbFile, &error);
+    });
     if (!got) {
         if (m_cancel)
             return cleanup();

@@ -37,3 +37,8 @@ QString sanitizeFileName(const QString &name, int maxLen = 120);
 QString foldText(const QString &s);
 
 QString formatDuration(double seconds);
+
+// Calls `quit` on the main thread when the process is asked to stop (Ctrl+C,
+// session logout, `kill`), so running imports are cancelled and cleaned up
+// instead of being cut off. Call once, after the application object exists.
+void quitOnTerminationSignals(std::function<void()> quit);

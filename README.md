@@ -66,7 +66,13 @@ For every track without a video (`src/core/ImportManager.cpp`):
 
 The music folders are watched; added tracks are picked up within a few
 seconds, edited tags on the next periodic rescan. Tracks with no video are
-retried after two weeks. Removing a folder in Settings drops its tracks but
+retried after two weeks. Lookups that could not be completed (a download
+error, typically YouTube throttling) are not treated as "no video": they are
+retried after 30 minutes, then at doubling intervals.
+
+Importing can be interrupted at any point — closing the window, logging out,
+Ctrl+C. Unfinished tracks stay queued and are picked up on the next start;
+partial downloads are discarded. Removing a folder in Settings drops its tracks but
 keeps their videos.
 
 Each library lives in its MV folder: videos and thumbnails under
