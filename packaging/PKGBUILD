@@ -1,6 +1,6 @@
 # Maintainer: brpjerry <https://github.com/brpjerry>
 pkgname=mvplayer
-pkgver=0.1.1
+pkgver=0.1.2
 pkgrel=1
 pkgdesc="Music player that builds a music video library from your audio library"
 arch=('x86_64')

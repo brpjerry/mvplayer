@@ -193,6 +193,18 @@ bool Database::init(QString *error)
         }
     }
 
+    // Up to 0.1.1 a track whose candidates could not be downloaded was filed
+    // as having no video. Give those another go, once.
+    QSqlQuery version(db);
+    int schema = 0;
+    if (version.exec(QStringLiteral("PRAGMA user_version")) && version.next())
+        schema = version.value(0).toInt();
+    if (schema < 2) {
+        QSqlQuery q(db);
+        q.exec(QStringLiteral("UPDATE tracks SET state = 'pending' WHERE state = 'not_found' AND message LIKE '%ERROR:%'"));
+        q.exec(QStringLiteral("PRAGMA user_version = 2"));
+    }
+
     // Added after 0.1.0: existing rows keep 0 and are audited once.
     QSqlQuery info(db);
     bool hasFlag = false;
@@ -340,15 +352,21 @@ void Database::resetTracks(const QStringList &fromStates)
 void Database::requeueStale(qint64 failedAfterSecs, qint64 notFoundAfterSecs)
 {
     const qint64 now = QDateTime::currentSecsSinceEpoch();
-    const QPair<QString, qint64> rules[] = {
-        {QStringLiteral("failed"), now - failedAfterSecs},
-        {QStringLiteral("not_found"), now - notFoundAfterSecs},
-    };
-    for (const auto &[state, before] : rules) {
+    {
+        // 1st failure: failedAfterSecs, then x2 per attempt, at most the not-found interval.
         QSqlQuery q(conn());
-        q.prepare(QStringLiteral("UPDATE tracks SET state = 'pending' WHERE state = ? AND last_attempt < ?"));
-        q.addBindValue(state);
-        q.addBindValue(before);
+        q.prepare(QStringLiteral(
+            "UPDATE tracks SET state = 'pending' WHERE state = 'failed'"
+            " AND last_attempt < ? - min(? * (1 << min(max(attempts, 1) - 1, 12)), ?)"));
+        q.addBindValue(now);
+        q.addBindValue(failedAfterSecs);
+        q.addBindValue(notFoundAfterSecs);
+        run(q);
+    }
+    {
+        QSqlQuery q(conn());
+        q.prepare(QStringLiteral("UPDATE tracks SET state = 'pending' WHERE state = 'not_found' AND last_attempt < ?"));
+        q.addBindValue(now - notFoundAfterSecs);
         run(q);
     }
 }

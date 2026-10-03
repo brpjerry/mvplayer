@@ -26,7 +26,8 @@ public:
     void removeTrack(qint64 id);
     void setTrackResult(qint64 id, const QString &state, qint64 videoId, const QString &message);
     void resetTracks(const QStringList &fromStates);
-    // Makes failed / not-found tracks pending again once their last attempt is old enough.
+    // Makes failed / not-found tracks pending again once their last attempt
+    // is old enough. The wait for failed tracks doubles with every attempt.
     void requeueStale(qint64 failedAfterSecs, qint64 notFoundAfterSecs);
     QVector<TrackInfo> tracksForVideo(qint64 videoId);
     QHash<QString, int> trackStateCounts();

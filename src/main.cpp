@@ -4,6 +4,8 @@
 #include "ui/IpcServer.h"
 #include "ui/MpvItem.h"
 
+#include "core/Util.h"
+
 #include <QCommandLineParser>
 #include <QFontDatabase>
 #include <QGuiApplication>
@@ -99,6 +101,9 @@ int main(int argc, char **argv)
                 return result.toString();
             });
         }
+
+        // Logging out or `kill` should end imports as cleanly as closing the window.
+        quitOnTerminationSignals([] { QCoreApplication::quit(); });
 
         rc = app.exec();
     }

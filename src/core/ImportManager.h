@@ -76,6 +76,7 @@ private:
     void onJobFinished(qint64 trackId);
     void runJob(qint64 trackId, const ImportSettings &cfg);
     void auditStills();
+    void requeueRetryable();
     bool claimVideo(const QString &ytId);
     void releaseVideo(const QString &ytId);
 

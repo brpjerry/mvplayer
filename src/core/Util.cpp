@@ -1,7 +1,20 @@
 #include "core/Util.h"
 
+#include <QCoreApplication>
 #include <QElapsedTimer>
 #include <QProcess>
+#include <QSocketNotifier>
+
+#include <csignal>
+
+#ifdef Q_OS_UNIX
+#include <fcntl.h>
+#include <sys/types.h>
+#include <unistd.h>
+#endif
+#ifdef Q_OS_LINUX
+#include <sys/prctl.h>
+#endif
 
 QString ProcResult::errorText() const
 {
@@ -30,6 +43,17 @@ ProcResult runProcess(const QString &program, const QStringList &args, const Pro
     if (!opts.workingDir.isEmpty())
         p.setWorkingDirectory(opts.workingDir);
     p.setProcessChannelMode(QProcess::SeparateChannels);
+#ifdef Q_OS_UNIX
+    // Own process group, so the helpers a tool starts itself (yt-dlp runs
+    // ffmpeg and a JS runtime) can be stopped together with it. On Linux the
+    // child is also told to stop if this process dies without cleaning up.
+    p.setChildProcessModifier([] {
+        ::setpgid(0, 0);
+#ifdef Q_OS_LINUX
+        ::prctl(PR_SET_PDEATHSIG, SIGTERM);
+#endif
+    });
+#endif
     p.start(QIODevice::ReadOnly);
     if (!p.waitForStarted(10000))
         return res;
@@ -72,11 +96,22 @@ ProcResult runProcess(const QString &program, const QStringList &args, const Pro
         }
     }
     if (res.cancelled || res.timedOut) {
+#ifdef Q_OS_UNIX
+        const pid_t group = pid_t(p.processId());
+        if (group > 0)
+            ::kill(-group, SIGTERM);
+        if (!p.waitForFinished(2000)) {
+            if (group > 0)
+                ::kill(-group, SIGKILL);
+            p.waitForFinished(2000);
+        }
+#else
         p.terminate();
         if (!p.waitForFinished(2000)) {
             p.kill();
             p.waitForFinished(2000);
         }
+#endif
         return res;
     }
     drain();
@@ -121,4 +156,37 @@ QString formatDuration(double seconds)
     if (h > 0)
         return QStringLiteral("%1:%2:%3").arg(h).arg(m, 2, 10, QLatin1Char('0')).arg(s, 2, 10, QLatin1Char('0'));
     return QStringLiteral("%1:%2").arg(m).arg(s, 2, 10, QLatin1Char('0'));
+}
+
+#ifdef Q_OS_UNIX
+namespace {
+int g_signalPipe[2] = {-1, -1};
+
+// Only async-signal-safe work here: wake the event loop through a pipe.
+void onTerminationSignal(int)
+{
+    const char byte = 1;
+    [[maybe_unused]] const ssize_t n = ::write(g_signalPipe[1], &byte, 1);
+}
+} // namespace
+#endif
+
+void quitOnTerminationSignals(std::function<void()> quit)
+{
+#ifdef Q_OS_UNIX
+    if (::pipe(g_signalPipe) != 0)
+        return;
+    ::fcntl(g_signalPipe[0], F_SETFD, FD_CLOEXEC);
+    ::fcntl(g_signalPipe[1], F_SETFD, FD_CLOEXEC);
+    auto *notifier = new QSocketNotifier(g_signalPipe[0], QSocketNotifier::Read, QCoreApplication::instance());
+    QObject::connect(notifier, &QSocketNotifier::activated, notifier, [quit, notifier] {
+        notifier->setEnabled(false);
+        quit();
+    });
+    std::signal(SIGINT, onTerminationSignal);
+    std::signal(SIGTERM, onTerminationSignal);
+    std::signal(SIGHUP, onTerminationSignal);
+#else
+    Q_UNUSED(quit);
+#endif
 }

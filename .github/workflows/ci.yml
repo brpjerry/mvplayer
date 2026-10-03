@@ -8,7 +8,7 @@ on:
 jobs:
   build:
     name: build
-    runs-on: ubuntu-latest
+    runs-on: ubuntu-24.04
     container: archlinux:base-devel
     steps:
       - name: Install dependencies
@@ -16,7 +16,7 @@ jobs:
           pacman -Sy --noconfirm archlinux-keyring
           pacman -Syu --noconfirm git cmake ninja qt6-base qt6-declarative qt6-shadertools \
             mpv taglib chromaprint ffmpeg yt-dlp python
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@v7
       - name: Configure and build
         run: |
           cmake -S . -B build -G Ninja -DCMAKE_BUILD_TYPE=Release
@@ -26,7 +26,7 @@ jobs:
 
   package:
     name: package
-    runs-on: ubuntu-latest
+    runs-on: ubuntu-24.04
     container: archlinux:base-devel
     steps:
       - name: Install dependencies
@@ -34,10 +34,10 @@ jobs:
           pacman -Sy --noconfirm archlinux-keyring
           pacman -Syu --noconfirm git cmake ninja qt6-base qt6-declarative qt6-shadertools \
             mpv taglib chromaprint ffmpeg yt-dlp
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@v7
       - name: Build the pacman package from this tree
         run: ci/makepkg.sh
-      - uses: actions/upload-artifact@v4
+      - uses: actions/upload-artifact@v7
         with:
           name: pacman-package
           path: packaging/*.pkg.tar.zst
