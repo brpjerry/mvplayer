@@ -3,6 +3,7 @@ name: Release
 # Pushing a tag like v0.1.0 builds the pacman package for that tag and
 # publishes it, with a pacman repository database, as a GitHub release.
 # The "latest/download" URL of the releases then works as a pacman Server.
+# Running it by hand builds everything as a rehearsal without publishing.
 on:
   push:
     tags: ['v*']
@@ -23,7 +24,12 @@ jobs:
             mpv taglib chromaprint ffmpeg yt-dlp github-cli
       - uses: actions/checkout@v7
       - name: Build the pacman package
-        run: ci/makepkg.sh "${GITHUB_REF_NAME#v}"
+        # A tag sets the version; a manual run builds the PKGBUILD's own.
+        run: |
+          case "$GITHUB_REF" in
+            refs/tags/v*) ci/makepkg.sh "${GITHUB_REF_NAME#v}" ;;
+            *) ci/makepkg.sh ;;
+          esac
       - name: Build the repository database
         working-directory: packaging
         run: |
