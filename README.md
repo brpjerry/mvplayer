@@ -70,6 +70,18 @@ retried after two weeks. Lookups that could not be completed (a download
 error, typically YouTube throttling) are not treated as "no video": they are
 retried after 30 minutes, then at doubling intervals.
 
+If YouTube starts refusing requests altogether (HTTP 429, a bot check, or
+eight downloads failing in a row), the whole queue pauses instead of failing
+track after track: 10 minutes at first, doubling up to two hours while the
+block lasts, then one job tests the water before the rest follow. The import
+panel shows the pause and has a "Resume now" button; `pauseSeconds` under
+`[import]` in the config file changes the first wait.
+
+Every lookup is recorded in `<MV folder>/.mvplayer/import-log.jsonl`, one
+JSON object per track: the queries run, every candidate with its score and
+why it was dropped, what each examined candidate turned out to be, and how
+many requests it took. It is there for tuning the matching rules.
+
 Importing can be interrupted at any point — closing the window, logging out,
 Ctrl+C. Unfinished tracks stay queued and are picked up on the next start;
 partial downloads are discarded. Removing a folder in Settings drops its tracks but

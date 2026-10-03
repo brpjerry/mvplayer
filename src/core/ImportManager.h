@@ -3,7 +3,9 @@
 #include "core/Database.h"
 #include "core/LibraryScanner.h"
 
+#include <QDateTime>
 #include <QFileSystemWatcher>
+#include <QJsonObject>
 #include <QMutex>
 #include <QObject>
 #include <QQueue>
@@ -22,6 +24,7 @@ struct ImportSettings {
     int concurrency = 2;
     QStringList ytdlpArgs;         // extra yt-dlp arguments (cookies, proxies, ...)
     int retryNotFoundDays = 14;
+    int pauseBaseSecs = 600;       // first wait after YouTube blocks requests; doubles on repeats
 };
 
 struct JobStatus {
@@ -31,7 +34,7 @@ struct JobStatus {
     QString stage;        // human readable
     double progress = -1; // 0..1, or -1 when indeterminate
     bool finished = false;
-    QString outcome;      // done | not_found | failed | skipped (when finished)
+    QString outcome;      // done | not_found | failed | skipped | postponed (when finished)
     QString detail;
 };
 Q_DECLARE_METATYPE(JobStatus)
@@ -54,10 +57,17 @@ public:
     void rescan();
     void retryUnmatched();
 
+    // Circuit breaker: when YouTube starts refusing requests the whole queue
+    // waits instead of failing track after track.
+    bool paused() const { return m_blocked; }
+    QDateTime resumeAt() const { return m_resumeAt; }
+    QString pauseReason() const { return m_pauseReason; }
+    void resumeNow();
+
     bool scanning() const { return m_scanning; }
     int queuedCount() const { return m_queue.size(); }
     int activeCount() const { return m_active; }
-    bool busy() const { return m_scanning || m_auditing || m_active > 0 || !m_queue.isEmpty(); }
+    bool busy() const { return m_scanning || m_auditing || m_blocked || m_active > 0 || !m_queue.isEmpty(); }
 
     static QString dataDir(const QString &mvDir);
 
@@ -77,6 +87,10 @@ private:
     void runJob(qint64 trackId, const ImportSettings &cfg);
     void auditStills();
     void requeueRetryable();
+    void noteSuccess();                      // any thread
+    bool noteFailure(const QString &error);  // any thread; true when the queue is (now) paused
+    void tripBreaker(const QString &reason);
+    void appendLog(const QJsonObject &entry); // any thread
     bool claimVideo(const QString &ytId);
     void releaseVideo(const QString &ytId);
 
@@ -98,6 +112,15 @@ private:
     bool m_started = false;
 
     QSet<QString> m_claimed; // YouTube ids being imported right now (guarded by m_mutex)
+
+    std::atomic<bool> m_blocked{false};
+    std::atomic<int> m_failStreak{0}; // network failures in a row, across jobs
+    std::atomic<int> m_tripCount{0};  // pauses in a row without a success in between
+    std::atomic<bool> m_probing{false}; // just resumed: one job at a time until a request succeeds
+    QTimer m_resumeTimer;
+    QDateTime m_resumeAt;
+    QString m_pauseReason;
+    QMutex m_logMutex;
 
     QFileSystemWatcher m_watcher;
     QTimer m_debounce;

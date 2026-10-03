@@ -26,6 +26,10 @@ public:
     bool downloadVideo(const QString &id, const QString &dir, const std::function<void(double)> &progress,
                        QString *file, QString *thumb, QString *error);
 
+    // True when an error message means YouTube is refusing this client
+    // altogether (rate limit, bot check) rather than one video failing.
+    static bool looksBlocked(const QString &error);
+
 private:
     QStringList baseArgs() const;
     static QString url(const QString &id);

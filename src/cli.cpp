@@ -128,6 +128,8 @@ int main(int argc, char **argv)
     cfg.replaceAudio = !parser.isSet(QStringLiteral("keep-youtube-audio"));
     cfg.skipStillImages = !parser.isSet(QStringLiteral("allow-still-images"));
     cfg.ytdlpArgs = parser.values(QStringLiteral("ytdlp-arg"));
+    if (qEnvironmentVariableIsSet("MVPLAYER_PAUSE_SECS"))
+        cfg.pauseBaseSecs = qEnvironmentVariableIntValue("MVPLAYER_PAUSE_SECS");
 
     QDir().mkpath(ImportManager::dataDir(cfg.mvDir));
     Database db(QDir(ImportManager::dataDir(cfg.mvDir)).filePath(QStringLiteral("library.db")));

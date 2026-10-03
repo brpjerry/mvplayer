@@ -115,6 +115,44 @@ Popup {
                 }
             }
 
+            // Paused by the circuit breaker
+            Item {
+                width: parent.width
+                height: App.importPaused ? pauseBox.height + 14 : 0
+                visible: App.importPaused
+                Rectangle {
+                    id: pauseBox
+                    x: 14
+                    y: 12
+                    width: parent.width - 28
+                    height: pauseText.implicitHeight + 46
+                    radius: Theme.radiusSmall
+                    color: Theme.hover
+                    Text {
+                        id: pauseText
+                        x: 12
+                        y: 10
+                        width: parent.width - 24
+                        wrapMode: Text.WordWrap
+                        maximumLineCount: 4
+                        elide: Text.ElideRight
+                        lineHeight: 1.25
+                        color: Theme.textDim
+                        font.pixelSize: 12
+                        text: App.statusText + ". YouTube is refusing requests, so importing waits instead of failing track after track. It resumes by itself.\n" + App.pauseReason
+                    }
+                    FlatButton {
+                        anchors.right: parent.right
+                        anchors.rightMargin: 8
+                        anchors.bottom: parent.bottom
+                        anchors.bottomMargin: 6
+                        implicitHeight: 26
+                        text: "Resume now"
+                        onClicked: App.resumeImport()
+                    }
+                }
+            }
+
             Item { width: 1; height: 10 }
 
             // Active and recent jobs

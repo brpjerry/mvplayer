@@ -59,6 +59,9 @@ class AppController : public QObject
     Q_PROPERTY(int sessionDone READ sessionDone NOTIFY activityChanged)
     Q_PROPERTY(QVariantMap trackCounts READ trackCounts NOTIFY activityChanged)
     Q_PROPERTY(QString statusText READ statusText NOTIFY activityChanged)
+    // YouTube is refusing requests; the queue waits and resumes by itself.
+    Q_PROPERTY(bool importPaused READ importPaused NOTIFY activityChanged)
+    Q_PROPERTY(QString pauseReason READ pauseReason NOTIFY activityChanged)
 
     // "auto" (follow the playing video) or a colour such as "#8b7dff"
     Q_PROPERTY(QString accent READ accent WRITE setAccent NOTIFY appearanceChanged)
@@ -105,6 +108,9 @@ public:
     int sessionDone() const { return m_sessionDone; }
     QVariantMap trackCounts() const { return m_trackCounts; }
     QString statusText() const;
+    bool importPaused() const;
+    QString pauseReason() const;
+    Q_INVOKABLE void resumeImport();
 
     QString accent() const { return m_accent; }
     void setAccent(const QString &accent);
