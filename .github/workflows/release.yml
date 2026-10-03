@@ -28,10 +28,11 @@ jobs:
         working-directory: packaging
         run: |
           repo-add mvplayer.db.tar.gz *.pkg.tar.zst
-          # pacman fetches "mvplayer.db" and "mvplayer.files"; release assets
-          # cannot be symlinks, so upload copies under those names too.
-          cp mvplayer.db.tar.gz mvplayer.db
-          cp mvplayer.files.tar.gz mvplayer.files
+          # repo-add leaves "mvplayer.db" and "mvplayer.files" (the names
+          # pacman fetches) as symlinks; release assets must be real files.
+          cp --remove-destination "$(readlink -f mvplayer.db)" mvplayer.db
+          cp --remove-destination "$(readlink -f mvplayer.files)" mvplayer.files
+          ls -l
       - name: Publish the release
         if: startsWith(github.ref, 'refs/tags/')
         env:
