@@ -1,0 +1,28 @@
+# Maintainer: brpjerry <https://github.com/brpjerry>
+pkgname=mvplayer
+pkgver=0.1.0
+pkgrel=1
+pkgdesc="Music player that builds a music video library from your audio library"
+arch=('x86_64')
+url="https://github.com/brpjerry/mvplayer"
+license=('custom')
+depends=('qt6-base' 'qt6-declarative' 'mpv' 'taglib' 'chromaprint' 'ffmpeg' 'yt-dlp' 'hicolor-icon-theme')
+makedepends=('cmake' 'ninja' 'qt6-shadertools')
+optdepends=('deno: lets yt-dlp use every YouTube format')
+options=('!debug')
+# CI drops a `git archive` of the tag next to this file; otherwise the tag's
+# tarball is fetched from GitHub.
+source=("$pkgname-$pkgver.tar.gz::$url/archive/refs/tags/v$pkgver.tar.gz")
+sha256sums=('SKIP')
+
+build() {
+    cmake -S "$pkgname-$pkgver" -B build -G Ninja \
+        -DCMAKE_BUILD_TYPE=Release \
+        -DCMAKE_INSTALL_PREFIX=/usr \
+        -DMV_VERSION="$pkgver"
+    cmake --build build
+}
+
+package() {
+    DESTDIR="$pkgdir" cmake --install build
+}

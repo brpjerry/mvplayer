@@ -1,0 +1,172 @@
+import QtQuick
+
+// One music video in the grid: thumbnail with hover affordances, title, artist.
+Item {
+    id: root
+
+    required property int index
+    required property var videoId
+    required property string title
+    required property string artist
+    required property int year
+    required property string durationText
+    required property url thumb
+    required property string quality
+    required property string audioSource
+
+    property bool current: false   // this video is loaded in the player
+    property bool playing: false   // ...and not paused
+    readonly property Item thumbnail: thumbItem
+
+    signal activated()
+
+    readonly property bool hovered: mouse.containsMouse
+
+    Item {
+        id: body
+        anchors.fill: parent
+        anchors.margins: 10
+        scale: mouse.pressed ? 0.975 : 1
+        Behavior on scale { NumberAnimation { duration: Theme.fast; easing.type: Easing.OutCubic } }
+
+        RoundedImage {
+            id: thumbItem
+            width: parent.width
+            height: Math.round(width * 9 / 16)
+            source: root.thumb
+            zoom: root.hovered ? 1.06 : 1.0
+            dim: root.hovered ? 0.35 : 0.0
+            Behavior on zoom { NumberAnimation { duration: Theme.slow; easing.type: Easing.OutCubic } }
+            Behavior on dim { NumberAnimation { duration: Theme.normal } }
+        }
+
+        // Selection ring for the video that is loaded
+        Rectangle {
+            anchors.fill: thumbItem
+            anchors.margins: -4
+            radius: Theme.radius + 4
+            color: "transparent"
+            border.width: 2
+            border.color: Theme.accent
+            opacity: root.current ? 1 : 0
+            visible: opacity > 0
+            Behavior on opacity { NumberAnimation { duration: Theme.normal } }
+        }
+
+        // Play affordance
+        Rectangle {
+            anchors.centerIn: thumbItem
+            width: 52
+            height: 52
+            radius: 26
+            color: Theme.accent
+            opacity: root.hovered ? 1 : 0
+            scale: root.hovered ? 1 : 0.7
+            visible: opacity > 0
+            Behavior on opacity { NumberAnimation { duration: Theme.normal } }
+            Behavior on scale { NumberAnimation { duration: Theme.slow; easing.type: Easing.OutBack; easing.overshoot: 1.4 } }
+            Icon {
+                anchors.centerIn: parent
+                anchors.horizontalCenterOffset: 2
+                path: Icons.play
+                size: 28
+                color: Theme.accentInk
+            }
+        }
+
+        // Badges
+        Row {
+            anchors.left: thumbItem.left
+            anchors.bottom: thumbItem.bottom
+            anchors.margins: 8
+            spacing: 4
+            Repeater {
+                model: {
+                    const list = []
+                    if (root.quality === "4K" || root.quality === "8K") list.push(root.quality)
+                    if (root.audioSource === "library") list.push("LOSSLESS")
+                    return list
+                }
+                Rectangle {
+                    required property string modelData
+                    width: badgeText.implicitWidth + 10
+                    height: 18
+                    radius: 4
+                    color: Theme.scrim
+                    Text {
+                        id: badgeText
+                        anchors.centerIn: parent
+                        text: parent.modelData
+                        color: Theme.scrimText
+                        font.pixelSize: 10
+                        font.weight: Font.DemiBold
+                        font.letterSpacing: 0.4
+                    }
+                }
+            }
+        }
+        Rectangle {
+            anchors.right: thumbItem.right
+            anchors.bottom: thumbItem.bottom
+            anchors.margins: 8
+            width: durationLabel.implicitWidth + 10
+            height: 18
+            radius: 4
+            color: Theme.scrim
+            Text {
+                id: durationLabel
+                anchors.centerIn: parent
+                text: root.durationText
+                color: Theme.scrimText
+                font.pixelSize: 11
+                font.weight: Font.Medium
+                font.features: { "tnum": 1 }
+            }
+        }
+
+        // Caption
+        EqBars {
+            id: bars
+            anchors.left: parent.left
+            anchors.top: thumbItem.bottom
+            anchors.topMargin: 13
+            visible: root.current
+            playing: root.playing
+            width: 13
+            height: 12
+        }
+        Text {
+            id: titleLabel
+            anchors.left: parent.left
+            anchors.leftMargin: root.current ? 21 : 0
+            anchors.right: parent.right
+            anchors.top: thumbItem.bottom
+            anchors.topMargin: 10
+            text: root.title
+            color: root.current ? Theme.accentHi : Theme.text
+            font.pixelSize: 14
+            font.weight: Font.DemiBold
+            elide: Text.ElideRight
+            Behavior on color { ColorAnimation { duration: Theme.normal } }
+            Behavior on anchors.leftMargin { NumberAnimation { duration: Theme.normal; easing.type: Easing.OutCubic } }
+        }
+        Text {
+            anchors.left: parent.left
+            anchors.right: parent.right
+            anchors.top: titleLabel.bottom
+            anchors.topMargin: 3
+            text: root.artist.replace(/; /g, ", ") + (root.year > 0 ? "  ·  " + root.year : "")
+            color: Theme.textDim
+            font.pixelSize: 12
+            elide: Text.ElideRight
+        }
+    }
+
+    MouseArea {
+        id: mouse
+        anchors.fill: body
+        hoverEnabled: true
+        cursorShape: Qt.PointingHandCursor
+        onClicked: root.activated()
+    }
+}

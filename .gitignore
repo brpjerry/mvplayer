@@ -1,0 +1,14 @@
+# build output
+build/
+build-*/
+.cache/
+
+# local test library (large media)
+testdata/
+*.part.mkv
+
+# makepkg output
+packaging/src/
+packaging/pkg/
+packaging/*.tar.gz
+packaging/*.pkg.tar.*

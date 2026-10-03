@@ -1,0 +1,10 @@
+[Desktop Entry]
+Type=Application
+Name=MV Player
+GenericName=Music Video Player
+Comment=Play your music library as music videos
+Exec=mvplayer
+Icon=mvplayer
+Terminal=false
+Categories=AudioVideo;Audio;Video;Player;
+StartupWMClass=mvplayer

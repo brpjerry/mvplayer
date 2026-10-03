@@ -1,0 +1,520 @@
+import QtQuick
+import QtQuick.Controls.Basic
+import QtQuick.Dialogs
+import MvPlayer.Core
+
+// Library folders and import behaviour.
+Popup {
+    id: root
+
+    width: 560
+    height: body.implicitHeight + 2
+    anchors.centerIn: Overlay.overlay
+    modal: true
+    padding: 1
+    closePolicy: Popup.CloseOnEscape | Popup.CloseOnPressOutside
+
+    Overlay.modal: Rectangle {
+        color: "#990c0d10"
+        Behavior on opacity { NumberAnimation { duration: Theme.normal } }
+    }
+
+    enter: Transition {
+        ParallelAnimation {
+            NumberAnimation { property: "opacity"; from: 0; to: 1; duration: Theme.normal }
+            NumberAnimation { property: "scale"; from: 0.95; to: 1; duration: Theme.slow; easing.type: Easing.BezierSpline; easing.bezierCurve: Theme.emphasized }
+        }
+    }
+    exit: Transition {
+        ParallelAnimation {
+            NumberAnimation { property: "opacity"; to: 0; duration: Theme.fast }
+            NumberAnimation { property: "scale"; to: 0.97; duration: Theme.fast }
+        }
+    }
+
+    background: Rectangle {
+        radius: Theme.radius + 4
+        color: Theme.raised
+        border.width: 1
+        border.color: Theme.line
+    }
+
+    readonly property var accentPresets: [
+        "#8b7dff", "#5b9dff", "#3ec9d6", "#4fd68f", "#c5d94a", "#f5b84a", "#ff8f4d", "#ff6f91", "#f06bd8"
+    ]
+    readonly property bool customAccent: App.accent !== "auto" && accentPresets.indexOf(App.accent) < 0
+
+    FolderDialog {
+        id: musicDialog
+        title: "Add a music folder"
+        currentFolder: App.pathToUrl(App.musicDirs.length > 0 ? App.musicDirs[App.musicDirs.length - 1] : "")
+        onAccepted: App.addMusicDir(App.urlToPath(selectedFolder))
+    }
+    FolderDialog {
+        id: mvDialog
+        title: "Choose where music videos are stored"
+        currentFolder: App.pathToUrl(App.mvDir)
+        onAccepted: App.mvDir = App.urlToPath(selectedFolder)
+    }
+
+    component FolderRow: Item {
+        id: folderRow
+        property string label
+        property string hint
+        property string path
+        property string icon
+        signal change()
+        width: parent.width
+        height: 64
+
+        Icon {
+            id: rowIcon
+            anchors.verticalCenter: parent.verticalCenter
+            path: folderRow.icon
+            size: 20
+            color: Theme.textDim
+        }
+        Column {
+            anchors.left: rowIcon.right
+            anchors.leftMargin: 14
+            anchors.right: changeButton.left
+            anchors.rightMargin: 16
+            anchors.verticalCenter: parent.verticalCenter
+            spacing: 3
+            Text {
+                text: folderRow.label
+                color: Theme.text
+                font.pixelSize: 14
+                font.weight: Font.DemiBold
+            }
+            Text {
+                width: parent.width
+                text: folderRow.path.length > 0 ? App.displayPath(folderRow.path) : folderRow.hint
+                color: folderRow.path.length > 0 ? Theme.textDim : Theme.textFaint
+                font.pixelSize: 12
+                elide: Text.ElideMiddle
+            }
+        }
+        FlatButton {
+            id: changeButton
+            anchors.right: parent.right
+            anchors.verticalCenter: parent.verticalCenter
+            text: folderRow.path.length > 0 ? "Change" : "Choose"
+            primary: folderRow.path.length === 0
+            onClicked: folderRow.change()
+        }
+    }
+
+    component SwitchRow: Item {
+        id: switchRow
+        property string label
+        property string hint
+        property bool checked
+        signal toggled(bool checked)
+        width: parent.width
+        height: 58
+
+        Column {
+            anchors.left: parent.left
+            anchors.right: toggle.left
+            anchors.rightMargin: 20
+            anchors.verticalCenter: parent.verticalCenter
+            spacing: 3
+            Text {
+                text: switchRow.label
+                color: Theme.text
+                font.pixelSize: 14
+            }
+            Text {
+                width: parent.width
+                text: switchRow.hint
+                color: Theme.textFaint
+                font.pixelSize: 12
+                wrapMode: Text.WordWrap
+            }
+        }
+        FlatSwitch {
+            id: toggle
+            anchors.right: parent.right
+            anchors.verticalCenter: parent.verticalCenter
+            checked: switchRow.checked
+            onToggled: (c) => switchRow.toggled(c)
+        }
+    }
+
+    contentItem: Column {
+        id: body
+        padding: 26
+        topPadding: 22
+        bottomPadding: 22
+        spacing: 2
+
+        Item {
+            width: parent.width - 2 * body.padding
+            height: 40
+            Text {
+                anchors.verticalCenter: parent.verticalCenter
+                text: "Settings"
+                color: Theme.text
+                font.pixelSize: 19
+                font.weight: Font.DemiBold
+                font.letterSpacing: -0.3
+            }
+            IconButton {
+                anchors.right: parent.right
+                anchors.rightMargin: -8
+                anchors.verticalCenter: parent.verticalCenter
+                icon: Icons.close
+                onClicked: root.close()
+            }
+        }
+
+        Column {
+            width: parent.width - 2 * body.padding
+
+            // Music library: any number of folders
+            Item {
+                width: parent.width
+                height: 44
+                Icon {
+                    id: musicIcon
+                    anchors.verticalCenter: parent.verticalCenter
+                    path: Icons.music
+                    size: 20
+                    color: Theme.textDim
+                }
+                Text {
+                    anchors.left: musicIcon.right
+                    anchors.leftMargin: 14
+                    anchors.verticalCenter: parent.verticalCenter
+                    text: "Music library"
+                    color: Theme.text
+                    font.pixelSize: 14
+                    font.weight: Font.DemiBold
+                }
+                FlatButton {
+                    anchors.right: parent.right
+                    anchors.verticalCenter: parent.verticalCenter
+                    text: "Add folder"
+                    icon: Icons.add
+                    primary: App.musicDirs.length === 0
+                    onClicked: musicDialog.open()
+                }
+            }
+            Text {
+                visible: App.musicDirs.length === 0
+                x: 34
+                height: 30
+                verticalAlignment: Text.AlignVCenter
+                text: "No folders yet"
+                color: Theme.textFaint
+                font.pixelSize: 12
+            }
+            Repeater {
+                model: App.musicDirs
+                Item {
+                    id: folder
+                    required property string modelData
+                    width: parent.width
+                    height: 32
+                    Rectangle {
+                        anchors.fill: parent
+                        anchors.leftMargin: 26
+                        anchors.rightMargin: -8
+                        radius: Theme.radiusSmall
+                        color: Theme.hover
+                        opacity: folderHover.hovered ? 1 : 0
+                        Behavior on opacity { NumberAnimation { duration: Theme.fast } }
+                    }
+                    HoverHandler { id: folderHover }
+                    Text {
+                        anchors.left: parent.left
+                        anchors.leftMargin: 34
+                        anchors.right: removeButton.left
+                        anchors.rightMargin: 8
+                        anchors.verticalCenter: parent.verticalCenter
+                        text: App.displayPath(folder.modelData)
+                        color: Theme.textDim
+                        font.pixelSize: 12
+                        elide: Text.ElideMiddle
+                    }
+                    IconButton {
+                        id: removeButton
+                        anchors.right: parent.right
+                        anchors.rightMargin: -4
+                        anchors.verticalCenter: parent.verticalCenter
+                        size: 26
+                        iconSize: 15
+                        icon: Icons.close
+                        opacity: folderHover.hovered || hovered ? 1 : 0.4
+                        tooltip: "Remove folder (its videos are kept)"
+                        onClicked: App.removeMusicDir(folder.modelData)
+                        Behavior on opacity { NumberAnimation { duration: Theme.fast } }
+                    }
+                }
+            }
+            Item { width: 1; height: 10 }
+            FolderRow {
+                label: "Music video library"
+                hint: "Not set"
+                icon: Icons.movie
+                path: App.mvDir
+                onChange: mvDialog.open()
+            }
+
+            Item { width: 1; height: 8 }
+            Rectangle { width: parent.width; height: 1; color: Theme.line }
+            Item { width: 1; height: 8 }
+
+            // Appearance: follow the system, or force dark / light
+            Item {
+                width: parent.width
+                height: 52
+
+                Text {
+                    anchors.verticalCenter: parent.verticalCenter
+                    text: "Appearance"
+                    color: Theme.text
+                    font.pixelSize: 14
+                }
+                Rectangle {
+                    id: modeSwitch
+                    anchors.right: parent.right
+                    anchors.verticalCenter: parent.verticalCenter
+                    width: 228
+                    height: 32
+                    radius: 16
+                    color: Theme.hover
+
+                    readonly property var modes: [
+                        { key: "auto", label: "Auto" },
+                        { key: "dark", label: "Dark" },
+                        { key: "light", label: "Light" }
+                    ]
+                    readonly property int current: Math.max(0, modes.findIndex((m) => m.key === App.themeMode))
+
+                    // Sliding highlight
+                    Rectangle {
+                        x: 3 + modeSwitch.current * (modeSwitch.width - 6) / 3
+                        y: 3
+                        width: (modeSwitch.width - 6) / 3
+                        height: parent.height - 6
+                        radius: height / 2
+                        color: Theme.accent
+                        Behavior on x { NumberAnimation { duration: Theme.slow; easing.type: Easing.BezierSpline; easing.bezierCurve: Theme.emphasized } }
+                    }
+                    Row {
+                        anchors.fill: parent
+                        anchors.margins: 3
+                        Repeater {
+                            model: modeSwitch.modes
+                            Item {
+                                id: segment
+                                required property var modelData
+                                required property int index
+                                width: (modeSwitch.width - 6) / 3
+                                height: parent.height
+                                Text {
+                                    anchors.centerIn: parent
+                                    text: segment.modelData.label
+                                    color: segment.index === modeSwitch.current ? Theme.accentInk : Theme.textDim
+                                    font.pixelSize: 12
+                                    font.weight: Font.DemiBold
+                                    Behavior on color { ColorAnimation { duration: Theme.normal } }
+                                }
+                                MouseArea {
+                                    anchors.fill: parent
+                                    cursorShape: Qt.PointingHandCursor
+                                    onClicked: App.themeMode = segment.modelData.key
+                                }
+                            }
+                        }
+                    }
+                }
+            }
+
+            // Accent colour: follow the video, a preset, or any colour
+            Item {
+                width: parent.width
+                height: 106
+
+                Text {
+                    y: 8
+                    text: "Accent colour"
+                    color: Theme.text
+                    font.pixelSize: 14
+                }
+                Text {
+                    anchors.right: parent.right
+                    y: 10
+                    text: App.accent === "auto" ? "Follows the video that is playing"
+                        : root.customAccent ? "Custom" : ""
+                    color: Theme.textFaint
+                    font.pixelSize: 12
+                }
+                Row {
+                    y: 40
+                    spacing: 9
+
+                    Item {
+                        id: autoChip
+                        readonly property bool selected: App.accent === "auto"
+                        width: autoLabel.implicitWidth + 26
+                        height: 28
+                        Rectangle {
+                            anchors.fill: parent
+                            radius: 14
+                            color: autoChip.selected ? Theme.accentSoft : autoMouse.containsMouse ? Theme.pressed : Theme.hover
+                            border.width: autoChip.selected ? 2 : 0
+                            border.color: Theme.accent
+                            Behavior on color { ColorAnimation { duration: Theme.fast } }
+                        }
+                        Text {
+                            id: autoLabel
+                            anchors.centerIn: parent
+                            text: "Auto"
+                            color: autoChip.selected ? Theme.accentHi : Theme.text
+                            font.pixelSize: 12
+                            font.weight: Font.DemiBold
+                        }
+                        MouseArea {
+                            id: autoMouse
+                            anchors.fill: parent
+                            hoverEnabled: true
+                            cursorShape: Qt.PointingHandCursor
+                            onClicked: App.accent = "auto"
+                        }
+                    }
+
+                    Repeater {
+                        model: root.accentPresets
+                        Item {
+                            id: swatch
+                            required property string modelData
+                            readonly property bool selected: App.accent === modelData
+                            width: 28
+                            height: 28
+                            Rectangle {
+                                anchors.fill: parent
+                                radius: 14
+                                color: "transparent"
+                                border.width: 2
+                                border.color: swatch.modelData
+                                opacity: swatch.selected ? 1 : 0
+                                Behavior on opacity { NumberAnimation { duration: Theme.fast } }
+                            }
+                            Rectangle {
+                                anchors.centerIn: parent
+                                width: 18
+                                height: 18
+                                radius: 9
+                                color: swatch.modelData
+                                scale: swatchMouse.pressed ? 0.9 : swatchMouse.containsMouse && !swatch.selected ? 1.2 : 1
+                                Behavior on scale { NumberAnimation { duration: Theme.fast; easing.type: Easing.OutCubic } }
+                            }
+                            MouseArea {
+                                id: swatchMouse
+                                anchors.fill: parent
+                                hoverEnabled: true
+                                cursorShape: Qt.PointingHandCursor
+                                onClicked: App.accent = swatch.modelData
+                            }
+                        }
+                    }
+
+                }
+
+                // Any other hue: click or drag along the strip
+                Item {
+                    id: hueStrip
+                    y: 80
+                    width: parent.width
+                    height: 14
+
+                    Rectangle {
+                        anchors.verticalCenter: parent.verticalCenter
+                        width: parent.width
+                        height: hueMouse.containsMouse || hueMouse.pressed ? 8 : 6
+                        radius: height / 2
+                        Behavior on height { NumberAnimation { duration: Theme.fast } }
+                        gradient: Gradient {
+                            orientation: Gradient.Horizontal
+                            GradientStop { position: 0 / 6; color: Theme.accentForHue(0 / 6) }
+                            GradientStop { position: 1 / 6; color: Theme.accentForHue(1 / 6) }
+                            GradientStop { position: 2 / 6; color: Theme.accentForHue(2 / 6) }
+                            GradientStop { position: 3 / 6; color: Theme.accentForHue(3 / 6) }
+                            GradientStop { position: 4 / 6; color: Theme.accentForHue(4 / 6) }
+                            GradientStop { position: 5 / 6; color: Theme.accentForHue(5 / 6) }
+                            GradientStop { position: 6 / 6; color: Theme.accentForHue(0.999) }
+                        }
+                    }
+                    Rectangle {
+                        visible: root.customAccent
+                        x: Math.max(0, Math.min(parent.width - width, Math.max(0, Theme.accentSource.hslHue) * parent.width - width / 2))
+                        anchors.verticalCenter: parent.verticalCenter
+                        width: 14
+                        height: 14
+                        radius: 7
+                        color: Theme.accentSource
+                        border.width: 2
+                        border.color: Theme.text
+                    }
+                    MouseArea {
+                        id: hueMouse
+                        anchors.fill: parent
+                        anchors.margins: -6
+                        hoverEnabled: true
+                        cursorShape: Qt.PointingHandCursor
+                        preventStealing: true
+                        function pick() {
+                            const hue = Math.max(0, Math.min(0.999, (mouseX - 6) / hueStrip.width))
+                            App.accent = "" + Theme.accentForHue(hue)
+                        }
+                        onPressed: pick()
+                        onPositionChanged: if (pressed) pick()
+                    }
+                }
+            }
+
+            Item { width: 1; height: 6 }
+            Rectangle { width: parent.width; height: 1; color: Theme.line }
+            Item { width: 1; height: 8 }
+
+            SwitchRow {
+                label: "Use my library's audio"
+                hint: "When your track is higher quality than YouTube's, it is synced to the video and used as the main audio."
+                checked: App.replaceAudio
+                onToggled: (c) => App.replaceAudio = c
+            }
+            SwitchRow {
+                label: "Skip still-image videos"
+                hint: "Ignore uploads that are just the cover art set to music."
+                checked: App.skipStillImages
+                onToggled: (c) => App.skipStillImages = c
+            }
+            SwitchRow {
+                label: "Allow unofficial uploads"
+                hint: "Also accept videos from channels that do not look like the artist's or label's."
+                checked: App.allowUnofficial
+                onToggled: (c) => App.allowUnofficial = c
+            }
+
+            Item { width: 1; height: 12 }
+
+            Row {
+                spacing: 10
+                FlatButton {
+                    text: "Rescan library"
+                    icon: Icons.refresh
+                    enabled: App.configured
+                    onClicked: App.rescan()
+                }
+                FlatButton {
+                    text: "Retry tracks without a video"
+                    enabled: App.configured && !App.busy
+                    onClicked: App.retryUnmatched()
+                }
+            }
+        }
+    }
+}

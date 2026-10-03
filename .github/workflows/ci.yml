@@ -1,0 +1,43 @@
+name: CI
+
+on:
+  pull_request:
+  push:
+    branches: [main]
+
+jobs:
+  build:
+    name: build
+    runs-on: ubuntu-latest
+    container: archlinux:base-devel
+    steps:
+      - name: Install dependencies
+        run: |
+          pacman -Sy --noconfirm archlinux-keyring
+          pacman -Syu --noconfirm git cmake ninja qt6-base qt6-declarative qt6-shadertools \
+            mpv taglib chromaprint ffmpeg yt-dlp python
+      - uses: actions/checkout@v4
+      - name: Configure and build
+        run: |
+          cmake -S . -B build -G Ninja -DCMAKE_BUILD_TYPE=Release
+          cmake --build build
+      - name: Smoke test (alignment, muxing, binaries)
+        run: ci/smoke.sh build
+
+  package:
+    name: package
+    runs-on: ubuntu-latest
+    container: archlinux:base-devel
+    steps:
+      - name: Install dependencies
+        run: |
+          pacman -Sy --noconfirm archlinux-keyring
+          pacman -Syu --noconfirm git cmake ninja qt6-base qt6-declarative qt6-shadertools \
+            mpv taglib chromaprint ffmpeg yt-dlp
+      - uses: actions/checkout@v4
+      - name: Build the pacman package from this tree
+        run: ci/makepkg.sh
+      - uses: actions/upload-artifact@v4
+        with:
+          name: pacman-package
+          path: packaging/*.pkg.tar.zst
