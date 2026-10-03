@@ -9,6 +9,10 @@
 #include <QDateTime>
 #include <QDebug>
 #include <QDir>
+#include <QElapsedTimer>
+#include <QFileInfo>
+#include <QJsonArray>
+#include <QJsonDocument>
 #include <QDirIterator>
 #include <QFile>
 #include <QThread>
@@ -52,6 +56,10 @@ bool audioMatches(const AudioAlign::Result &r)
     return m >= 0.5 * r.trackSec || (m >= 0.8 * r.videoSec && m >= 45);
 }
 
+constexpr int kFailStreakLimit = 8;         // consecutive network failures that also trip the breaker
+constexpr int kMaxPauseSecs = 2 * 60 * 60;
+constexpr qint64 kLogRotateBytes = 8 * 1024 * 1024;
+
 // Is the waveform match complete enough to swap the audio without audible seams?
 bool audioReplaceable(const AudioAlign::Result &r)
 {
@@ -73,6 +81,9 @@ ImportManager::ImportManager(Database *db, QObject *parent)
     m_debounce.setInterval(2500);
     connect(&m_debounce, &QTimer::timeout, this, &ImportManager::rescan);
     connect(&m_watcher, &QFileSystemWatcher::directoryChanged, this, [this] { m_debounce.start(); });
+
+    m_resumeTimer.setSingleShot(true);
+    connect(&m_resumeTimer, &QTimer::timeout, this, &ImportManager::resumeNow);
 
     // Catches what directory watching cannot see, such as tags edited in place.
     m_periodic.setInterval(10 * 60 * 1000);
@@ -139,6 +150,8 @@ void ImportManager::stop()
     m_cancel = true;
     m_debounce.stop();
     m_periodic.stop();
+    m_resumeTimer.stop();
+    m_blocked = false;
     m_queue.clear();
     m_scanPool.waitForDone();
     m_auditPool.waitForDone();
@@ -175,6 +188,78 @@ void ImportManager::requeueRetryable()
         enqueue(t.id);
     // The caller starts the work: reporting "idle" from here would end a
     // headless run before its first scan.
+}
+
+void ImportManager::noteSuccess()
+{
+    m_failStreak = 0;
+    m_tripCount = 0;
+    m_probing = false;
+}
+
+bool ImportManager::noteFailure(const QString &error)
+{
+    const bool refused = YtDlp::looksBlocked(error);
+    const int streak = ++m_failStreak;
+    if (!refused && streak < kFailStreakLimit)
+        return m_blocked;
+    if (!m_blocked.exchange(true)) {
+        const QString reason = refused ? QStringLiteral("YouTube is limiting requests (%1)").arg(error)
+                                       : QStringLiteral("%1 downloads in a row failed (last: %2)").arg(streak).arg(error);
+        QMetaObject::invokeMethod(this, [this, reason] { tripBreaker(reason); }, Qt::QueuedConnection);
+    }
+    return true;
+}
+
+void ImportManager::tripBreaker(const QString &reason)
+{
+    if (!m_started)
+        return;
+    const int trips = ++m_tripCount;
+    const int base = qMax(1, settings().pauseBaseSecs);
+    const int wait = int(qMin<qint64>(qint64(base) << qMin(trips - 1, 10), qMax(base, kMaxPauseSecs)));
+    m_pauseReason = reason;
+    m_resumeAt = QDateTime::currentDateTime().addSecs(wait);
+    m_resumeTimer.start(wait * 1000);
+    qInfo().noquote() << QStringLiteral("[import] paused for %1: %2").arg(formatDuration(wait), reason);
+    appendLog({{QStringLiteral("event"), QStringLiteral("paused")}, {QStringLiteral("seconds"), wait},
+               {QStringLiteral("reason"), reason}});
+    emit activityChanged();
+}
+
+void ImportManager::resumeNow()
+{
+    if (!m_started || !m_blocked)
+        return;
+    m_resumeTimer.stop();
+    m_blocked = false;
+    m_failStreak = 0;
+    m_probing = true;
+    qInfo("[import] resuming");
+    appendLog({{QStringLiteral("event"), QStringLiteral("resumed")}});
+    // Tracks set aside while paused are still pending in the database.
+    for (const TrackInfo &t : m_db->tracksInState({QStringLiteral("pending")}))
+        enqueue(t.id);
+    emit activityChanged();
+    pump();
+}
+
+void ImportManager::appendLog(const QJsonObject &entry)
+{
+    // One JSON object per line: what was searched, which candidates were
+    // examined and why each was accepted or dropped, and how many requests
+    // it took. Meant for tuning the matching rules against real libraries.
+    QJsonObject line = entry;
+    line.insert(QStringLiteral("t"), QDateTime::currentDateTime().toString(Qt::ISODate));
+    const QString path = QDir(dataDir(settings().mvDir)).filePath(QStringLiteral("import-log.jsonl"));
+    QMutexLocker lock(&m_logMutex);
+    if (QFileInfo(path).size() > kLogRotateBytes) {
+        QFile::remove(path + QStringLiteral(".1"));
+        QFile::rename(path, path + QStringLiteral(".1"));
+    }
+    QFile f(path);
+    if (f.open(QIODevice::WriteOnly | QIODevice::Append))
+        f.write(QJsonDocument(line).toJson(QJsonDocument::Compact) + '\n');
 }
 
 void ImportManager::auditStills()
@@ -271,7 +356,9 @@ void ImportManager::pump()
     if (!m_started)
         return;
     const ImportSettings cfg = settings();
-    while (m_active < m_jobPool.maxThreadCount() && !m_queue.isEmpty()) {
+    // After a pause a single job tests the water before the rest follow.
+    const int limit = m_probing ? 1 : m_jobPool.maxThreadCount();
+    while (!m_blocked && m_active < limit && !m_queue.isEmpty()) {
         const qint64 id = m_queue.dequeue();
         ++m_active;
         m_jobPool.start([this, id, cfg] {
@@ -321,6 +408,35 @@ void ImportManager::runJob(qint64 trackId, const ImportSettings &cfg)
     if (!maybe || maybe->state != QLatin1String("pending"))
         return;
     const TrackInfo track = *maybe;
+    if (m_blocked)
+        return; // stays pending; picked up again when the pause ends
+
+    QElapsedTimer clock;
+    clock.start();
+    int nSearch = 0, nAudio = 0, nPreview = 0, nVideo = 0;
+    QJsonArray logQueries, logCandidates, logChecked;
+    auto writeLog = [&](const QString &outcome, const QString &message) {
+        appendLog({
+            {QStringLiteral("track"), track.title},
+            {QStringLiteral("artist"), track.artist},
+            {QStringLiteral("album"), track.album},
+            {QStringLiteral("duration"), qRound(track.duration)},
+            {QStringLiteral("outcome"), outcome},
+            {QStringLiteral("message"), message},
+            {QStringLiteral("seconds"), qRound(clock.elapsed() / 100.0) / 10.0},
+            {QStringLiteral("requests"), QJsonObject{{QStringLiteral("search"), nSearch}, {QStringLiteral("audio"), nAudio},
+                                                      {QStringLiteral("preview"), nPreview}, {QStringLiteral("video"), nVideo}}},
+            {QStringLiteral("queries"), logQueries},
+            {QStringLiteral("candidates"), logCandidates},
+            {QStringLiteral("checked"), logChecked},
+        });
+    };
+    auto checked = [&](const YtCandidate &c, const QString &result, const QString &detail = QString()) {
+        QJsonObject o{{QStringLiteral("id"), c.id}, {QStringLiteral("result"), result}};
+        if (!detail.isEmpty())
+            o.insert(QStringLiteral("detail"), detail);
+        logChecked.append(o);
+    };
 
     JobStatus st;
     st.trackId = trackId;
@@ -353,6 +469,21 @@ void ImportManager::runJob(qint64 trackId, const ImportSettings &cfg)
         qInfo().noquote() << QStringLiteral("[import] %1 — %2: %3%4")
                                  .arg(st.artist, st.title, st.stage,
                                       message.isEmpty() ? QString() : QStringLiteral(" (%1)").arg(message));
+        writeLog(outcome, message);
+        emit jobChanged(st);
+    };
+
+    // YouTube is refusing requests: put the track back untouched.
+    auto postpone = [&] {
+        cleanup();
+        if (m_cancel)
+            return;
+        writeLog(QStringLiteral("postponed"), QString());
+        st.finished = true;
+        st.outcome = QStringLiteral("postponed");
+        st.progress = -1;
+        st.stage = QStringLiteral("Waiting");
+        st.detail = QStringLiteral("YouTube is limiting requests");
         emit jobChanged(st);
     };
 
@@ -364,7 +495,7 @@ void ImportManager::runJob(qint64 trackId, const ImportSettings &cfg)
 
     // ---- 1. Search ---------------------------------------------------------
     report(QStringLiteral("Searching"));
-    YtDlp yt(QStringLiteral("yt-dlp"), cfg.ytdlpArgs, &m_cancel);
+    YtDlp yt(qEnvironmentVariable("MVPLAYER_YTDLP", QStringLiteral("yt-dlp")), cfg.ytdlpArgs, &m_cancel);
     QVector<YtCandidate> candidates;
     QSet<QString> seen;
     bool searched = false;
@@ -374,11 +505,17 @@ void ImportManager::runJob(qint64 trackId, const ImportSettings &cfg)
     };
     for (const QString &query : Matcher::searchQueries(track)) {
         QVector<YtCandidate> found;
+        ++nSearch;
         if (!yt.search(query, 10, &found, &error)) {
             if (m_cancel)
                 return cleanup();
+            logQueries.append(QJsonObject{{QStringLiteral("q"), query}, {QStringLiteral("error"), error}});
+            if (noteFailure(error))
+                return postpone();
             continue;
         }
+        noteSuccess();
+        logQueries.append(QJsonObject{{QStringLiteral("q"), query}, {QStringLiteral("results"), found.size()}});
         searched = true;
         for (YtCandidate &c : found) {
             if (seen.contains(c.id))
@@ -400,6 +537,12 @@ void ImportManager::runJob(qint64 trackId, const ImportSettings &cfg)
     for (const YtCandidate &c : std::as_const(candidates)) {
         if (usable(c) && shortlist.size() < 4)
             shortlist.append(c);
+        QJsonObject o{{QStringLiteral("id"), c.id}, {QStringLiteral("title"), c.title}, {QStringLiteral("channel"), c.channel},
+                      {QStringLiteral("duration"), qRound(c.duration)}, {QStringLiteral("score"), qRound(c.score)},
+                      {QStringLiteral("trusted"), c.trusted}};
+        if (!c.rejectReason.isEmpty())
+            o.insert(QStringLiteral("rejected"), c.rejectReason);
+        logCandidates.append(o);
     }
     if (shortlist.isEmpty()) {
         finish(QStringLiteral("not_found"), 0,
@@ -426,12 +569,24 @@ void ImportManager::runJob(qint64 trackId, const ImportSettings &cfg)
 
     // Downloads fail transiently (throttling, expired stream URLs); one more
     // try after a short pause settles most of them.
+    // A refusal aimed at this client as a whole is not retried at all.
     auto withRetry = [&](const std::function<bool()> &attempt) {
-        if (attempt())
+        if (attempt()) {
+            noteSuccess();
             return true;
+        }
+        if (m_cancel || YtDlp::looksBlocked(error)) {
+            noteFailure(error);
+            return false;
+        }
         for (int i = 0; i < 30 && !m_cancel; ++i)
             QThread::msleep(100);
-        return !m_cancel && attempt();
+        if (!m_cancel && attempt()) {
+            noteSuccess();
+            return true;
+        }
+        noteFailure(error);
+        return false;
     };
 
     for (const YtCandidate &c : std::as_const(shortlist)) {
@@ -453,6 +608,7 @@ void ImportManager::runJob(qint64 trackId, const ImportSettings &cfg)
                 anyChecked = true;
                 const AudioAlign::Result ar = AudioAlign::align(trackPcm, pcm);
                 if (audioMatches(ar)) {
+                    checked(c, QStringLiteral("shared"));
                     finish(QStringLiteral("done"), existing->id,
                            QStringLiteral("shares the video of “%1”").arg(existing->title));
                     return;
@@ -470,9 +626,13 @@ void ImportManager::runJob(qint64 trackId, const ImportSettings &cfg)
 
         QString audioFile;
         QJsonObject info;
+        ++nAudio;
         if (!withRetry([&] { return yt.downloadAudio(c.id, dir, &audioFile, &info, &error); })) {
             if (m_cancel)
                 return cleanup();
+            checked(c, QStringLiteral("error"), error);
+            if (m_blocked)
+                return postpone();
             // Could not listen to it: that says nothing about the video.
             undecided = true;
             reasons << QStringLiteral("%1: %2").arg(c.id, error);
@@ -489,6 +649,8 @@ void ImportManager::runJob(qint64 trackId, const ImportSettings &cfg)
         const AudioAlign::Result ar = AudioAlign::align(trackPcm, mvPcm);
         qInfo().noquote() << QStringLiteral("[align] %1 ~ “%2” [%3]: %4").arg(track.title, c.title, c.id, ar.summary());
         if (!audioMatches(ar)) {
+            checked(c, QStringLiteral("different"),
+                    QStringLiteral("%1s of %2s matched").arg(ar.fpMatchedSec, 0, 'f', 0).arg(ar.trackSec, 0, 'f', 0));
             reasons << QStringLiteral("“%1” is a different recording").arg(c.title);
             QDir(dir).removeRecursively();
             continue;
@@ -497,9 +659,13 @@ void ImportManager::runJob(qint64 trackId, const ImportSettings &cfg)
         if (cfg.skipStillImages) {
             report(QStringLiteral("Checking video"), -1, c.title);
             QString preview;
+            ++nPreview;
             if (!withRetry([&] { return yt.downloadPreview(c.id, dir, &preview, &error); })) {
                 if (m_cancel)
                     return cleanup();
+                checked(c, QStringLiteral("error"), error);
+                if (m_blocked)
+                    return postpone();
                 // Never accept a video whose picture could not be looked at.
                 undecided = true;
                 reasons << QStringLiteral("%1: %2").arg(c.id, error);
@@ -517,12 +683,14 @@ void ImportManager::runJob(qint64 trackId, const ImportSettings &cfg)
                 continue;
             }
             if (check.still) {
+                checked(c, QStringLiteral("still"));
                 reasons << QStringLiteral("“%1” is a still image").arg(c.title);
                 QDir(dir).removeRecursively();
                 continue;
             }
         }
 
+        checked(c, QStringLiteral("match"));
         chosen = c;
         chosenDir = dir;
         ytAudio = audioFile;
@@ -546,6 +714,7 @@ void ImportManager::runJob(qint64 trackId, const ImportSettings &cfg)
     report(QStringLiteral("Downloading"), 0, chosen.title);
     QString videoFile, thumbFile;
     double lastShown = -1;
+    ++nVideo;
     const bool got = withRetry([&] {
         lastShown = -1;
         return yt.downloadVideo(chosen.id, chosenDir, [&](double p) {
@@ -558,6 +727,8 @@ void ImportManager::runJob(qint64 trackId, const ImportSettings &cfg)
     if (!got) {
         if (m_cancel)
             return cleanup();
+        if (m_blocked)
+            return postpone();
         finish(QStringLiteral("failed"), 0, QStringLiteral("download failed: %1").arg(error));
         return;
     }

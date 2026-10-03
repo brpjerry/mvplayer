@@ -42,6 +42,21 @@ QStringList YtDlp::baseArgs() const
     return a;
 }
 
+bool YtDlp::looksBlocked(const QString &error)
+{
+    static const QStringList signs = {
+        QStringLiteral("http error 429"), QStringLiteral("too many requests"),
+        QStringLiteral("not a bot"), QStringLiteral("rate-limited"), QStringLiteral("rate limited"),
+        QStringLiteral("try again later"),
+    };
+    const QString e = error.toLower();
+    for (const QString &s : signs) {
+        if (e.contains(s))
+            return true;
+    }
+    return false;
+}
+
 QString YtDlp::url(const QString &id)
 {
     return QStringLiteral("https://www.youtube.com/watch?v=") + id;

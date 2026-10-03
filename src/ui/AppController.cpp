@@ -2,6 +2,7 @@
 
 #include <QCollator>
 #include <QDir>
+#include <QLocale>
 #include <QMap>
 #include <QStandardPaths>
 
@@ -96,6 +97,9 @@ AppController::AppController(const AppOptions &options, QObject *parent)
     m_cfg.skipStillImages = m_settings->value(QStringLiteral("import/skipStillImages"), true).toBool();
     m_cfg.concurrency = m_settings->value(QStringLiteral("import/concurrency"), 2).toInt();
     m_cfg.ytdlpArgs = m_settings->value(QStringLiteral("import/ytdlpArgs")).toStringList();
+    m_cfg.pauseBaseSecs = m_settings->value(QStringLiteral("import/pauseSeconds"), m_cfg.pauseBaseSecs).toInt();
+    if (qEnvironmentVariableIsSet("MVPLAYER_PAUSE_SECS"))
+        m_cfg.pauseBaseSecs = qEnvironmentVariableIntValue("MVPLAYER_PAUSE_SECS");
     m_accent = m_settings->value(QStringLiteral("ui/accent"), m_accent).toString();
     m_sidebarFacet = m_settings->value(QStringLiteral("ui/sidebarFacet"), m_sidebarFacet).toString();
     m_themeMode = m_settings->value(QStringLiteral("ui/theme"), m_themeMode).toString();
@@ -180,7 +184,7 @@ void AppController::openLibrary()
     m_manager->setSettings(m_cfg);
     connect(m_manager.get(), &ImportManager::jobChanged, this, [this](const JobStatus &s) {
         m_jobs->update(s);
-        if (s.finished) {
+        if (s.finished && s.outcome != QLatin1String("postponed")) {
             ++m_sessionDone;
             refreshCounts();
         }
@@ -396,6 +400,8 @@ QString AppController::statusText() const
 {
     if (!m_manager)
         return {};
+    if (m_manager->paused())
+        return tr("Paused until %1").arg(QLocale().toString(m_manager->resumeAt().time(), QLocale::ShortFormat));
     const int left = remaining();
     if (left > 0) {
         const int total = left + m_sessionDone;
@@ -450,6 +456,22 @@ void AppController::setMuted(bool m)
     m_muted = m;
     m_settings->setValue(QStringLiteral("player/muted"), m_muted);
     emit volumeChanged();
+}
+
+bool AppController::importPaused() const
+{
+    return m_manager && m_manager->paused();
+}
+
+QString AppController::pauseReason() const
+{
+    return m_manager ? m_manager->pauseReason() : QString();
+}
+
+void AppController::resumeImport()
+{
+    if (m_manager)
+        m_manager->resumeNow();
 }
 
 void AppController::rescan()

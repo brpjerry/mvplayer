@@ -31,8 +31,18 @@ Item {
         x: 10
         anchors.verticalCenter: parent.verticalCenter
         size: 16
-        opacity: root.busy ? 1 : 0
+        opacity: root.busy && !App.importPaused ? 1 : 0
         visible: opacity > 0
+        Behavior on opacity { NumberAnimation { duration: Theme.normal } }
+    }
+    // Waiting out a block by YouTube
+    Icon {
+        x: 8
+        anchors.verticalCenter: parent.verticalCenter
+        path: Icons.pause
+        size: 20
+        color: Theme.warn
+        opacity: App.importPaused ? 1 : 0
         Behavior on opacity { NumberAnimation { duration: Theme.normal } }
     }
     Icon {
@@ -51,7 +61,7 @@ Item {
         x: 36
         anchors.verticalCenter: parent.verticalCenter
         text: root.label
-        color: Theme.textDim
+        color: App.importPaused ? Theme.warn : Theme.textDim
         font.pixelSize: 12
         font.features: { "tnum": 1 }
         opacity: root.busy ? 1 : 0

@@ -58,6 +58,29 @@ for mode in "" keyframes; do
     M=$("$BUILD/mvplayer-import" check-video "$WORK/mv.mkv" $mode);    echo "mv.mkv     ${mode:-full}: $M"; [[ "$M" == moving:* ]]
 done
 
+echo "== circuit breaker"
+# A yt-dlp that is bot-checked for its first three calls, then answers with
+# no results. The importer must pause (waits doubling), put the tracks back
+# untouched, and finish them once requests succeed again.
+mkdir -p "$WORK/lib/A" "$WORK/mvlib"
+for n in one two; do
+    ffmpeg -v error -y -f lavfi -i "sine=f=330:d=20" -metadata title="Song $n" -metadata artist=A "$WORK/lib/A/$n.flac"
+done
+cat > "$WORK/fake-ytdlp" <<FAKE
+#!/bin/sh
+n=\$(cat "$WORK/calls" 2>/dev/null || echo 0); n=\$((n+1)); echo \$n > "$WORK/calls"
+if [ \$n -le 3 ]; then echo "ERROR: [youtube] x: Sign in to confirm you’re not a bot" >&2; exit 1; fi
+echo '{"entries": []}'
+FAKE
+chmod +x "$WORK/fake-ytdlp"
+OUT=$(MVPLAYER_YTDLP="$WORK/fake-ytdlp" MVPLAYER_PAUSE_SECS=1 timeout 60 "$BUILD/mvplayer-import" \
+    --music-dir "$WORK/lib" --mv-dir "$WORK/mvlib" 2>&1)
+echo "$OUT" | grep -E "paused|resuming|^done:"
+[[ $(echo "$OUT" | grep -c "paused for 0:01") -eq 1 && $(echo "$OUT" | grep -c "paused for 0:02") -eq 1 ]]
+[[ "$OUT" == *"done: 0 videos; tracks: not_found=2"* ]]
+grep -q '"outcome":"postponed"' "$WORK/mvlib/.mvplayer/import-log.jsonl"
+grep -q '"event":"paused"' "$WORK/mvlib/.mvplayer/import-log.jsonl"
+
 echo "== binaries start"
 "$BUILD/mvplayer-import" --help >/dev/null
 QT_QPA_PLATFORM=offscreen "$BUILD/mvplayer" --help >/dev/null
