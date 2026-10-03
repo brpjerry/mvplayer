@@ -13,7 +13,7 @@ permissions:
 
 jobs:
   release:
-    runs-on: ubuntu-latest
+    runs-on: ubuntu-24.04
     container: archlinux:base-devel
     steps:
       - name: Install dependencies
@@ -21,7 +21,7 @@ jobs:
           pacman -Sy --noconfirm archlinux-keyring
           pacman -Syu --noconfirm git cmake ninja qt6-base qt6-declarative qt6-shadertools \
             mpv taglib chromaprint ffmpeg yt-dlp github-cli
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@v7
       - name: Build the pacman package
         run: ci/makepkg.sh "${GITHUB_REF_NAME#v}"
       - name: Build the repository database
@@ -42,7 +42,7 @@ jobs:
           gh release create "$GITHUB_REF_NAME" --generate-notes --title "MV Player $GITHUB_REF_NAME" \
             packaging/*.pkg.tar.zst packaging/mvplayer.db packaging/mvplayer.db.tar.gz \
             packaging/mvplayer.files packaging/mvplayer.files.tar.gz
-      - uses: actions/upload-artifact@v4
+      - uses: actions/upload-artifact@v7
         with:
           name: pacman-package
           path: |
