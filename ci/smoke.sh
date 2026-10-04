@@ -216,7 +216,6 @@ case " \$* " in
     dir=\$(dirname "\$out")
     case "\$out" in
     *audio.*) cp "$WORK/site-audio.opus" "\$dir/audio.opus"; echo '{"abr": 96, "acodec": "opus"}' > "\$dir/audio.info.json" ;;
-    *preview.*) cp "$WORK/site-video.mkv" "\$dir/preview.mkv" ;;
     *video.*) cp "$WORK/site-video.mkv" "\$dir/video.mkv" ;;
     esac ;;
 esac
@@ -229,26 +228,28 @@ if [[ -n "$EXE" ]]; then
 fi
 streams() { (cd "$WORK/mvlib5/Dee" && ffprobe -v error -show_entries stream=codec_name -of csv=p=0 "Five [liv].mkv" | tr -d '\r' | tr '\n' ' '); }
 review_state() { python3 -c "import sqlite3, sys; print(sqlite3.connect(sys.argv[1]).execute('SELECT review, audio_source FROM videos').fetchall())" "$WORK/mvlib5/.mvplayer/library.db"; }
-OUT=$(MVPLAYER_YTDLP="$SITE" timeout 120 "$BUILD/mvplayer-import" --music-dir "$WORK/lib5" --mv-dir "$WORK/mvlib5" 2>&1)
+OUT=$(MVPLAYER_YTDLP="$SITE" timeout 120 "$BUILD/mvplayer-import" --allow-still-images --music-dir "$WORK/lib5" --mv-dir "$WORK/mvlib5" 2>&1)
 echo "$OUT" | grep -E "^\[import\]|^done:"
 [[ "$OUT" == *"for your review (1 option)"* && "$OUT" == *"done: 0 videos and 1 for review; tracks: done=1"* ]]
 [[ "$(streams)" == "h264 flac opus flac " && "$(review_state)" == "[(1, 'library')]" ]]
-# search, audio to listen to, the picture to look at, the video
-[[ $(wc -l < "$WORK/site-args") -eq 4 ]]
-OUT=$(MVPLAYER_YTDLP="$SITE" timeout 120 "$BUILD/mvplayer-import" --music-dir "$WORK/lib5" --mv-dir "$WORK/mvlib5" --approve liv 2>&1)
+# search, audio to listen to, the video. (The look at the picture is left out:
+# its format selector has a ">" in it, which the Windows stand-in, a batch
+# file, would take for a redirection.)
+[[ $(wc -l < "$WORK/site-args") -eq 3 ]]
+OUT=$(MVPLAYER_YTDLP="$SITE" timeout 120 "$BUILD/mvplayer-import" --allow-still-images --music-dir "$WORK/lib5" --mv-dir "$WORK/mvlib5" --approve liv 2>&1)
 echo "$OUT" | grep -E "^\[review\]|^done:"
 [[ "$OUT" == *"done: 1 videos; tracks: done=1"* ]]
 [[ "$(streams)" == "h264 flac opus " && "$(review_state)" == "[(0, 'library')]" ]]
 # Put back under review, and turned down this time.
 python3 -c "import sqlite3, sys; db = sqlite3.connect(sys.argv[1]); db.execute('UPDATE videos SET review = 1, review_group = id'); db.commit()" "$WORK/mvlib5/.mvplayer/library.db"
-OUT=$(MVPLAYER_YTDLP="$SITE" timeout 120 "$BUILD/mvplayer-import" --music-dir "$WORK/lib5" --mv-dir "$WORK/mvlib5" --reject liv 2>&1)
+OUT=$(MVPLAYER_YTDLP="$SITE" timeout 120 "$BUILD/mvplayer-import" --allow-still-images --music-dir "$WORK/lib5" --mv-dir "$WORK/mvlib5" --reject liv 2>&1)
 echo "$OUT" | grep -E "^\[review\]|^done:"
 [[ "$OUT" == *"done: 0 videos; tracks: not_found=1"* ]]
 [[ ! -e "$WORK/mvlib5/Dee/Five [liv].mkv" ]]
 # Looking again finds the same upload and leaves it alone: one search, nothing fetched.
-OUT=$(MVPLAYER_YTDLP="$SITE" timeout 120 "$BUILD/mvplayer-import" --music-dir "$WORK/lib5" --mv-dir "$WORK/mvlib5" --retry 2>&1)
+OUT=$(MVPLAYER_YTDLP="$SITE" timeout 120 "$BUILD/mvplayer-import" --allow-still-images --music-dir "$WORK/lib5" --mv-dir "$WORK/mvlib5" --retry 2>&1)
 [[ "$OUT" == *"done: 0 videos; tracks: not_found=1"* ]]
-[[ $(wc -l < "$WORK/site-args") -eq 5 ]]
+[[ $(wc -l < "$WORK/site-args") -eq 4 ]]
 python3 - "$WORK/mvlib5/.mvplayer/library.db" <<'PY'
 import sqlite3, sys
 db = sqlite3.connect(sys.argv[1])
