@@ -1,13 +1,18 @@
 #include "core/Database.h"
 
+#include "core/Util.h"
+
 #include <QAtomicInt>
 #include <QCoreApplication>
 #include <QDateTime>
 #include <QDebug>
+#include <QDir>
 #include <QJsonDocument>
 #include <QSqlError>
 #include <QSqlQuery>
 #include <QVariant>
+
+#include <tuple>
 
 namespace {
 
@@ -117,9 +122,63 @@ bool run(QSqlQuery &q)
 
 } // namespace
 
-Database::Database(const QString &file)
+Database::Database(const QString &file, const QString &mvDir)
     : m_file(file)
+    , m_mvDir(QDir(mvDir).absolutePath())
 {
+}
+
+// Inside the MV folder: relative to it, with "/" on every platform.
+QString Database::storedPath(const QString &path) const
+{
+    const QString prefix = m_mvDir.endsWith(QLatin1Char('/')) ? m_mvDir : m_mvDir + QLatin1Char('/');
+    if (path.startsWith(prefix, pathCase))
+        return path.mid(prefix.size());
+    return path;
+}
+
+QString Database::resolvedPath(const QString &stored) const
+{
+    if (stored.isEmpty() || QDir::isAbsolutePath(stored))
+        return stored;
+    return QDir(m_mvDir).filePath(stored);
+}
+
+VideoInfo Database::resolved(VideoInfo v) const
+{
+    v.path = resolvedPath(v.path);
+    v.thumb = resolvedPath(v.thumb);
+    return v;
+}
+
+// Up to 0.1.2 videos were stored by their absolute path. The folder may have
+// been moved since, or come from another system, so a path that is not under
+// the MV folder is taken by its place in the layout: "<Album Artist>/<file>".
+void Database::makeVideoPathsRelative(QSqlDatabase &db)
+{
+    const auto relative = [this](const QString &old) {
+        const QString inside = storedPath(old);
+        if (inside != old || old.isEmpty() || !old.contains(QLatin1Char('/')))
+            return inside;
+        return old.section(QLatin1Char('/'), -2);
+    };
+
+    QVector<std::tuple<qint64, QString, QString>> rows;
+    QSqlQuery select(db);
+    if (select.exec(QStringLiteral("SELECT id, path, thumb FROM videos"))) {
+        while (select.next())
+            rows.append({select.value(0).toLongLong(), select.value(1).toString(), select.value(2).toString()});
+    }
+    db.transaction();
+    for (const auto &[id, path, thumb] : rows) {
+        QSqlQuery q(db);
+        q.prepare(QStringLiteral("UPDATE videos SET path = ?, thumb = ? WHERE id = ?"));
+        q.addBindValue(relative(path));
+        q.addBindValue(relative(thumb));
+        q.addBindValue(id);
+        run(q);
+    }
+    db.commit();
 }
 
 QSqlDatabase Database::conn()
@@ -203,6 +262,11 @@ bool Database::init(QString *error)
         QSqlQuery q(db);
         q.exec(QStringLiteral("UPDATE tracks SET state = 'pending' WHERE state = 'not_found' AND message LIKE '%ERROR:%'"));
         q.exec(QStringLiteral("PRAGMA user_version = 2"));
+    }
+    if (schema < 3) {
+        makeVideoPathsRelative(db);
+        QSqlQuery q(db);
+        q.exec(QStringLiteral("PRAGMA user_version = 3"));
     }
 
     // Added after 0.1.0: existing rows keep 0 and are audited once.
@@ -317,6 +381,15 @@ bool Database::upsertTrack(TrackInfo &t)
     return true;
 }
 
+bool Database::moveTrack(qint64 id, const QString &path)
+{
+    QSqlQuery q(conn());
+    q.prepare(QStringLiteral("UPDATE tracks SET path = ? WHERE id = ?"));
+    q.addBindValue(path);
+    q.addBindValue(id);
+    return run(q);
+}
+
 void Database::removeTrack(qint64 id)
 {
     QSqlQuery q(conn());
@@ -403,7 +476,7 @@ QVector<VideoInfo> Database::allVideos()
     q.prepare(QStringLiteral("SELECT %1 FROM videos ORDER BY id").arg(QLatin1String(kVideoCols)));
     if (run(q)) {
         while (q.next())
-            out << readVideo(q);
+            out << resolved(readVideo(q));
     }
     return out;
 }
@@ -414,7 +487,7 @@ std::optional<VideoInfo> Database::video(qint64 id)
     q.prepare(QStringLiteral("SELECT %1 FROM videos WHERE id = ?").arg(QLatin1String(kVideoCols)));
     q.addBindValue(id);
     if (run(q) && q.next())
-        return readVideo(q);
+        return resolved(readVideo(q));
     return std::nullopt;
 }
 
@@ -424,7 +497,7 @@ std::optional<VideoInfo> Database::videoByYtId(const QString &ytId)
     q.prepare(QStringLiteral("SELECT %1 FROM videos WHERE yt_id = ?").arg(QLatin1String(kVideoCols)));
     q.addBindValue(ytId);
     if (run(q) && q.next())
-        return readVideo(q);
+        return resolved(readVideo(q));
     return std::nullopt;
 }
 
@@ -437,8 +510,8 @@ qint64 Database::insertVideo(const VideoInfo &v)
         " yt_channel, tags_json, added_at, still_checked)"
         " VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,1)"));
     q.addBindValue(v.ytId);
-    q.addBindValue(v.path);
-    q.addBindValue(v.thumb);
+    q.addBindValue(storedPath(v.path));
+    q.addBindValue(storedPath(v.thumb));
     q.addBindValue(v.title);
     q.addBindValue(v.artist);
     q.addBindValue(v.albumArtist);
@@ -487,7 +560,7 @@ QVector<VideoInfo> Database::videosNotStillChecked()
     q.prepare(QStringLiteral("SELECT %1 FROM videos WHERE still_checked = 0 ORDER BY id").arg(QLatin1String(kVideoCols)));
     if (run(q)) {
         while (q.next())
-            out << readVideo(q);
+            out << resolved(readVideo(q));
     }
     return out;
 }

@@ -89,6 +89,39 @@ echo "$OUT" | grep -E "paused|resuming|^done:"
 grep -q '"outcome":"postponed"' "$WORK/mvlib/.mvplayer/import-log.jsonl"
 grep -q '"event":"paused"' "$WORK/mvlib/.mvplayer/import-log.jsonl"
 
+echo "== moved library"
+# A library written by 0.1.2 (absolute video paths) whose MV folder and music
+# folder are both somewhere else now: the video must still be found and its
+# track must keep it, with no new lookup.
+mkdir -p "$WORK/mvlib/A"
+cp "$WORK/out.mkv" "$WORK/mvlib/A/Song one [abc].mkv"
+python3 - "$WORK/mvlib/.mvplayer/library.db" <<'PY'
+import sqlite3, sys
+db = sqlite3.connect(sys.argv[1])
+db.execute("INSERT INTO videos (yt_id, path, thumb, title, added_at, still_checked) "
+           "VALUES ('abc', '/old/place/MVs/A/Song one [abc].mkv', '/old/place/MVs/A/Song one [abc].jpg', 'Song one', 1, 1)")
+db.execute("UPDATE tracks SET state = 'done', video_id = (SELECT id FROM videos) WHERE title = 'Song one'")
+db.execute("PRAGMA user_version = 2")
+db.commit()
+PY
+mv "$WORK/mvlib" "$WORK/mvlib2"
+mv "$WORK/lib" "$WORK/lib2"
+rm -f "$WORK/calls"
+OUT=$(MVPLAYER_YTDLP="$FAKE" MVPLAYER_PAUSE_SECS=1 timeout 60 "$BUILD/mvplayer-import" \
+    --music-dir "$WORK/lib2" --mv-dir "$WORK/mvlib2" 2>&1)
+echo "$OUT" | grep -E "^\[scan\]|^done:"
+[[ "$OUT" == *"2 tracks: 0 new, 2 changed, 0 removed"* && "$OUT" == *"done: 1 videos;"* ]]
+[[ ! -e "$WORK/calls" ]]
+python3 - "$WORK/mvlib2/.mvplayer/library.db" <<'PY'
+import sqlite3, sys
+db = sqlite3.connect(sys.argv[1])
+assert db.execute("SELECT path, thumb FROM videos").fetchall() == [("A/Song one [abc].mkv", "A/Song one [abc].jpg")]
+states = dict(db.execute("SELECT title, state FROM tracks"))
+assert states == {"Song one": "done", "Song two": "not_found"}, states
+assert db.execute("SELECT COUNT(*) FROM tracks WHERE video_id IS NOT NULL AND path LIKE '%/lib2/A/one.flac'").fetchone()[0] == 1
+print("moved library ok")
+PY
+
 echo "== binaries start"
 "$BUILD/mvplayer-import" --help >/dev/null
 QT_QPA_PLATFORM=offscreen "$BUILD/mvplayer$EXE" --help >/dev/null
