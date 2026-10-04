@@ -12,6 +12,8 @@ ApplicationWindow {
     minimumHeight: 600
     visible: true
     color: Theme.bg
+    // Windows: no system title bar; the top bar carries the window controls.
+    flags: WindowFrame.custom ? Qt.Window | Qt.FramelessWindowHint : Qt.Window
     title: player.current ? player.current.title + " · " + player.current.artist.replace(/; /g, ", ") + " — MV Player"
                           : "MV Player"
 
@@ -182,102 +184,109 @@ ApplicationWindow {
     }
 
     // ---- Layout ------------------------------------------------------------
-    Sidebar {
-        id: sidebar
-        width: 248
-        anchors.top: parent.top
-        anchors.bottom: controlBar.top
-        onNavigated: if (window.view === "player") window.showGrid()
-        onSettingsRequested: settings.open()
-    }
-
     Item {
-        id: mainArea
-        anchors.left: sidebar.right
-        anchors.right: parent.right
-        anchors.top: parent.top
-        anchors.bottom: controlBar.top
+        id: frame
+        anchors.fill: parent
+        // A maximised window without its system frame overlaps the screen edges.
+        anchors.margins: window.visibility === Window.Maximized ? WindowFrame.maximizedInset : 0
 
-        TopBar {
-            id: topBar
-            width: parent.width
-            playerView: window.view === "player"
-            current: player.current
-            onBackRequested: window.showGrid()
-            onSearchTextChanged: {
-                App.videos.searchText = searchText
-                if (searchText.length > 0 && window.view === "player")
-                    window.showGrid()
-            }
+        Sidebar {
+            id: sidebar
+            width: 248
+            anchors.top: parent.top
+            anchors.bottom: controlBar.top
+            onNavigated: if (window.view === "player") window.showGrid()
+            onSettingsRequested: settings.open()
         }
 
         Item {
-            id: pane
-            anchors.top: topBar.bottom
-            anchors.bottom: parent.bottom
-            width: parent.width
+            id: mainArea
+            anchors.left: sidebar.right
+            anchors.right: parent.right
+            anchors.top: parent.top
+            anchors.bottom: controlBar.top
 
-            VideoGrid {
-                id: grid
-                anchors.fill: parent
-                // Recedes as the player grows over it.
-                opacity: 1 - playerView.cover
-                scale: 1 - 0.03 * playerView.cover
-                visible: opacity > 0 && App.configured
-                searchText: topBar.searchText
-                currentVideoId: player.current ? player.current.videoId : -1
-                currentPlaying: window.playingNow
-                onActivated: (row) => player.playRow(row)
+            TopBar {
+                id: topBar
+                width: parent.width
+                playerView: window.view === "player"
+                current: player.current
+                onBackRequested: window.showGrid()
+                onSearchTextChanged: {
+                    App.videos.searchText = searchText
+                    if (searchText.length > 0 && window.view === "player")
+                        window.showGrid()
+                }
             }
 
-            Welcome {
-                anchors.fill: parent
-                visible: !App.configured
+            Item {
+                id: pane
+                anchors.top: topBar.bottom
+                anchors.bottom: parent.bottom
+                width: parent.width
+
+                VideoGrid {
+                    id: grid
+                    anchors.fill: parent
+                    // Recedes as the player grows over it.
+                    opacity: 1 - playerView.cover
+                    scale: 1 - 0.03 * playerView.cover
+                    visible: opacity > 0 && App.configured
+                    searchText: topBar.searchText
+                    currentVideoId: player.current ? player.current.videoId : -1
+                    currentPlaying: window.playingNow
+                    onActivated: (row) => player.playRow(row)
+                }
+
+                Welcome {
+                    anchors.fill: parent
+                    visible: !App.configured
+                }
             }
         }
-    }
 
-    PlayerView {
-        id: playerView
-        x: window.fullscreen ? 0 : sidebar.width
-        y: window.fullscreen ? 0 : topBar.height
-        width: window.fullscreen ? window.width : mainArea.width
-        height: window.fullscreen ? window.height : pane.height
-        current: player.current
-        fullscreen: window.fullscreen
-        // The grid occupies the same rectangle, so its coordinates carry over.
-        anchorRect: grid.currentThumbRect
-        anchorAvailable: grid.currentThumbAvailable && grid.visible
-        onExpandRequested: window.showPlayer()
-        onCloseRequested: player.stop()
-        onTogglePauseRequested: window.togglePause()
-        onToggleFullscreenRequested: window.setFullscreen(!window.fullscreen)
-    }
+        PlayerView {
+            id: playerView
+            x: window.fullscreen ? 0 : sidebar.width
+            y: window.fullscreen ? 0 : topBar.height
+            width: window.fullscreen ? window.width : mainArea.width
+            height: window.fullscreen ? window.height : pane.height
+            current: player.current
+            fullscreen: window.fullscreen
+            // The grid occupies the same rectangle, so its coordinates carry over.
+            anchorRect: grid.currentThumbRect
+            anchorAvailable: grid.currentThumbAvailable && grid.visible
+            onExpandRequested: window.showPlayer()
+            onCloseRequested: player.stop()
+            onTogglePauseRequested: window.togglePause()
+            onToggleFullscreenRequested: window.setFullscreen(!window.fullscreen)
+        }
 
-    ControlBar {
-        id: controlBar
-        width: parent.width
-        readonly property bool revealed: !window.fullscreen || playerView.pointerActive || hovered || window.mpv.paused
-        y: parent.height - height + (revealed ? 0 : height)
-        opacity: revealed ? 1 : 0
-        Behavior on y { enabled: window.fullscreen; NumberAnimation { duration: Theme.normal; easing.type: Easing.OutCubic } }
-        Behavior on opacity { enabled: window.fullscreen; NumberAnimation { duration: Theme.fast } }
+        ControlBar {
+            id: controlBar
+            width: parent.width
+            readonly property bool revealed: !window.fullscreen || playerView.pointerActive || hovered || window.mpv.paused
+            y: parent.height - height + (revealed ? 0 : height)
+            opacity: revealed ? 1 : 0
+            Behavior on y { enabled: window.fullscreen; NumberAnimation { duration: Theme.normal; easing.type: Easing.OutCubic } }
+            Behavior on opacity { enabled: window.fullscreen; NumberAnimation { duration: Theme.fast } }
 
-        mpv: window.mpv
-        current: player.current
-        playing: window.playingNow
-        overlay: window.fullscreen
-        fullscreen: window.fullscreen
-        shuffle: player.shuffle
-        repeatMode: player.repeatMode
-        canStep: player.queue.length > 1
-        onPlayPauseRequested: window.togglePause()
-        onNextRequested: player.next(false)
-        onPreviousRequested: player.previous()
-        onShuffleToggled: player.shuffle = !player.shuffle
-        onRepeatCycled: player.repeatMode = (player.repeatMode + 1) % 3
-        onFullscreenToggled: window.setFullscreen(!window.fullscreen)
-        onNowPlayingClicked: window.view === "player" ? window.showGrid() : window.showPlayer()
+            mpv: window.mpv
+            current: player.current
+            playing: window.playingNow
+            overlay: window.fullscreen
+            fullscreen: window.fullscreen
+            shuffle: player.shuffle
+            repeatMode: player.repeatMode
+            canStep: player.queue.length > 1
+            onPlayPauseRequested: window.togglePause()
+            onNextRequested: player.next(false)
+            onPreviousRequested: player.previous()
+            onShuffleToggled: player.shuffle = !player.shuffle
+            onRepeatCycled: player.repeatMode = (player.repeatMode + 1) % 3
+            onFullscreenToggled: window.setFullscreen(!window.fullscreen)
+            onNowPlayingClicked: window.view === "player" ? window.showGrid() : window.showPlayer()
+        }
     }
 
     SettingsPanel { id: settings }

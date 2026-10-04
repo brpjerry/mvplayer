@@ -195,6 +195,12 @@ Platform-specific code is confined to:
   Qt's own as the fallback.
 - `src/ui/MpvItem.cpp`: the native-display hand-off to mpv.
 - `src/ui/YtDlpUpdater.cpp`: the yt-dlp download, offered only on Windows.
+- `src/ui/WindowFrame.cpp`: on Windows the system title bar is removed and the
+  top bar carries the window controls; Linux keeps the window manager's
+  decorations.
+- `src/ui/PointerPacer.cpp`: on Windows, presents every frame while the mouse
+  moves over the window, so the pointer stays smooth with G-Sync in windowed
+  mode.
 
 On Windows a video cannot be replaced or deleted while it is playing, and
 very long artist or title names can run into the 260-character path limit.

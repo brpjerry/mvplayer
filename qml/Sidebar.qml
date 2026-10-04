@@ -73,6 +73,8 @@ Rectangle {
         width: parent.width
         height: 64
 
+        WindowDrag { anchors.fill: parent }
+
         Rectangle {
             id: logo
             x: 20

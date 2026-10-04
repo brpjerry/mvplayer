@@ -31,6 +31,8 @@ Item {
         return n + noun
     }
 
+    WindowDrag { anchors.fill: parent }
+
     // Back button, only in the player view
     IconButton {
         id: back
@@ -159,7 +161,7 @@ Item {
     Row {
         id: tools
         anchors.right: parent.right
-        anchors.rightMargin: 24
+        anchors.rightMargin: windowControls.visible ? 14 : 24
         anchors.verticalCenter: parent.verticalCenter
         spacing: 8
 
@@ -262,6 +264,11 @@ Item {
 
         SearchBox {
             id: searchField
+            anchors.verticalCenter: parent.verticalCenter
+        }
+
+        WindowControls {
+            id: windowControls
             anchors.verticalCenter: parent.verticalCenter
         }
     }

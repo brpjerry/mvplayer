@@ -3,6 +3,8 @@
 #include "ui/IdleInhibitor.h"
 #include "ui/IpcServer.h"
 #include "ui/MpvItem.h"
+#include "ui/PointerPacer.h"
+#include "ui/WindowFrame.h"
 #include "ui/YtDlpUpdater.h"
 
 #include "core/Util.h"
@@ -76,6 +78,8 @@ int main(int argc, char **argv)
     frameStats.setVisible(parser.isSet(QStringLiteral("fps")));
     IdleInhibitor idleInhibitor;
     YtDlpUpdater ytDlpUpdater;
+    WindowFrame windowFrame;
+    PointerPacer pointerPacer;
 
     const char *uri = "MvPlayer.Core";
     qmlRegisterType<MpvItem>(uri, 1, 0, "MpvItem");
@@ -83,6 +87,7 @@ int main(int argc, char **argv)
     qmlRegisterSingletonInstance(uri, 1, 0, "FrameStats", &frameStats);
     qmlRegisterSingletonInstance(uri, 1, 0, "IdleInhibitor", &idleInhibitor);
     qmlRegisterSingletonInstance(uri, 1, 0, "YtDlpUpdater", &ytDlpUpdater);
+    qmlRegisterSingletonInstance(uri, 1, 0, "WindowFrame", &windowFrame);
     qmlRegisterAnonymousType<VideoFilterModel>(uri, 1);
     qmlRegisterAnonymousType<JobModel>(uri, 1);
 
@@ -96,8 +101,11 @@ int main(int argc, char **argv)
             return 1;
 
         QObject *root = engine.rootObjects().constFirst();
-        if (auto *window = qobject_cast<QQuickWindow *>(root))
+        if (auto *window = qobject_cast<QQuickWindow *>(root)) {
             frameStats.attach(window);
+            windowFrame.attach(window);
+            pointerPacer.attach(window);
+        }
 
         std::unique_ptr<IpcServer> ipc;
         if (parser.isSet(QStringLiteral("ipc"))) {

@@ -79,6 +79,8 @@ qt_add_executable(mvplayer
     src/ui/IdleInhibitor.h src/ui/IdleInhibitor.cpp
     src/ui/IpcServer.h src/ui/IpcServer.cpp
     src/ui/YtDlpUpdater.h src/ui/YtDlpUpdater.cpp
+    src/ui/WindowFrame.h src/ui/WindowFrame.cpp
+    src/ui/PointerPacer.h src/ui/PointerPacer.cpp
     ${MV_WINDOWS_RC}
 )
 # No console window on Windows.
@@ -111,6 +113,8 @@ set(MV_QML_FILES
     qml/FlatSwitch.qml
     qml/Tooltip.qml
     qml/KineticWheel.qml
+    qml/WindowControls.qml
+    qml/WindowDrag.qml
 )
 foreach(f ${MV_QML_FILES})
     get_filename_component(fname ${f} NAME)
@@ -135,6 +139,9 @@ target_link_libraries(mvplayer PRIVATE
     Qt6::Gui Qt6::Qml Qt6::Quick Qt6::QuickControls2 Qt6::Network Qt6::OpenGL
     PkgConfig::MPV
 )
+if(WIN32)
+    target_link_libraries(mvplayer PRIVATE dwmapi)
+endif()
 if(Qt6DBus_FOUND)
     target_link_libraries(mvplayer PRIVATE Qt6::DBus)
     target_compile_definitions(mvplayer PRIVATE MV_HAVE_DBUS)
