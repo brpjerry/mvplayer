@@ -254,7 +254,7 @@ MpvItem::MpvItem(QQuickItem *parent)
     const QString cacheDir = QStandardPaths::writableLocation(QStandardPaths::CacheLocation);
     if (!cacheDir.isEmpty() && QDir().mkpath(cacheDir)) {
         setOption(mpv, "gpu-shader-cache", "yes");
-        setOption(mpv, "gpu-shader-cache-dir", QFile::encodeName(cacheDir + QStringLiteral("/shaders")).constData());
+        setOption(mpv, "gpu-shader-cache-dir", (cacheDir + QStringLiteral("/shaders")).toUtf8().constData());
     }
     // Extra options for experiments: MVPLAYER_MPV_OPTS="name=value,name=value"
     for (const QByteArray &kv : qgetenv("MVPLAYER_MPV_OPTS").split(',')) {

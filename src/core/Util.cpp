@@ -1,11 +1,16 @@
 #include "core/Util.h"
 
 #include <QCoreApplication>
+#include <QDir>
 #include <QElapsedTimer>
+#include <QFile>
 #include <QProcess>
 #include <QSocketNotifier>
+#include <QStandardPaths>
 
 #include <csignal>
+#include <cstdio>
+#include <cstdlib>
 
 #ifdef Q_OS_UNIX
 #include <fcntl.h>
@@ -15,6 +20,92 @@
 #ifdef Q_OS_LINUX
 #include <sys/prctl.h>
 #endif
+#ifdef Q_OS_WIN
+#include <qt_windows.h>
+#include <io.h>
+#include <tlhelp32.h>
+#endif
+
+#ifdef Q_OS_WIN
+namespace {
+
+// A job object holds a child and everything it starts (yt-dlp runs ffmpeg and
+// a JS runtime), so they can be stopped together. The system also ends them
+// when the handle closes, which covers this process dying without cleaning up.
+struct ProcessJob {
+    ProcessJob()
+    {
+        handle = ::CreateJobObjectW(nullptr, nullptr);
+        if (!handle)
+            return;
+        JOBOBJECT_EXTENDED_LIMIT_INFORMATION info = {};
+        info.BasicLimitInformation.LimitFlags = JOB_OBJECT_LIMIT_KILL_ON_JOB_CLOSE;
+        ::SetInformationJobObject(handle, JobObjectExtendedLimitInformation, &info, sizeof(info));
+    }
+    ~ProcessJob()
+    {
+        if (handle)
+            ::CloseHandle(handle);
+    }
+    void add(DWORD pid)
+    {
+        if (HANDLE process = ::OpenProcess(PROCESS_SET_QUOTA | PROCESS_TERMINATE, FALSE, pid)) {
+            if (handle)
+                ::AssignProcessToJobObject(handle, process);
+            ::CloseHandle(process);
+        }
+    }
+    void terminate()
+    {
+        if (handle)
+            ::TerminateJobObject(handle, 1);
+    }
+    HANDLE handle = nullptr;
+};
+
+// The child is created suspended so that it joins its job before it can start
+// anything; this lets it run.
+void resumeProcess(DWORD pid)
+{
+    const HANDLE snapshot = ::CreateToolhelp32Snapshot(TH32CS_SNAPTHREAD, 0);
+    if (snapshot == INVALID_HANDLE_VALUE)
+        return;
+    THREADENTRY32 entry = {};
+    entry.dwSize = sizeof(entry);
+    for (BOOL more = ::Thread32First(snapshot, &entry); more; more = ::Thread32Next(snapshot, &entry)) {
+        if (entry.th32OwnerProcessID != pid)
+            continue;
+        if (HANDLE thread = ::OpenThread(THREAD_SUSPEND_RESUME, FALSE, entry.th32ThreadID)) {
+            ::ResumeThread(thread);
+            ::CloseHandle(thread);
+        }
+    }
+    ::CloseHandle(snapshot);
+}
+
+} // namespace
+#endif
+
+QString toolsDir()
+{
+#ifdef Q_OS_WIN
+    return QStandardPaths::writableLocation(QStandardPaths::GenericDataLocation) + QStringLiteral("/mvplayer/tools");
+#else
+    return {};
+#endif
+}
+
+QString toolPath(const QString &name)
+{
+#ifdef Q_OS_WIN
+    for (const QString &dir : {toolsDir(), QCoreApplication::applicationDirPath()}) {
+        const QString file = dir + QLatin1Char('/') + name + QStringLiteral(".exe");
+        if (QFile::exists(file))
+            return QDir::toNativeSeparators(file);
+    }
+#endif
+    return name;
+}
 
 QString ProcResult::errorText() const
 {
@@ -54,9 +145,17 @@ ProcResult runProcess(const QString &program, const QStringList &args, const Pro
 #endif
     });
 #endif
+#ifdef Q_OS_WIN
+    ProcessJob job;
+    p.setCreateProcessArgumentsModifier([](QProcess::CreateProcessArguments *a) { a->flags |= CREATE_SUSPENDED; });
+#endif
     p.start(QIODevice::ReadOnly);
     if (!p.waitForStarted(10000))
         return res;
+#ifdef Q_OS_WIN
+    job.add(DWORD(p.processId()));
+    resumeProcess(DWORD(p.processId()));
+#endif
     res.started = true;
 
     QElapsedTimer timer;
@@ -105,6 +204,10 @@ ProcResult runProcess(const QString &program, const QStringList &args, const Pro
                 ::kill(-group, SIGKILL);
             p.waitForFinished(2000);
         }
+#elif defined(Q_OS_WIN)
+        // Console programs have no window to ask politely; end the whole job.
+        job.terminate();
+        p.waitForFinished(2000);
 #else
         p.terminate();
         if (!p.waitForFinished(2000)) {
@@ -139,6 +242,17 @@ QString sanitizeFileName(const QString &name, int maxLen)
         out.remove(0, 1);
     if (out.size() > maxLen)
         out = out.left(maxLen).trimmed();
+    // Windows reserves these names, with or without an extension.
+    static const QStringList devices = {
+        QStringLiteral("con"), QStringLiteral("prn"), QStringLiteral("aux"), QStringLiteral("nul"),
+        QStringLiteral("com1"), QStringLiteral("com2"), QStringLiteral("com3"), QStringLiteral("com4"),
+        QStringLiteral("com5"), QStringLiteral("com6"), QStringLiteral("com7"), QStringLiteral("com8"),
+        QStringLiteral("com9"), QStringLiteral("lpt1"), QStringLiteral("lpt2"), QStringLiteral("lpt3"),
+        QStringLiteral("lpt4"), QStringLiteral("lpt5"), QStringLiteral("lpt6"), QStringLiteral("lpt7"),
+        QStringLiteral("lpt8"), QStringLiteral("lpt9"),
+    };
+    if (devices.contains(out.section(QLatin1Char('.'), 0, 0).trimmed().toLower()))
+        out.prepend(QLatin1Char('_'));
     if (out.isEmpty())
         out = QStringLiteral("Unknown");
     return out;
@@ -171,6 +285,24 @@ void onTerminationSignal(int)
 } // namespace
 #endif
 
+#ifdef Q_OS_WIN
+namespace {
+std::function<void()> g_quit;
+
+// Runs on a thread of its own. For anything but Ctrl+C the system ends the
+// process as soon as this returns, so give the main thread time to clean up.
+BOOL WINAPI onConsoleEvent(DWORD type)
+{
+    QMetaObject::invokeMethod(QCoreApplication::instance(), [] { g_quit(); }, Qt::QueuedConnection);
+    if (type != CTRL_C_EVENT && type != CTRL_BREAK_EVENT)
+        ::Sleep(4000);
+    return TRUE;
+}
+
+UINT g_consoleCodePage = 0;
+} // namespace
+#endif
+
 void quitOnTerminationSignals(std::function<void()> quit)
 {
 #ifdef Q_OS_UNIX
@@ -186,7 +318,35 @@ void quitOnTerminationSignals(std::function<void()> quit)
     std::signal(SIGINT, onTerminationSignal);
     std::signal(SIGTERM, onTerminationSignal);
     std::signal(SIGHUP, onTerminationSignal);
+#elif defined(Q_OS_WIN)
+    g_quit = std::move(quit);
+    ::SetConsoleCtrlHandler(onConsoleEvent, TRUE);
 #else
     Q_UNUSED(quit);
+#endif
+}
+
+void initConsole()
+{
+#ifdef Q_OS_WIN
+    // Output that is already going to a file or pipe stays as it is.
+    if (::AttachConsole(ATTACH_PARENT_PROCESS)) {
+        if (_fileno(stdout) < 0)
+            std::freopen("CONOUT$", "w", stdout);
+        if (_fileno(stderr) < 0)
+            std::freopen("CONOUT$", "w", stderr);
+    }
+    g_consoleCodePage = ::GetConsoleOutputCP();
+    if (g_consoleCodePage != 0 && g_consoleCodePage != CP_UTF8 && ::SetConsoleOutputCP(CP_UTF8))
+        std::atexit([] { ::SetConsoleOutputCP(g_consoleCodePage); });
+#endif
+}
+
+QByteArray consoleText(const QString &s)
+{
+#ifdef Q_OS_WIN
+    return s.toUtf8();
+#else
+    return s.toLocal8Bit();
 #endif
 }

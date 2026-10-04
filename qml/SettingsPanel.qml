@@ -515,6 +515,46 @@ Popup {
                     onClicked: App.retryUnmatched()
                 }
             }
+
+            // Windows only: elsewhere yt-dlp is updated with the system.
+            Item {
+                visible: YtDlpUpdater.supported
+                width: parent.width
+                height: 70
+
+                Column {
+                    anchors.left: parent.left
+                    anchors.right: ytdlpButton.left
+                    anchors.rightMargin: 20
+                    anchors.bottom: parent.bottom
+                    anchors.bottomMargin: 6
+                    spacing: 3
+                    Text {
+                        text: YtDlpUpdater.version.length > 0 ? "yt-dlp " + YtDlpUpdater.version : "yt-dlp is not installed"
+                        color: Theme.text
+                        font.pixelSize: 14
+                    }
+                    Text {
+                        width: parent.width
+                        text: YtDlpUpdater.status.length > 0 ? YtDlpUpdater.status
+                              : "Finds and downloads the videos. Update it when imports start failing."
+                        color: Theme.textDim
+                        font.pixelSize: 12
+                        wrapMode: Text.WordWrap
+                    }
+                }
+                FlatButton {
+                    id: ytdlpButton
+                    anchors.right: parent.right
+                    anchors.bottom: parent.bottom
+                    anchors.bottomMargin: 10
+                    text: YtDlpUpdater.version.length > 0 ? "Update yt-dlp" : "Download yt-dlp"
+                    primary: YtDlpUpdater.version.length === 0 && !YtDlpUpdater.busy
+                    // The running copy cannot be replaced.
+                    enabled: !YtDlpUpdater.busy && !App.busy
+                    onClicked: YtDlpUpdater.update()
+                }
+            }
         }
     }
 }

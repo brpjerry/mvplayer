@@ -30,11 +30,12 @@ static void logToStderr(QtMsgType type, const QMessageLogContext &, const QStrin
 {
     const char *tag = type == QtWarningMsg ? "warning: "
                     : type == QtCriticalMsg || type == QtFatalMsg ? "error: " : "";
-    std::fprintf(stderr, "%s%s\n", tag, msg.toLocal8Bit().constData());
+    std::fprintf(stderr, "%s%s\n", tag, consoleText(msg).constData());
 }
 
 int main(int argc, char **argv)
 {
+    initConsole();
     qInstallMessageHandler(logToStderr);
     QCoreApplication app(argc, argv);
     QCoreApplication::setApplicationName(QStringLiteral("mvplayer-import"));

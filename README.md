@@ -6,7 +6,21 @@ ear that it really is that recording, downloads it at the best quality on
 offer, and muxes in your own audio where it is better than YouTube's.
 
 The audio library (one or more folders) is only ever read. Videos go to a
-single separate folder (`~/Videos/MVs` by default).
+single separate folder (`~/Videos/MVs` by default; `Videos\MVs` in your user
+folder on Windows).
+
+## Install (Windows)
+
+Download `mvplayer-<version>-setup.exe` from the
+[latest release](https://github.com/brpjerry/mvplayer/releases/latest) and run
+it. It installs for the current user only, so it needs no administrator
+rights. The installer is not code-signed; Windows SmartScreen will ask before
+running it.
+
+ffmpeg is included. yt-dlp, and the Deno runtime it uses for some YouTube
+formats, are downloaded during setup from their own release pages into
+`%LOCALAPPDATA%\mvplayer\tools`. YouTube changes often, so when imports start
+failing use **Settings → Update yt-dlp** to fetch the latest version.
 
 ## Install (Arch Linux)
 
@@ -38,6 +52,23 @@ cmake --build build
 
 `sudo cmake --install build` also installs the desktop entry and icon.
 `-DMV_BUILD_GUI=OFF` builds only the headless importer.
+
+### Windows
+
+The Windows build uses [MSYS2](https://www.msys2.org)'s UCRT64 environment,
+which packages the same libraries as Arch. In a UCRT64 shell:
+
+```sh
+pacman -S --needed mingw-w64-ucrt-x86_64-{gcc,cmake,ninja,pkgconf,qt6-base,qt6-declarative,qt6-shadertools,mpv,taglib,chromaprint,ffmpeg,ntldd,python}
+cmake -S . -B build -G Ninja
+cmake --build build
+./build/mvplayer
+```
+
+`ci/winpkg.sh` builds the installer (it needs
+[Inno Setup](https://jrsoftware.org/isinfo.php) 6.5 or later): it gathers the
+programs and every library they load into `packaging/windows/stage` and
+compiles `packaging/windows/mvplayer.iss`.
 
 ## How importing works
 
@@ -139,24 +170,39 @@ the saved folders for one run, `--mute` silences a run, `--fps` shows the frame 
 `--ipc <socket>` opens a line-based control socket for UI automation (see
 `ipc()` in `qml/Main.qml`).
 
-Scroll feel is set in `~/.config/mvplayer/mvplayer.conf` under `[ui]`:
+Scroll feel is set in `~/.config/mvplayer/mvplayer.conf`
+(`%APPDATA%\mvplayer\mvplayer.ini` on Windows) under `[ui]`:
 `touchpadGain` (default 4: touchpad distance is multiplied by this, as browsers
 do), `flickDeceleration` (default 4800 px/s²: higher means less glide after a
 flick) and `wheelStep` (pixels per mouse-wheel notch, default 170).
 
 Environment: `MVPLAYER_HWDEC` (mpv `hwdec` value, default `auto-safe`),
-`MVPLAYER_MPV_OPTS` (`name=value,name=value` extra mpv options).
+`MVPLAYER_MPV_OPTS` (`name=value,name=value` extra mpv options),
+`MVPLAYER_YTDLP` (the yt-dlp program to run instead of the default one).
 
 ## Porting notes
 
-Qt Quick, libmpv, TagLib, Chromaprint, yt-dlp and ffmpeg all run on Windows
-and macOS. Platform-specific code is confined to `src/ui/IdleInhibitor.cpp`
-(D-Bus screen-saver inhibit), `src/ui/SystemTheme.cpp` (the desktop portal's
-dark/light preference) and the native-display hand-off in `src/ui/MpvItem.cpp`.
+The application runs on Linux and Windows; Qt Quick, libmpv, TagLib,
+Chromaprint, yt-dlp and ffmpeg are also available on macOS.
+Platform-specific code is confined to:
+
+- `src/core/Util.cpp`: stopping a helper program together with everything it
+  started (process groups on Linux, job objects on Windows), reacting to
+  Ctrl+C and logout, console output, and where the helper programs are found.
+- `src/ui/IdleInhibitor.cpp`: keeping the screen awake (D-Bus on Linux,
+  `SetThreadExecutionState` on Windows).
+- `src/ui/SystemTheme.cpp`: the desktop portal's dark/light preference, with
+  Qt's own as the fallback.
+- `src/ui/MpvItem.cpp`: the native-display hand-off to mpv.
+- `src/ui/YtDlpUpdater.cpp`: the yt-dlp download, offered only on Windows.
+
+On Windows a video cannot be replaced or deleted while it is playing, and
+very long artist or title names can run into the 260-character path limit.
 
 ## Development
 
-CI (`.github/workflows/ci.yml`) builds on Arch, runs `ci/smoke.sh` — an
-end-to-end check of the audio alignment and muxing on synthetic files — and
-builds the pacman package. Pushing a `vX.Y.Z` tag publishes that package as a
-GitHub release (`.github/workflows/release.yml`).
+CI (`.github/workflows/ci.yml`) builds on Arch and on Windows, runs
+`ci/smoke.sh` — an end-to-end check of the audio alignment and muxing on
+synthetic files — and builds the pacman package and the Windows installer.
+Pushing a `vX.Y.Z` tag publishes both as a GitHub release
+(`.github/workflows/release.yml`).

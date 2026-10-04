@@ -3,6 +3,7 @@
 #include "ui/IdleInhibitor.h"
 #include "ui/IpcServer.h"
 #include "ui/MpvItem.h"
+#include "ui/YtDlpUpdater.h"
 
 #include "core/Util.h"
 
@@ -19,11 +20,12 @@ static void logToStderr(QtMsgType type, const QMessageLogContext &, const QStrin
 {
     const char *tag = type == QtWarningMsg ? "warning: "
                     : type == QtCriticalMsg || type == QtFatalMsg ? "error: " : "";
-    std::fprintf(stderr, "%s%s\n", tag, msg.toLocal8Bit().constData());
+    std::fprintf(stderr, "%s%s\n", tag, consoleText(msg).constData());
 }
 
 int main(int argc, char **argv)
 {
+    initConsole();
     qInstallMessageHandler(logToStderr);
 
     // libmpv renders through OpenGL, so the scene graph has to as well.
@@ -49,9 +51,11 @@ int main(int argc, char **argv)
     });
     parser.process(app);
 
-    // Prefer a clean UI face when one is installed; CJK falls back via fontconfig.
+    // Prefer a clean UI face when one is installed; CJK falls back via the
+    // platform's font matching.
     const QStringList families = QFontDatabase::families();
-    for (const QString &family : {QStringLiteral("Inter"), QStringLiteral("Inter Variable"), QStringLiteral("Adwaita Sans")}) {
+    for (const QString &family : {QStringLiteral("Inter"), QStringLiteral("Inter Variable"), QStringLiteral("Adwaita Sans"),
+                                  QStringLiteral("Segoe UI Variable Text")}) {
         if (families.contains(family)) {
             QFont font(family);
             font.setPixelSize(14);
@@ -71,12 +75,14 @@ int main(int argc, char **argv)
     FrameStats frameStats;
     frameStats.setVisible(parser.isSet(QStringLiteral("fps")));
     IdleInhibitor idleInhibitor;
+    YtDlpUpdater ytDlpUpdater;
 
     const char *uri = "MvPlayer.Core";
     qmlRegisterType<MpvItem>(uri, 1, 0, "MpvItem");
     qmlRegisterSingletonInstance(uri, 1, 0, "App", &controller);
     qmlRegisterSingletonInstance(uri, 1, 0, "FrameStats", &frameStats);
     qmlRegisterSingletonInstance(uri, 1, 0, "IdleInhibitor", &idleInhibitor);
+    qmlRegisterSingletonInstance(uri, 1, 0, "YtDlpUpdater", &ytDlpUpdater);
     qmlRegisterAnonymousType<VideoFilterModel>(uri, 1);
     qmlRegisterAnonymousType<JobModel>(uri, 1);
 

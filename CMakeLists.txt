@@ -34,8 +34,15 @@ qt_add_library(mvcore STATIC
 target_include_directories(mvcore PUBLIC src)
 target_link_libraries(mvcore PUBLIC Qt6::Core Qt6::Sql PkgConfig::TAGLIB PkgConfig::CHROMAPRINT)
 
+# Windows: the icon and version details shown by Explorer.
+if(WIN32)
+    enable_language(RC)
+    configure_file(packaging/windows/mvplayer.rc.in ${CMAKE_CURRENT_BINARY_DIR}/mvplayer.rc @ONLY)
+    set(MV_WINDOWS_RC ${CMAKE_CURRENT_BINARY_DIR}/mvplayer.rc)
+endif()
+
 # Headless importer: same pipeline, no display needed.
-qt_add_executable(mvplayer-import src/cli.cpp)
+qt_add_executable(mvplayer-import src/cli.cpp ${MV_WINDOWS_RC})
 target_link_libraries(mvplayer-import PRIVATE mvcore)
 
 option(MV_BUILD_GUI "Build the graphical player" ON)
@@ -47,8 +54,19 @@ endif()
 # Application
 # ---------------------------------------------------------------------------
 find_package(Qt6 6.5 REQUIRED COMPONENTS Gui Qml Quick QuickControls2 Network OpenGL ShaderTools)
-find_package(Qt6 QUIET OPTIONAL_COMPONENTS DBus)
+# D-Bus carries the Linux desktop integration; Windows has its own calls.
+if(NOT WIN32)
+    find_package(Qt6 QUIET OPTIONAL_COMPONENTS DBus)
+endif()
 pkg_check_modules(MPV REQUIRED IMPORTED_TARGET mpv)
+if(WIN32)
+    # One of mpv's dependencies in MSYS2 names the prefix by its Unix path
+    # ("/ucrt64/include"), which is not a directory Windows knows; the
+    # compiler searches the real one anyway.
+    get_target_property(MV_MPV_INCLUDES PkgConfig::MPV INTERFACE_INCLUDE_DIRECTORIES)
+    list(FILTER MV_MPV_INCLUDES EXCLUDE REGEX "^/")
+    set_target_properties(PkgConfig::MPV PROPERTIES INTERFACE_INCLUDE_DIRECTORIES "${MV_MPV_INCLUDES}")
+endif()
 
 qt_add_executable(mvplayer
     src/main.cpp
@@ -60,7 +78,11 @@ qt_add_executable(mvplayer
     src/ui/FrameStats.h src/ui/FrameStats.cpp
     src/ui/IdleInhibitor.h src/ui/IdleInhibitor.cpp
     src/ui/IpcServer.h src/ui/IpcServer.cpp
+    src/ui/YtDlpUpdater.h src/ui/YtDlpUpdater.cpp
+    ${MV_WINDOWS_RC}
 )
+# No console window on Windows.
+set_target_properties(mvplayer PROPERTIES WIN32_EXECUTABLE TRUE)
 
 set(MV_QML_FILES
     qml/Main.qml
@@ -120,5 +142,7 @@ endif()
 
 include(GNUInstallDirs)
 install(TARGETS mvplayer mvplayer-import RUNTIME DESTINATION ${CMAKE_INSTALL_BINDIR})
-install(FILES data/mvplayer.desktop DESTINATION ${CMAKE_INSTALL_DATADIR}/applications)
-install(FILES data/mvplayer.svg DESTINATION ${CMAKE_INSTALL_DATADIR}/icons/hicolor/scalable/apps)
+if(UNIX AND NOT APPLE)
+    install(FILES data/mvplayer.desktop DESTINATION ${CMAKE_INSTALL_DATADIR}/applications)
+    install(FILES data/mvplayer.svg DESTINATION ${CMAKE_INSTALL_DATADIR}/icons/hicolor/scalable/apps)
+endif()

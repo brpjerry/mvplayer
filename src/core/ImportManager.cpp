@@ -495,7 +495,7 @@ void ImportManager::runJob(qint64 trackId, const ImportSettings &cfg)
 
     // ---- 1. Search ---------------------------------------------------------
     report(QStringLiteral("Searching"));
-    YtDlp yt(qEnvironmentVariable("MVPLAYER_YTDLP", QStringLiteral("yt-dlp")), cfg.ytdlpArgs, &m_cancel);
+    YtDlp yt(qEnvironmentVariable("MVPLAYER_YTDLP", toolPath(QStringLiteral("yt-dlp"))), cfg.ytdlpArgs, &m_cancel);
     QVector<YtCandidate> candidates;
     QSet<QString> seen;
     bool searched = false;

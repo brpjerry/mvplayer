@@ -7,6 +7,8 @@
 set -euo pipefail
 
 BUILD=${1:-build}
+# On Windows "mvplayer" alone would name the QML module's build folder.
+EXE=; if command -v cygpath >/dev/null; then EXE=.exe; fi
 WORK=$(mktemp -d)
 trap 'rm -rf "$WORK"' EXIT
 
@@ -73,7 +75,13 @@ if [ \$n -le 3 ]; then echo "ERROR: [youtube] x: Sign in to confirm you’re not
 echo '{"entries": []}'
 FAKE
 chmod +x "$WORK/fake-ytdlp"
-OUT=$(MVPLAYER_YTDLP="$WORK/fake-ytdlp" MVPLAYER_PAUSE_SECS=1 timeout 60 "$BUILD/mvplayer-import" \
+FAKE="$WORK/fake-ytdlp"
+if [[ -n "$EXE" ]]; then
+    # Windows cannot start a "#!" script; a batch file hands it to sh.
+    printf '@"%s" "%%~dp0fake-ytdlp" %%*\r\n' "$(cygpath -w "$(command -v sh)")" > "$WORK/fake-ytdlp.cmd"
+    FAKE="$WORK/fake-ytdlp.cmd"
+fi
+OUT=$(MVPLAYER_YTDLP="$FAKE" MVPLAYER_PAUSE_SECS=1 timeout 60 "$BUILD/mvplayer-import" \
     --music-dir "$WORK/lib" --mv-dir "$WORK/mvlib" 2>&1)
 echo "$OUT" | grep -E "paused|resuming|^done:"
 [[ $(echo "$OUT" | grep -c "paused for 0:01") -eq 1 && $(echo "$OUT" | grep -c "paused for 0:02") -eq 1 ]]
@@ -83,5 +91,5 @@ grep -q '"event":"paused"' "$WORK/mvlib/.mvplayer/import-log.jsonl"
 
 echo "== binaries start"
 "$BUILD/mvplayer-import" --help >/dev/null
-QT_QPA_PLATFORM=offscreen "$BUILD/mvplayer" --help >/dev/null
+QT_QPA_PLATFORM=offscreen "$BUILD/mvplayer$EXE" --help >/dev/null
 echo "smoke ok"

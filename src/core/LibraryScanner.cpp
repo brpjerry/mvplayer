@@ -2,6 +2,7 @@
 
 #include "core/Matcher.h"
 #include "core/TagReader.h"
+#include "core/Util.h"
 
 #include <QDateTime>
 #include <QDir>
@@ -19,14 +20,17 @@ QStringList normaliseRoots(const QStringList &roots)
         if (r.isEmpty() || !d.exists())
             continue;
         const QString abs = d.absolutePath();
-        if (!out.contains(abs))
+        if (!out.contains(abs, pathCase))
             out << abs;
     }
     QStringList top;
     for (const QString &a : out) {
         bool nested = false;
-        for (const QString &b : out)
-            nested |= a != b && a.startsWith(b + QLatin1Char('/'));
+        for (const QString &b : out) {
+            // A drive root ("C:/") already ends with the separator.
+            const QString prefix = b.endsWith(QLatin1Char('/')) ? b : b + QLatin1Char('/');
+            nested |= a != b && a.startsWith(prefix, pathCase);
+        }
         if (!nested)
             top << a;
     }
