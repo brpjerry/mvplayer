@@ -319,6 +319,7 @@ void ImportManager::onScanFinished(const LibraryScanner::Result &r)
         if (!add.isEmpty())
             m_watcher.addPaths(add);
 
+        m_db->requeueUntriedTitles();
         for (const TrackInfo &t : m_db->pendingRecordings())
             enqueue(t.id);
         for (qint64 id : r.videosChanged)
@@ -366,6 +367,11 @@ void ImportManager::onJobFinished(qint64 trackId)
 {
     m_pending.remove(trackId);
     m_active = qMax(0, m_active - 1);
+    // No video under this title: the recording's other titles get their turn.
+    if (m_started && m_db->requeueUntriedTitles() > 0) {
+        for (const TrackInfo &t : m_db->pendingRecordings())
+            enqueue(t.id);
+    }
     pump();
 }
 

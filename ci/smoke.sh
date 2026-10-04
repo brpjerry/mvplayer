@@ -107,12 +107,13 @@ db.commit()
 PY
 mv "$WORK/mvlib" "$WORK/mvlib2"
 mv "$WORK/lib" "$WORK/lib2"
-rm -f "$WORK/calls"
+# From here on yt-dlp answers at once; the count shows whether it was asked.
+echo 100 > "$WORK/calls"
 OUT=$(MVPLAYER_YTDLP="$FAKE" MVPLAYER_PAUSE_SECS=1 timeout 60 "$BUILD/mvplayer-import" \
     --music-dir "$WORK/lib2" --mv-dir "$WORK/mvlib2" 2>&1)
 echo "$OUT" | grep -E "^\[scan\]|^done:"
 [[ "$OUT" == *"2 tracks: 0 new, 2 changed, 0 removed"* && "$OUT" == *"done: 1 videos;"* ]]
-[[ ! -e "$WORK/calls" ]]
+[[ $(cat "$WORK/calls") -eq 100 ]]
 python3 - "$WORK/mvlib2/.mvplayer/library.db" <<'PY'
 import sqlite3, sys
 db = sqlite3.connect(sys.argv[1])
@@ -126,7 +127,8 @@ PY
 echo "== recordings"
 # The same library on a device that keeps it as Opus, under other file names,
 # with one title romanised, plus a second copy of a song under another title.
-# Every file is recognised by its sound: nothing is looked up again.
+# Every file is recognised by its sound. The only new search is for the title
+# that has not been tried on a recording without a video, and only once.
 [[ $("$BUILD/mvplayer-import" same-recording "$WORK/lib2/A/one.flac" "$WORK/lib2/A/two.flac") == different:* ]]
 mkdir -p "$WORK/lib3/B"
 ffmpeg -v error -y -i "$WORK/lib2/A/one.flac" -c:a libopus -b:a 64k -metadata title="Uta ichi" "$WORK/lib3/B/01.opus"
@@ -146,7 +148,9 @@ OUT=$(MVPLAYER_YTDLP="$FAKE" MVPLAYER_PAUSE_SECS=1 timeout 60 "$BUILD/mvplayer-i
     --music-dir "$WORK/lib3" --mv-dir "$WORK/mvlib2" 2>&1)
 echo "$OUT" | grep -E "^\[scan\]|^done:"
 [[ "$OUT" == *"3 tracks: 1 new, 2 changed, 0 removed"* && "$OUT" == *"done: 1 videos;"* ]]
-[[ ! -e "$WORK/calls" ]]
+# One lookup: "Song two" has no video, and the album cut's title was never tried.
+[[ $(cat "$WORK/calls") -eq 104 ]]
+[[ "$OUT" == *"Song two (album cut): No music video found"* ]]
 python3 - "$WORK/mvlib2/.mvplayer/library.db" <<'PY'
 import sqlite3, sys
 db = sqlite3.connect(sys.argv[1])
@@ -159,6 +163,8 @@ assert rows["Song two"][2] == rows["Song two (album cut)"][2] != rows["Uta ichi"
 assert db.execute("SELECT title FROM videos").fetchall() == [("Uta ichi",)]
 print("recordings ok")
 PY
+OUT=$(MVPLAYER_YTDLP="$FAKE" timeout 60 "$BUILD/mvplayer-import" --music-dir "$WORK/lib3" --mv-dir "$WORK/mvlib2" 2>&1)
+[[ $(cat "$WORK/calls") -eq 104 && "$OUT" == *"tracks:"*"not_found=2"* ]]
 
 echo "== binaries start"
 "$BUILD/mvplayer-import" --help >/dev/null

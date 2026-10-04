@@ -40,6 +40,11 @@ public:
     // The import state of the recording becomes the track's too, or the other
     // way round when `trackLeads`.
     void joinRecording(qint64 trackId, qint64 memberId, bool trackLeads);
+    // A recording without a video is searched for once more under each
+    // title its files carry that has not been tried: the same song may be
+    // tagged in the original script in one place and romanised in another.
+    // Makes one such file per recording pending; returns how many.
+    int requeueUntriedTitles();
     // The tracks waiting for a lookup, one per recording: its best file.
     QVector<TrackInfo> pendingRecordings();
 

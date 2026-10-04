@@ -8,8 +8,10 @@
 #include <QDebug>
 #include <QDir>
 #include <QJsonDocument>
+#include <QSet>
 #include <QSqlError>
 #include <QSqlQuery>
+#include <QSqlRecord>
 #include <QVariant>
 
 #include <tuple>
@@ -297,7 +299,11 @@ bool Database::init(QString *error)
     if (!hasRecording) {
         more << QStringLiteral("ALTER TABLE tracks ADD COLUMN recording INTEGER")
              << QStringLiteral("ALTER TABLE tracks ADD COLUMN fingerprint BLOB")
-             << QStringLiteral("ALTER TABLE tracks ADD COLUMN fp_size INTEGER");
+             << QStringLiteral("ALTER TABLE tracks ADD COLUMN fp_size INTEGER")
+             // The title a file was last searched under. Until now every
+             // file ran its own lookup, under its own title.
+             << QStringLiteral("ALTER TABLE tracks ADD COLUMN searched_title TEXT")
+             << QStringLiteral("UPDATE tracks SET searched_title = title WHERE state IN ('done', 'not_found')");
     }
     more << QStringLiteral("CREATE INDEX IF NOT EXISTS tracks_recording ON tracks(recording)");
     for (const QString &sql : std::as_const(more)) {
@@ -436,6 +442,54 @@ void Database::setTrackResult(qint64 id, const QString &state, qint64 videoId, c
     q.addBindValue(id);
     q.addBindValue(id);
     run(q);
+
+    // The search ran under this file's title.
+    if (state == QLatin1String("done") || state == QLatin1String("not_found")) {
+        QSqlQuery t(conn());
+        t.prepare(QStringLiteral("UPDATE tracks SET searched_title = title WHERE id = ?"));
+        t.addBindValue(id);
+        run(t);
+    }
+}
+
+int Database::requeueUntriedTitles()
+{
+    struct Group {
+        QSet<QString> tried;
+        QVector<TrackInfo> files;
+    };
+    QHash<qint64, Group> groups;
+    QSqlQuery q(conn());
+    q.prepare(QStringLiteral("SELECT %1, searched_title FROM tracks WHERE state = 'not_found' AND recording IS NOT NULL")
+                  .arg(QLatin1String(kTrackCols)));
+    if (!run(q))
+        return 0;
+    while (q.next()) {
+        const TrackInfo t = readTrack(q);
+        Group &g = groups[t.recording];
+        g.files << t;
+        const QString tried = q.value(q.record().count() - 1).toString();
+        if (!tried.isEmpty())
+            g.tried.insert(foldText(tried));
+    }
+
+    int queued = 0;
+    for (const Group &g : std::as_const(groups)) {
+        const TrackInfo *next = nullptr;
+        for (const TrackInfo &t : g.files) {
+            if (!g.tried.contains(foldText(t.title)) && (!next || betterSource(t, *next)))
+                next = &t;
+        }
+        // Nothing on record as tried: a library from before this was kept.
+        if (!next || g.tried.isEmpty())
+            continue;
+        QSqlQuery p(conn());
+        p.prepare(QStringLiteral("UPDATE tracks SET state = 'pending', message = '' WHERE id = ?"));
+        p.addBindValue(next->id);
+        if (run(p))
+            ++queued;
+    }
+    return queued;
 }
 
 void Database::setRecording(qint64 trackId, qint64 recording)

@@ -141,6 +141,10 @@ copies — count as one: one lookup, one video, and the video carries the tags
 of the best-quality file. An instrumental, a live take, another language
 version or a short edit is a different recording with a lookup of its own.
 
+When a recording has no video and one of its files carries a title that has
+not been searched for — the original script in one place, romanised in
+another — it is searched once more under that title.
+
 The first scan after upgrading from 0.1.2 fingerprints the whole library once
 (about half a minute for 30 hours of FLAC on a laptop).
 
