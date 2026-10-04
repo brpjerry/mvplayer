@@ -2,6 +2,9 @@
 
 #include "core/Util.h"
 
+#include <QRegularExpression>
+#include <QSet>
+
 #include <algorithm>
 
 namespace {
@@ -160,7 +163,17 @@ bool Matcher::sameVersion(const TrackInfo &track, const QString &videoTitle)
         if (hasTerm(video, term) != (hasTerm(title, term) || hasTerm(album, term)))
             return false;
     }
-    return true;
+    // "(English Ver.)", "(Prayer Ver.)", "Rap version": a named version on
+    // one side has to be named on the other.
+    const auto named = [](const QString &tok) {
+        QSet<QString> out;
+        static const QRegularExpression re(QStringLiteral("(\\S+) (?:ver|version)(?= )"));
+        auto it = re.globalMatch(tok);
+        while (it.hasNext())
+            out.insert(it.next().captured(1));
+        return out;
+    };
+    return named(video) == (named(title) | named(album));
 }
 
 void Matcher::rank(const TrackInfo &track, QVector<YtCandidate> &candidates)
