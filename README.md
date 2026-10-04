@@ -120,6 +120,9 @@ fits outright, and then waits for you:
   these videos in place of the library. They are in no other view.
 - Playing one, the sound changes every ten seconds between YouTube's audio
   and your track's, level-matched; the chip in the bottom bar says which.
+- When several uploads could be the track's video, they are options on one
+  card: the arrows on the thumbnail step through them. Accepting one drops the
+  others; turning one down leaves the rest to choose from.
 - ✓ on its thumbnail accepts it: it joins the library with your track's audio.
   ✗ turns it down: the video is deleted, its track counts as having no video,
   and that upload is not offered for it again.

@@ -93,7 +93,7 @@ public:
     VideoFilterModel *videos() const { return m_filter; }
     JobModel *jobs() const { return m_jobs; }
     QVariantList facets() const { return m_facets; }
-    int videoCount() const { return m_model->rowCount() - m_reviewCount; }
+    int videoCount() const { return m_model->rowCount() - m_reviewVideos; }
     int reviewCount() const { return m_reviewCount; }
     Q_INVOKABLE void approveVideo(qint64 videoId);
     Q_INVOKABLE void rejectVideo(qint64 videoId);
@@ -185,7 +185,8 @@ private:
     QTimer m_facetTimer;
     QVariantMap m_trackCounts;
     int m_sessionDone = 0;
-    int m_reviewCount = 0;
+    int m_reviewCount = 0;  // tracks with videos waiting for review
+    int m_reviewVideos = 0; // those videos, counting every option
     QString m_accent = QStringLiteral("auto");
     QString m_sidebarFacet = QStringLiteral("albumArtist");
     SystemTheme m_systemTheme;

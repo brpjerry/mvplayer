@@ -6,6 +6,7 @@
 #include <QCollator>
 #include <QDir>
 #include <QLocale>
+#include <QSet>
 #include <QSaveFile>
 #include <QFileInfo>
 #include <QMap>
@@ -302,8 +303,15 @@ void AppController::rebuildFacets()
         };
     }
     m_facets = out;
-    m_reviewCount = int(std::count_if(m_model->videos().begin(), m_model->videos().end(),
-                                      [](const VideoInfo &v) { return v.review; }));
+    // Several options for the same track are one thing to review.
+    QSet<qint64> groups;
+    for (const VideoInfo &v : m_model->videos()) {
+        if (v.review)
+            groups.insert(v.reviewGroup > 0 ? v.reviewGroup : v.id);
+    }
+    m_reviewCount = int(groups.size());
+    m_reviewVideos = int(std::count_if(m_model->videos().begin(), m_model->videos().end(),
+                                       [](const VideoInfo &v) { return v.review; }));
     emit facetsChanged();
 }
 

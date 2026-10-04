@@ -98,6 +98,9 @@ struct VideoInfo {
     bool review = false;
     double reviewStart = 0;
     double reviewEnd = 0;
+    // Several videos can wait as options for the same tracks: they share this
+    // number, and the tracks point at one of them.
+    qint64 reviewGroup = 0;
 
     QString ytTitle;
     QString ytChannel;

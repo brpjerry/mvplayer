@@ -250,8 +250,8 @@ assert [y for _, y in db.execute("SELECT key, yt_id FROM rejected_videos")] == [
 assert db.execute("SELECT message FROM tracks").fetchone()[0].startswith("you turned down")
 print("review ok")
 PY
-# None of that asked YouTube anything.
-[[ $(cat "$WORK/calls") -eq 300 ]]
+# The one search was the track looking for other uploads to offer beside it.
+[[ $(cat "$WORK/calls") -eq 304 ]]
 
 echo "== premium account"
 # A yt-dlp that knows an account by its cookies: it lists audio at 250 kbit/s

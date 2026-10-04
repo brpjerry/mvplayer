@@ -62,6 +62,16 @@ ApplicationWindow {
         mpv.togglePause()
     }
 
+    // Another option for the same track comes on show; if the one it replaces
+    // was playing, the new one plays.
+    function stepReview(id, delta) {
+        const wasPlaying = player.current && player.current.videoId === id
+        const shown = App.videos.stepReview(id, delta)
+        if (wasPlaying && shown !== id)
+            player.playRow(App.videos.rowOfVideo(shown))
+        return shown
+    }
+
     // A rejected video is deleted: it cannot go on playing.
     function rejectVideo(id) {
         if (player.current && player.current.videoId === id)
@@ -245,6 +255,7 @@ ApplicationWindow {
                     onActivated: (row) => player.playRow(row)
                     onApproved: (id) => App.approveVideo(id)
                     onRejected: (id) => window.rejectVideo(id)
+                    onStepped: (id, delta) => window.stepReview(id, delta)
                 }
 
                 Welcome {
@@ -402,6 +413,10 @@ ApplicationWindow {
         case "rescan": App.rescan(); return "ok"
         case "cookies": return (arg === "" ? (App.removeCookies(), "") : App.importCookies(arg)) || "ok"
         case "check-quality": App.checkQuality(); return "ok"
+        case "step": { // step <video id> <delta>
+            const sp = arg.split(" ")
+            return "" + window.stepReview(parseInt(sp[0]), parseInt(sp[1] || "1"))
+        }
         case "approve": App.approveVideo(parseInt(arg)); return "ok"
         case "reject": window.rejectVideo(parseInt(arg)); return "ok"
         case "grab": // grab <file>: a picture of the settings panel when open, else of the window

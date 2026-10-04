@@ -85,7 +85,7 @@ TrackInfo readTrack(const QSqlQuery &q)
 const char *kVideoCols =
     "id, yt_id, path, thumb, title, artist, album_artist, album, genre, year, track_no, duration, "
     "width, height, fps, vcodec, audio_source, audio_detail, yt_title, yt_channel, tags_json, added_at, yt_abr, "
-    "review, review_start, review_end";
+    "review, review_start, review_end, review_group";
 
 VideoInfo readVideo(const QSqlQuery &q)
 {
@@ -117,6 +117,7 @@ VideoInfo readVideo(const QSqlQuery &q)
     v.review = q.value(i++).toBool();
     v.reviewStart = q.value(i++).toDouble();
     v.reviewEnd = q.value(i++).toDouble();
+    v.reviewGroup = q.value(i++).toLongLong();
     return v;
 }
 
@@ -336,7 +337,8 @@ bool Database::init(QString *error)
     if (!hasReview) {
         reviewDdl << QStringLiteral("ALTER TABLE videos ADD COLUMN review INTEGER NOT NULL DEFAULT 0")
                   << QStringLiteral("ALTER TABLE videos ADD COLUMN review_start REAL")
-                  << QStringLiteral("ALTER TABLE videos ADD COLUMN review_end REAL");
+                  << QStringLiteral("ALTER TABLE videos ADD COLUMN review_end REAL")
+                  << QStringLiteral("ALTER TABLE videos ADD COLUMN review_group INTEGER");
     }
     reviewDdl << QStringLiteral("CREATE TABLE IF NOT EXISTS rejected_videos ("
                                 " key TEXT NOT NULL, yt_id TEXT NOT NULL, PRIMARY KEY (key, yt_id))");
@@ -727,8 +729,9 @@ qint64 Database::insertVideo(const VideoInfo &v)
     q.prepare(QStringLiteral(
         "INSERT INTO videos (yt_id, path, thumb, title, artist, album_artist, album, genre, year,"
         " track_no, duration, width, height, fps, vcodec, audio_source, audio_detail, yt_title,"
-        " yt_channel, tags_json, added_at, yt_abr, review, review_start, review_end, still_checked, audio_checked)"
-        " VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,1,1)"));
+        " yt_channel, tags_json, added_at, yt_abr, review, review_start, review_end, review_group,"
+        " still_checked, audio_checked)"
+        " VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,1,1)"));
     q.addBindValue(v.ytId);
     q.addBindValue(storedPath(v.path));
     q.addBindValue(storedPath(v.thumb));
@@ -754,6 +757,7 @@ qint64 Database::insertVideo(const VideoInfo &v)
     q.addBindValue(v.review);
     q.addBindValue(v.reviewStart);
     q.addBindValue(v.reviewEnd);
+    q.addBindValue(v.reviewGroup > 0 ? QVariant(v.reviewGroup) : QVariant());
     if (!run(q))
         return 0;
     return q.lastInsertId().toLongLong();
@@ -782,7 +786,7 @@ void Database::updateVideoMedia(const VideoInfo &v)
     QSqlQuery q(conn());
     q.prepare(QStringLiteral(
         "UPDATE videos SET duration = ?, width = ?, height = ?, fps = ?, vcodec = ?, audio_source = ?,"
-        " audio_detail = ?, yt_abr = ?, review = ?, review_start = ?, review_end = ? WHERE id = ?"));
+        " audio_detail = ?, yt_abr = ?, review = ?, review_start = ?, review_end = ?, review_group = ? WHERE id = ?"));
     q.addBindValue(v.duration);
     q.addBindValue(v.width);
     q.addBindValue(v.height);
@@ -794,7 +798,40 @@ void Database::updateVideoMedia(const VideoInfo &v)
     q.addBindValue(v.review);
     q.addBindValue(v.reviewStart);
     q.addBindValue(v.reviewEnd);
+    q.addBindValue(v.reviewGroup > 0 ? QVariant(v.reviewGroup) : QVariant());
     q.addBindValue(v.id);
+    run(q);
+}
+
+QVector<VideoInfo> Database::reviewOptions(qint64 group)
+{
+    QVector<VideoInfo> out;
+    QSqlQuery q(conn());
+    q.prepare(QStringLiteral("SELECT %1 FROM videos WHERE review = 1 AND (review_group = ? OR id = ?) ORDER BY id")
+                  .arg(QLatin1String(kVideoCols)));
+    q.addBindValue(group);
+    q.addBindValue(group);
+    if (run(q)) {
+        while (q.next())
+            out << resolved(readVideo(q));
+    }
+    return out;
+}
+
+void Database::relinkTracks(qint64 fromVideoId, qint64 toVideoId)
+{
+    QSqlQuery q(conn());
+    q.prepare(QStringLiteral("UPDATE tracks SET video_id = ? WHERE video_id = ?"));
+    q.addBindValue(toVideoId);
+    q.addBindValue(fromVideoId);
+    run(q);
+}
+
+void Database::setTrackPending(qint64 trackId)
+{
+    QSqlQuery q(conn());
+    q.prepare(QStringLiteral("UPDATE tracks SET state = 'pending' WHERE id = ?"));
+    q.addBindValue(trackId);
     run(q);
 }
 
