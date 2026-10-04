@@ -84,7 +84,7 @@ TrackInfo readTrack(const QSqlQuery &q)
 
 const char *kVideoCols =
     "id, yt_id, path, thumb, title, artist, album_artist, album, genre, year, track_no, duration, "
-    "width, height, fps, vcodec, audio_source, audio_detail, yt_title, yt_channel, tags_json, added_at";
+    "width, height, fps, vcodec, audio_source, audio_detail, yt_title, yt_channel, tags_json, added_at, yt_abr";
 
 VideoInfo readVideo(const QSqlQuery &q)
 {
@@ -112,6 +112,7 @@ VideoInfo readVideo(const QSqlQuery &q)
     v.ytChannel = q.value(i++).toString();
     v.tags = jsonObj(q.value(i++).toString());
     v.addedAt = q.value(i++).toLongLong();
+    v.ytAbr = q.value(i++).toDouble();
     return v;
 }
 
@@ -282,6 +283,22 @@ bool Database::init(QString *error)
     if (!hasFlag) {
         QSqlQuery q(db);
         if (!q.exec(QStringLiteral("ALTER TABLE videos ADD COLUMN still_checked INTEGER NOT NULL DEFAULT 0"))) {
+            if (error)
+                *error = q.lastError().text();
+            return false;
+        }
+    }
+
+    // Added after 0.2.0: the bitrate of the YouTube audio a video was built
+    // from. Existing rows keep NULL: fetched without an account.
+    bool hasAbr = false;
+    if (info.exec(QStringLiteral("PRAGMA table_info(videos)"))) {
+        while (info.next())
+            hasAbr |= info.value(1).toString() == QLatin1String("yt_abr");
+    }
+    if (!hasAbr) {
+        QSqlQuery q(db);
+        if (!q.exec(QStringLiteral("ALTER TABLE videos ADD COLUMN yt_abr REAL"))) {
             if (error)
                 *error = q.lastError().text();
             return false;
@@ -666,8 +683,8 @@ qint64 Database::insertVideo(const VideoInfo &v)
     q.prepare(QStringLiteral(
         "INSERT INTO videos (yt_id, path, thumb, title, artist, album_artist, album, genre, year,"
         " track_no, duration, width, height, fps, vcodec, audio_source, audio_detail, yt_title,"
-        " yt_channel, tags_json, added_at, still_checked)"
-        " VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,1)"));
+        " yt_channel, tags_json, added_at, yt_abr, still_checked)"
+        " VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,1)"));
     q.addBindValue(v.ytId);
     q.addBindValue(storedPath(v.path));
     q.addBindValue(storedPath(v.thumb));
@@ -689,6 +706,7 @@ qint64 Database::insertVideo(const VideoInfo &v)
     q.addBindValue(v.ytChannel);
     q.addBindValue(jsonText(v.tags));
     q.addBindValue(v.addedAt);
+    q.addBindValue(v.ytAbr > 0 ? QVariant(v.ytAbr) : QVariant());
     if (!run(q))
         return 0;
     return q.lastInsertId().toLongLong();
@@ -708,6 +726,24 @@ void Database::updateVideoTags(const VideoInfo &v)
     q.addBindValue(v.year);
     q.addBindValue(v.trackNo);
     q.addBindValue(jsonText(v.tags));
+    q.addBindValue(v.id);
+    run(q);
+}
+
+void Database::updateVideoMedia(const VideoInfo &v)
+{
+    QSqlQuery q(conn());
+    q.prepare(QStringLiteral(
+        "UPDATE videos SET duration = ?, width = ?, height = ?, fps = ?, vcodec = ?, audio_source = ?,"
+        " audio_detail = ?, yt_abr = ? WHERE id = ?"));
+    q.addBindValue(v.duration);
+    q.addBindValue(v.width);
+    q.addBindValue(v.height);
+    q.addBindValue(v.fps);
+    q.addBindValue(v.vcodec);
+    q.addBindValue(v.audioSource);
+    q.addBindValue(v.audioDetail);
+    q.addBindValue(v.ytAbr > 0 ? QVariant(v.ytAbr) : QVariant());
     q.addBindValue(v.id);
     run(q);
 }

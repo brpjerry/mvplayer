@@ -166,6 +166,51 @@ PY
 OUT=$(MVPLAYER_YTDLP="$FAKE" timeout 60 "$BUILD/mvplayer-import" --music-dir "$WORK/lib3" --mv-dir "$WORK/mvlib2" 2>&1)
 [[ $(cat "$WORK/calls") -eq 104 && "$OUT" == *"tracks:"*"not_found=2"* ]]
 
+echo "== premium account"
+# A yt-dlp that knows an account by its cookies: it lists audio at 250 kbit/s
+# and hands it out. The check of existing videos must rebuild the one video
+# from it, and must give yt-dlp a copy of the cookies, not the stored file.
+printf '# Netscape HTTP Cookie File\n.youtube.com\tTRUE\t/\tTRUE\t0\tSID\tsecret\n' > "$WORK/cookies.txt"
+cat > "$WORK/fake-premium" <<FAKE
+#!/bin/sh
+echo "\$*" >> "$WORK/premium-args"
+case " \$* " in *" --cookies "*) ;; *) echo "ERROR: no cookies given" >&2; exit 1 ;; esac
+case " \$* " in
+*" -J "*) echo '{"formats": [{"format_id": "774", "vcodec": "none", "acodec": "opus", "abr": 250}]}' ;;
+*)  out=; prev=
+    for a in "\$@"; do [ "\$prev" = "-o" ] && out=\$a; prev=\$a; done
+    dir=\$(dirname "\$out")
+    cp "$WORK/mv.opus" "\$dir/premium.opus"
+    echo '{"abr": 250, "acodec": "opus"}' > "\$dir/premium.info.json" ;;
+esac
+FAKE
+chmod +x "$WORK/fake-premium"
+PREMIUM="$WORK/fake-premium"
+if [[ -n "$EXE" ]]; then
+    printf '@"%s" "%%~dp0fake-premium" %%*\r\n' "$(cygpath -w "$(command -v sh)")" > "$WORK/fake-premium.cmd"
+    PREMIUM="$WORK/fake-premium.cmd"
+fi
+! "$BUILD/mvplayer-import" --music-dir "$WORK/lib3" --mv-dir "$WORK/mvlib2" --cookies "$WORK/track.flac" >/dev/null
+OUT=$(MVPLAYER_YTDLP="$PREMIUM" timeout 120 "$BUILD/mvplayer-import" --music-dir "$WORK/lib3" --mv-dir "$WORK/mvlib2" \
+    --cookies "$WORK/cookies.txt" --check-quality 2>&1)
+echo "$OUT" | grep -E "^\[quality\]"
+[[ "$OUT" == *"1 upgraded, 0 failed"* ]]
+[[ $(wc -l < "$WORK/premium-args") -eq 2 ]]
+! grep -q -e "--cookies $WORK/cookies.txt" "$WORK/premium-args"
+grep -q "secret" "$WORK/cookies.txt"
+STREAMS=$(ffprobe -v error -show_entries stream=codec_type,codec_name -of csv=p=0 "$WORK/mvlib2/A/Song one [abc].mkv" | tr '\n' ' ')
+echo "streams: $STREAMS"
+[[ "$STREAMS" == "h264,video opus,audio " ]]
+python3 - "$WORK/mvlib2/.mvplayer/library.db" <<'PY'
+import sqlite3, sys
+db = sqlite3.connect(sys.argv[1])
+assert db.execute("SELECT yt_abr, audio_source FROM videos").fetchall() == [(250.0, "youtube")]
+PY
+# Already built from the account's audio: nothing is asked again.
+MVPLAYER_YTDLP="$PREMIUM" timeout 120 "$BUILD/mvplayer-import" --music-dir "$WORK/lib3" --mv-dir "$WORK/mvlib2" \
+    --cookies "$WORK/cookies.txt" --check-quality >/dev/null 2>&1
+[[ $(wc -l < "$WORK/premium-args") -eq 2 ]]
+
 echo "== binaries start"
 "$BUILD/mvplayer-import" --help >/dev/null
 QT_QPA_PLATFORM=offscreen "$BUILD/mvplayer$EXE" --help >/dev/null

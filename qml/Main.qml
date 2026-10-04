@@ -391,6 +391,11 @@ ApplicationWindow {
         case "settings": arg === "off" ? settings.close() : settings.open(); return "ok"
         case "retry": App.retryUnmatched(); return "ok"
         case "rescan": App.rescan(); return "ok"
+        case "cookies": return (arg === "" ? (App.removeCookies(), "") : App.importCookies(arg)) || "ok"
+        case "check-quality": App.checkQuality(); return "ok"
+        case "grab": // grab <file>: a picture of the settings panel when open, else of the window
+            (settings.opened ? settings.contentItem : window.contentItem).grabToImage(r => r.saveToFile(arg))
+            return "ok"
         case "ytdlp-update": YtDlpUpdater.update(); return "ok"
         case "ytdlp": return JSON.stringify({ version: YtDlpUpdater.version, busy: YtDlpUpdater.busy, status: YtDlpUpdater.status })
         case "fps": FrameStats.visible = arg !== "off"; return "ok"
@@ -423,6 +428,7 @@ ApplicationWindow {
                 hwdec: mpv.hwdec, videoSize: mpv.videoSize.width + "x" + mpv.videoSize.height,
                 audioTrack: mpv.audioTrack, audioTracks: mpv.audioTracks.length,
                 busy: App.busy, status: App.statusText, counts: App.trackCounts,
+                cookies: App.hasCookies, checkingQuality: App.checkingQuality,
                 accent: "" + Theme.accent, accentMode: App.accent, theme: App.themeMode, dark: Theme.dark,
                 systemDark: App.systemDark, bg: "" + Theme.bg, musicDirs: App.musicDirs, frameColor: "" + mpv.frameColor,
                 frameColorValid: mpv.frameColorValid, sidebar: App.sidebarFacet,

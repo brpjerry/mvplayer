@@ -89,6 +89,7 @@ struct VideoInfo {
     QString vcodec;
     QString audioSource;  // "library" when local audio was muxed in, else "youtube"
     QString audioDetail;  // e.g. "FLAC 24/48"
+    double ytAbr = 0;     // bitrate of the YouTube audio in the file, kbit/s; 0: not recorded
 
     QString ytTitle;
     QString ytChannel;

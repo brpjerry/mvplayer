@@ -148,6 +148,27 @@ another — it is searched once more under that title.
 The first scan after upgrading from 0.1.2 fingerprints the whole library once
 (about half a minute for 30 hours of FLAC on a laptop).
 
+### YouTube Premium
+
+With the cookies of a Premium account YouTube offers audio at about twice the
+usual bitrate (around 250 kbit/s Opus instead of 130). Export a `cookies.txt`
+from a browser signed in to the account and add it under Settings → YouTube
+Premium; the app keeps its own copy beside its settings file, readable by you
+only. From then on every imported video is built from that audio — as its
+"YouTube audio" track, and as its main audio where the library's own does not
+replace it.
+
+"Check videos for better quality" goes through the videos already in the
+library, one at a time, and rebuilds those the account is offered something
+better for: the audio is fetched again and put into the existing file, the
+picture is only downloaded again if a higher resolution has appeared.
+
+The account is used for nothing else. Searches and video downloads stay
+anonymous (the "1080p Premium" picture needs no account, and signed-in
+clients are not offered it); the cookies are only tried for a video that
+cannot be had without signing in, such as an age-restricted one. Headless:
+`--cookies cookies.txt` and `--check-quality`.
+
 ### Headless
 
 ```sh

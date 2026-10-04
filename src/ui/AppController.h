@@ -52,6 +52,10 @@ class AppController : public QObject
     Q_PROPERTY(bool replaceAudio READ replaceAudio WRITE setReplaceAudio NOTIFY settingsChanged)
     Q_PROPERTY(bool allowUnofficial READ allowUnofficial WRITE setAllowUnofficial NOTIFY settingsChanged)
     Q_PROPERTY(bool skipStillImages READ skipStillImages WRITE setSkipStillImages NOTIFY settingsChanged)
+    // A YouTube Premium account's cookies.txt, kept beside the settings.
+    Q_PROPERTY(bool hasCookies READ hasCookies NOTIFY settingsChanged)
+    Q_PROPERTY(QString cookiesAdded READ cookiesAdded NOTIFY settingsChanged)
+    Q_PROPERTY(bool checkingQuality READ checkingQuality NOTIFY activityChanged)
 
     Q_PROPERTY(bool busy READ busy NOTIFY activityChanged)
     Q_PROPERTY(bool scanning READ scanning NOTIFY activityChanged)
@@ -101,6 +105,13 @@ public:
     void setAllowUnofficial(bool v);
     bool skipStillImages() const { return m_cfg.skipStillImages; }
     void setSkipStillImages(bool v);
+    bool hasCookies() const { return !m_cfg.cookiesFile.isEmpty(); }
+    QString cookiesAdded() const;
+    // Stores a copy of `file`. Returns what is wrong with it, or nothing.
+    Q_INVOKABLE QString importCookies(const QString &file);
+    Q_INVOKABLE void removeCookies();
+    bool checkingQuality() const;
+    Q_INVOKABLE void checkQuality();
 
     bool busy() const;
     bool scanning() const;
@@ -153,6 +164,7 @@ private:
     void rebuildFacets();
     void refreshCounts();
     void saveSettings();
+    QString cookiesPath() const;
 
     AppOptions m_options;
     std::unique_ptr<QSettings> m_settings;

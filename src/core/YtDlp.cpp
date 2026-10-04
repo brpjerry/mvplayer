@@ -7,6 +7,9 @@
 #include <QFile>
 #include <QJsonArray>
 #include <QJsonDocument>
+#include <QTemporaryFile>
+
+#include <algorithm>
 
 namespace {
 
@@ -26,11 +29,67 @@ QString findFile(const QString &dir, const QString &base, const QStringList &ski
 
 } // namespace
 
-YtDlp::YtDlp(const QString &program, const QStringList &extraArgs, const std::atomic<bool> *cancel)
+YtDlp::YtDlp(const QString &program, const QStringList &extraArgs, const QString &cookiesFile,
+             const std::atomic<bool> *cancel)
     : m_program(program.isEmpty() ? QStringLiteral("yt-dlp") : program)
     , m_extraArgs(extraArgs)
+    , m_cookiesFile(looksLikeCookies(cookiesFile) ? cookiesFile : QString())
     , m_cancel(cancel)
 {
+}
+
+YtDlp::~YtDlp() = default;
+
+bool YtDlp::looksLikeCookies(const QString &file)
+{
+    QFile f(file);
+    if (file.isEmpty() || !f.open(QIODevice::ReadOnly) || f.size() > 4 * 1024 * 1024)
+        return false;
+    bool youtube = false;
+    while (!f.atEnd()) {
+        // domain, subdomains, path, secure, expiry, name, value
+        const QByteArray line = f.readLine().trimmed();
+        if (line.isEmpty() || (line.startsWith('#') && !line.startsWith("#HttpOnly_")))
+            continue;
+        const QList<QByteArray> fields = line.split('\t');
+        if (fields.size() != 7)
+            return false;
+        youtube |= fields[0].endsWith("youtube.com");
+    }
+    return youtube;
+}
+
+QStringList YtDlp::accountArgs()
+{
+    if (m_cookiesFile.isEmpty())
+        return {};
+    if (!m_cookiesCopy) {
+        auto copy = std::make_unique<QTemporaryFile>(QDir::temp().filePath(QStringLiteral("mvplayer-XXXXXX.txt")));
+        QFile source(m_cookiesFile);
+        if (!copy->open() || !source.open(QIODevice::ReadOnly) || copy->write(source.readAll()) < 0)
+            return {};
+        copy->close(); // the temporary file is readable by its owner only
+        m_cookiesCopy = std::move(copy);
+    }
+    // The YouTube Music client is the one that is offered the high-bitrate audio.
+    return {QStringLiteral("--cookies"), QDir::toNativeSeparators(m_cookiesCopy->fileName()),
+            QStringLiteral("--extractor-args"), QStringLiteral("youtube:player_client=default,web_music")};
+}
+
+ProcResult YtDlp::run(const QStringList &args, const ProcOptions &opts)
+{
+    ProcResult r = runProcess(m_program, baseArgs() + args, opts);
+    if (r.ok() || m_cookiesFile.isEmpty() || (m_cancel && m_cancel->load()))
+        return r;
+    static const QStringList signs = {
+        QStringLiteral("confirm your age"), QStringLiteral("age-restricted"), QStringLiteral("members-only"),
+        QStringLiteral("join this channel"), QStringLiteral("private video"), QStringLiteral("login required"),
+    };
+    const QString e = r.errorText().toLower();
+    if (std::none_of(signs.begin(), signs.end(), [&e](const QString &s) { return e.contains(s); }))
+        return r;
+    const QStringList account = accountArgs();
+    return account.isEmpty() ? r : runProcess(m_program, baseArgs() + account + args, opts);
 }
 
 QStringList YtDlp::baseArgs() const
@@ -111,25 +170,38 @@ bool YtDlp::search(const QString &query, int count, QVector<YtCandidate> *out, Q
     return true;
 }
 
-bool YtDlp::downloadAudio(const QString &id, const QString &dir, QString *file, QJsonObject *info, QString *error)
+bool YtDlp::downloadAudio(const QString &id, const QString &dir, QString *file, QJsonObject *info, QString *error,
+                          bool premium)
 {
-    QStringList args = baseArgs();
+    const QString name = premium ? QStringLiteral("premium") : QStringLiteral("audio");
+    QStringList args;
     args << QStringLiteral("-f") << QStringLiteral("ba/b") << QStringLiteral("--no-progress")
          << QStringLiteral("--write-info-json") << QStringLiteral("-o")
-         << QDir(dir).filePath(QStringLiteral("audio.%(ext)s")) << url(id);
+         << QDir(dir).filePath(name + QStringLiteral(".%(ext)s")) << url(id);
     ProcOptions opts;
     opts.cancel = m_cancel;
     opts.timeoutMs = 15 * 60 * 1000;
-    const ProcResult r = runProcess(m_program, args, opts);
+    ProcResult r;
+    if (premium) {
+        const QStringList account = accountArgs();
+        if (account.isEmpty()) {
+            if (error)
+                *error = QStringLiteral("no account cookies");
+            return false;
+        }
+        r = runProcess(m_program, baseArgs() + account + args, opts);
+    } else {
+        r = run(args, opts);
+    }
     if (!r.ok()) {
         if (error)
             *error = r.errorText();
         return false;
     }
-    QFile jf(QDir(dir).filePath(QStringLiteral("audio.info.json")));
+    QFile jf(QDir(dir).filePath(name + QStringLiteral(".info.json")));
     if (info && jf.open(QIODevice::ReadOnly))
         *info = QJsonDocument::fromJson(jf.readAll()).object();
-    *file = findFile(dir, QStringLiteral("audio"), {QStringLiteral(".json"), QStringLiteral(".part")});
+    *file = findFile(dir, name, {QStringLiteral(".json"), QStringLiteral(".part")});
     if (file->isEmpty()) {
         if (error)
             *error = QStringLiteral("yt-dlp produced no audio file");
@@ -138,15 +210,70 @@ bool YtDlp::downloadAudio(const QString &id, const QString &dir, QString *file, 
     return true;
 }
 
+bool YtDlp::premiumInfo(const QString &id, QJsonObject *info, QString *error)
+{
+    const QStringList account = accountArgs();
+    if (account.isEmpty()) {
+        if (error)
+            *error = QStringLiteral("no account cookies");
+        return false;
+    }
+    ProcOptions opts;
+    opts.cancel = m_cancel;
+    opts.timeoutMs = 120000;
+    const ProcResult r = runProcess(m_program, baseArgs() + account + QStringList{QStringLiteral("-J"), url(id)}, opts);
+    if (!r.ok()) {
+        if (error)
+            *error = r.errorText();
+        return false;
+    }
+    *info = QJsonDocument::fromJson(r.out).object();
+    if (info->value(QLatin1String("formats")).toArray().isEmpty()) {
+        if (error)
+            *error = QStringLiteral("yt-dlp listed no formats");
+        return false;
+    }
+    return true;
+}
+
+double YtDlp::bestAudioKbps(const QJsonObject &info)
+{
+    double best = 0;
+    for (const QJsonValue &v : info.value(QLatin1String("formats")).toArray()) {
+        const QJsonObject f = v.toObject();
+        if (f.value(QLatin1String("vcodec")).toString() == QLatin1String("none")
+            && f.value(QLatin1String("acodec")).toString() != QLatin1String("none"))
+            best = std::max(best, f.value(QLatin1String("abr")).toDouble());
+    }
+    return best;
+}
+
+int YtDlp::bestHeight(const QJsonObject &info)
+{
+    int best = 0;
+    for (const QJsonValue &v : info.value(QLatin1String("formats")).toArray()) {
+        const QJsonObject f = v.toObject();
+        if (f.value(QLatin1String("vcodec")).toString() != QLatin1String("none"))
+            best = std::max(best, f.value(QLatin1String("height")).toInt());
+    }
+    return best;
+}
+
+double YtDlp::audioKbps(const QJsonObject &info)
+{
+    const double abr = info.value(QLatin1String("abr")).toDouble();
+    return abr > 0 ? abr : info.value(QLatin1String("tbr")).toDouble();
+}
+
 bool YtDlp::downloadPreview(const QString &id, const QString &dir, QString *file, QString *error)
 {
-    QStringList args = baseArgs();
+    QStringList args;
     args << QStringLiteral("-f") << QStringLiteral("wv*[height>=144]/wv*/w") << QStringLiteral("--no-progress")
          << QStringLiteral("-o") << QDir(dir).filePath(QStringLiteral("preview.%(ext)s")) << url(id);
     ProcOptions opts;
     opts.cancel = m_cancel;
     opts.timeoutMs = 15 * 60 * 1000;
-    const ProcResult r = runProcess(m_program, args, opts);
+    const ProcResult r = run(args, opts);
     if (!r.ok()) {
         if (error)
             *error = r.errorText();
@@ -159,7 +286,7 @@ bool YtDlp::downloadPreview(const QString &id, const QString &dir, QString *file
 bool YtDlp::downloadVideo(const QString &id, const QString &dir, const std::function<void(double)> &progress,
                           QString *file, QString *thumb, QString *error)
 {
-    QStringList args = baseArgs();
+    QStringList args;
     args << QStringLiteral("-f") << QStringLiteral("bv*/b") << QStringLiteral("--write-thumbnail")
          << QStringLiteral("--convert-thumbnails") << QStringLiteral("jpg") << QStringLiteral("--newline")
          << QStringLiteral("--progress-template")
@@ -181,7 +308,7 @@ bool YtDlp::downloadVideo(const QString &id, const QString &dir, const std::func
         if (total > 0)
             progress(qBound(0.0, done / total, 1.0));
     };
-    const ProcResult r = runProcess(m_program, args, opts);
+    const ProcResult r = run(args, opts);
     if (!r.ok()) {
         if (error)
             *error = r.errorText();

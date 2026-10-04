@@ -151,6 +151,7 @@ void ImportManager::stop()
     m_active = 0;
     m_scanning = false;
     m_auditing = false;
+    m_upgrading = false;
 }
 
 void ImportManager::rescan()
@@ -290,6 +291,192 @@ void ImportManager::auditStills()
         }
         pump();
     }, Qt::QueuedConnection);
+}
+
+void ImportManager::checkQuality()
+{
+    if (!m_started || m_upgrading.exchange(true))
+        return;
+    const ImportSettings cfg = settings();
+    m_upgradeDone = 0;
+    m_upgradeTotal = 0;
+    emit activityChanged();
+    m_auditPool.start([this, cfg] {
+        upgradeVideos(cfg);
+        m_upgrading = false;
+        QMetaObject::invokeMethod(this, [this] {
+            emit activityChanged();
+            pump();
+        }, Qt::QueuedConnection);
+    });
+}
+
+void ImportManager::upgradeVideos(const ImportSettings &cfg)
+{
+    // One video at a time: this is a courtesy pass, not worth YouTube's ire.
+    const QVector<VideoInfo> videos = m_db->allVideos();
+    m_upgradeTotal = int(videos.size());
+    int rebuilt = 0, failed = 0;
+    for (const VideoInfo &v : videos) {
+        if (m_cancel || m_blocked)
+            break;
+        JobStatus st;
+        st.upgrade = true;
+        st.trackId = -v.id; // imports use track ids; these never collide with them
+        st.title = v.title;
+        st.artist = splitMulti(v.albumArtist).value(0, v.artist);
+        st.stage = QStringLiteral("Checking quality");
+        emit jobChanged(st);
+
+        QString detail;
+        const QString outcome = upgradeVideo(v, cfg, &detail);
+        if (m_cancel)
+            break;
+        rebuilt += outcome == QLatin1String("done");
+        failed += outcome == QLatin1String("failed");
+        st.finished = true;
+        st.outcome = outcome;
+        st.detail = detail;
+        st.stage = outcome == QLatin1String("done") ? QStringLiteral("Upgraded")
+            : outcome == QLatin1String("failed") ? QStringLiteral("Failed") : QStringLiteral("Already the best available");
+        if (outcome != QLatin1String("skipped"))
+            qInfo().noquote() << QStringLiteral("[quality] %1 — %2: %3 (%4)").arg(st.artist, st.title, st.stage, detail);
+        emit jobChanged(st);
+        ++m_upgradeDone;
+        if (outcome == QLatin1String("done"))
+            emit videoChanged(v.id);
+        emit activityChanged();
+    }
+    if (!m_cancel) {
+        qInfo("[quality] checked %d of %d videos: %d upgraded, %d failed%s", m_upgradeDone.load(), int(videos.size()),
+              rebuilt, failed, m_blocked ? "; stopped because YouTube is limiting requests" : "");
+    }
+}
+
+QString ImportManager::upgradeVideo(const VideoInfo &video, const ImportSettings &cfg, QString *detail)
+{
+    // Anonymous downloads top out around 130 kbit/s.
+    constexpr double kOrdinaryKbps = 160;
+    const auto fail = [&](const QString &why) {
+        *detail = why;
+        return QStringLiteral("failed");
+    };
+    if (!QFile::exists(video.path)) {
+        *detail = QStringLiteral("file is missing");
+        return QStringLiteral("skipped");
+    }
+
+    const double have = video.ytAbr > 0 ? video.ytAbr : kOrdinaryKbps;
+    if (have >= 200) {
+        // Already built from Premium audio: not worth a request.
+        *detail = QStringLiteral("%1p, audio %2 kbit/s").arg(video.height).arg(qRound(have));
+        return QStringLiteral("skipped");
+    }
+
+    YtDlp yt(qEnvironmentVariable("MVPLAYER_YTDLP", toolPath(QStringLiteral("yt-dlp"))), cfg.ytdlpArgs, cfg.cookiesFile, &m_cancel);
+    QString error;
+    QJsonObject offer;
+    if (!yt.premiumInfo(video.ytId, &offer, &error)) {
+        if (!m_cancel)
+            noteFailure(error);
+        return fail(error);
+    }
+    noteSuccess();
+    const double offered = YtDlp::bestAudioKbps(offer);
+    const bool betterAudio = offered >= have * 1.3;
+    const bool betterVideo = YtDlp::bestHeight(offer) > video.height;
+    if (!betterAudio && !betterVideo) {
+        *detail = QStringLiteral("%1p, audio %2 kbit/s").arg(video.height).arg(qRound(have));
+        return QStringLiteral("skipped");
+    }
+
+    if (!claimVideo(video.ytId))
+        return fail(QStringLiteral("cancelled"));
+    const auto release = qScopeGuard([&] { releaseVideo(video.ytId); });
+    const QString workDir = QDir(dataDir(cfg.mvDir)).filePath(QStringLiteral("tmp/upgrade-%1").arg(video.id));
+    QDir(workDir).removeRecursively();
+    QDir().mkpath(workDir);
+    const auto cleanup = qScopeGuard([&] { QDir(workDir).removeRecursively(); });
+
+    QString audioFile;
+    QJsonObject audioInfo;
+    if (!yt.downloadAudio(video.ytId, workDir, &audioFile, &audioInfo, &error, true)) {
+        if (!m_cancel)
+            noteFailure(error);
+        return fail(error);
+    }
+    QString videoFile = video.path, thumbFile;
+    if (betterVideo && !yt.downloadVideo(video.ytId, workDir, nullptr, &videoFile, &thumbFile, &error)) {
+        if (!m_cancel)
+            noteFailure(error);
+        return fail(error);
+    }
+    noteSuccess();
+
+    // The library's own audio goes back in where it was used, from the best
+    // file of the video's tracks.
+    Muxer::Plan plan;
+    plan.videoFile = videoFile;
+    plan.ytAudioFile = audioFile;
+    plan.workDir = workDir;
+    plan.outFile = video.path;
+    plan.ytId = video.ytId;
+    plan.track.title = video.title;
+    plan.track.artist = video.artist;
+    plan.track.albumArtist = video.albumArtist;
+    plan.track.album = video.album;
+    plan.track.genre = video.genre;
+    plan.track.year = video.year;
+    plan.track.trackNo = video.trackNo;
+    std::optional<TrackInfo> source;
+    for (const TrackInfo &t : m_db->tracksForVideo(video.id)) {
+        if (QFile::exists(t.path) && (!source || betterSource(t, *source)))
+            source = t;
+    }
+    if (source && cfg.replaceAudio) {
+        std::vector<int16_t> trackPcm, mvPcm;
+        if (AudioAlign::decodeMono(source->path, &trackPcm, &m_cancel, &error)
+            && AudioAlign::decodeMono(audioFile, &mvPcm, &m_cancel, &error)) {
+            plan.align = AudioAlign::align(trackPcm, mvPcm);
+            plan.track = *source;
+            plan.replaceAudio = audioMatches(plan.align) && audioReplaceable(plan.align)
+                && trackQuality(*source) > youtubeQuality(audioInfo) * 1.15;
+        }
+    }
+    if (m_cancel)
+        return fail(QStringLiteral("cancelled"));
+    // Never trade the library's audio for YouTube's, however good.
+    if (video.audioSource == QLatin1String("library") && !plan.replaceAudio) {
+        *detail = QStringLiteral("its library audio cannot be put back");
+        return QStringLiteral("skipped");
+    }
+
+    QString audioDetail;
+    if (!Muxer::mux(plan, &m_cancel, &audioDetail, &error))
+        return fail(error);
+
+    VideoInfo v = video;
+    Muxer::Probe pr;
+    if (Muxer::probe(video.path, &pr)) {
+        v.duration = pr.duration;
+        v.width = pr.width;
+        v.height = pr.height;
+        v.fps = pr.fps;
+        v.vcodec = pr.vcodec;
+    }
+    v.audioSource = plan.replaceAudio ? QStringLiteral("library") : QStringLiteral("youtube");
+    v.audioDetail = audioDetail;
+    v.ytAbr = YtDlp::audioKbps(audioInfo);
+    m_db->updateVideoMedia(v);
+    QStringList gains;
+    if (betterVideo)
+        gains << QStringLiteral("%1p → %2p").arg(video.height).arg(v.height);
+    if (betterAudio) {
+        gains << (video.ytAbr > 0 ? QStringLiteral("YouTube audio %1 → %2 kbit/s").arg(qRound(have)).arg(qRound(v.ytAbr))
+                                  : QStringLiteral("YouTube audio now %1 kbit/s").arg(qRound(v.ytAbr)));
+    }
+    *detail = gains.join(QStringLiteral(", "));
+    return QStringLiteral("done");
 }
 
 void ImportManager::retryUnmatched()
@@ -492,7 +679,7 @@ void ImportManager::runJob(qint64 trackId, const ImportSettings &cfg)
 
     // ---- 1. Search ---------------------------------------------------------
     report(QStringLiteral("Searching"));
-    YtDlp yt(qEnvironmentVariable("MVPLAYER_YTDLP", toolPath(QStringLiteral("yt-dlp"))), cfg.ytdlpArgs, &m_cancel);
+    YtDlp yt(qEnvironmentVariable("MVPLAYER_YTDLP", toolPath(QStringLiteral("yt-dlp"))), cfg.ytdlpArgs, cfg.cookiesFile, &m_cancel);
     QVector<YtCandidate> candidates;
     QSet<QString> seen;
     bool searched = false;
@@ -730,6 +917,25 @@ void ImportManager::runJob(qint64 trackId, const ImportSettings &cfg)
         return;
     }
 
+    // With a Premium account the audio comes at about twice the bitrate. The
+    // candidates were compared on the ordinary audio, which needs no account.
+    if (yt.hasCookies()) {
+        report(QStringLiteral("Fetching Premium audio"), -1, chosen.title);
+        QString premiumFile;
+        QJsonObject premiumInfo;
+        ++nAudio;
+        if (yt.downloadAudio(chosen.id, chosenDir, &premiumFile, &premiumInfo, &error, true)) {
+            if (youtubeQuality(premiumInfo) > youtubeQuality(ytInfo)) {
+                ytAudio = premiumFile;
+                ytInfo = premiumInfo;
+            }
+        } else {
+            if (m_cancel)
+                return cleanup();
+            qWarning().noquote() << "[import] no Premium audio, keeping the ordinary one:" << error;
+        }
+    }
+
     // ---- 4. Audio + mux ----------------------------------------------------
     const QString artistDir = sanitizeFileName(splitMulti(track.albumArtist).value(0, QStringLiteral("Unknown Artist")));
     const QString baseName = QStringLiteral("%1 [%2]").arg(sanitizeFileName(track.title), chosen.id);
@@ -796,6 +1002,7 @@ void ImportManager::runJob(qint64 trackId, const ImportSettings &cfg)
     v.vcodec = pr.vcodec;
     v.audioSource = plan.replaceAudio ? QStringLiteral("library") : QStringLiteral("youtube");
     v.audioDetail = audioDetail;
+    v.ytAbr = YtDlp::audioKbps(ytInfo);
     v.ytTitle = chosen.title;
     v.ytChannel = chosen.channel;
     v.tags = track.tags;

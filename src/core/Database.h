@@ -70,6 +70,8 @@ public:
     std::optional<VideoInfo> videoByYtId(const QString &ytId);
     qint64 insertVideo(const VideoInfo &v);
     void updateVideoTags(const VideoInfo &v);
+    // After a video's file was rebuilt from better streams.
+    void updateVideoMedia(const VideoInfo &v);
     void removeVideo(qint64 id);
     // Videos imported before their picture was reliably checked for stills.
     QVector<VideoInfo> videosNotStillChecked();
