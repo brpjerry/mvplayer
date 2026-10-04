@@ -1,5 +1,6 @@
 #include "core/TagReader.h"
 
+#include <QDir>
 #include <QFile>
 #include <QFileInfo>
 #include <QRegularExpression>
@@ -68,7 +69,13 @@ const QStringList &TagReader::audioExtensions()
 
 bool TagReader::read(TrackInfo &out)
 {
+#ifdef Q_OS_WIN
+    // The 8-bit form of a Windows path cannot hold every file name.
+    const std::wstring name = QDir::toNativeSeparators(out.path).toStdWString();
+    TagLib::FileRef f(name.c_str(), true, TagLib::AudioProperties::Average);
+#else
     TagLib::FileRef f(QFile::encodeName(out.path).constData(), true, TagLib::AudioProperties::Average);
+#endif
     if (f.isNull() || !f.audioProperties())
         return false;
 

@@ -12,3 +12,7 @@ packaging/src/
 packaging/pkg/
 packaging/*.tar.gz
 packaging/*.pkg.tar.*
+
+# Windows installer output
+packaging/windows/stage/
+packaging/windows/out/

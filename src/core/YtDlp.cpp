@@ -2,6 +2,7 @@
 
 #include "core/Util.h"
 
+#include <QCoreApplication>
 #include <QDir>
 #include <QFile>
 #include <QJsonArray>
@@ -38,6 +39,16 @@ QStringList YtDlp::baseArgs() const
         QStringLiteral("--ignore-config"), QStringLiteral("--no-playlist"), QStringLiteral("--no-warnings"),
         QStringLiteral("--socket-timeout"), QStringLiteral("30"), QStringLiteral("--retries"), QStringLiteral("5"),
     };
+#ifdef Q_OS_WIN
+    // yt-dlp looks for its helpers beside itself and on PATH; here ffmpeg is
+    // installed with the application and the JS runtime sits in toolsDir().
+    const QString appDir = QCoreApplication::applicationDirPath();
+    if (QFile::exists(appDir + QStringLiteral("/ffmpeg.exe")))
+        a << QStringLiteral("--ffmpeg-location") << QDir::toNativeSeparators(appDir);
+    const QString deno = toolsDir() + QStringLiteral("/deno.exe");
+    if (QFile::exists(deno))
+        a << QStringLiteral("--js-runtimes") << QStringLiteral("deno:") + QDir::toNativeSeparators(deno);
+#endif
     a += m_extraArgs;
     return a;
 }

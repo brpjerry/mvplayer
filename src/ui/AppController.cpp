@@ -1,5 +1,7 @@
 #include "ui/AppController.h"
 
+#include "core/Util.h"
+
 #include <QCollator>
 #include <QDir>
 #include <QLocale>
@@ -80,7 +82,14 @@ AppController::AppController(const AppOptions &options, QObject *parent)
     , m_jobs(new JobModel(this))
 {
     if (options.configFile.isEmpty())
+#ifdef Q_OS_WIN
+        // A file rather than the registry, so settings can be edited by hand
+        // as on Linux: %APPDATA%/mvplayer/mvplayer.ini
+        m_settings = std::make_unique<QSettings>(QSettings::IniFormat, QSettings::UserScope,
+                                                 QStringLiteral("mvplayer"), QStringLiteral("mvplayer"));
+#else
         m_settings = std::make_unique<QSettings>(QStringLiteral("mvplayer"), QStringLiteral("mvplayer"));
+#endif
     else
         m_settings = std::make_unique<QSettings>(options.configFile, QSettings::IniFormat);
 
@@ -308,7 +317,7 @@ void AppController::addMusicDir(const QString &dir)
     if (dir.isEmpty())
         return;
     const QString d = QDir(dir).absolutePath();
-    if (m_cfg.musicDirs.contains(d))
+    if (m_cfg.musicDirs.contains(d, pathCase))
         return;
     m_cfg.musicDirs << d;
     m_options.musicDirs.clear();
@@ -517,10 +526,14 @@ QUrl AppController::pathToUrl(const QString &path) const
 
 QString AppController::displayPath(const QString &path) const
 {
+#ifdef Q_OS_WIN
+    return QDir::toNativeSeparators(path);
+#else
     const QString home = QDir::homePath();
     if (path == home)
         return QStringLiteral("~");
     if (path.startsWith(home + QLatin1Char('/')))
         return QLatin1Char('~') + path.mid(home.size());
     return path;
+#endif
 }

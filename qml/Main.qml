@@ -382,6 +382,8 @@ ApplicationWindow {
         case "settings": arg === "off" ? settings.close() : settings.open(); return "ok"
         case "retry": App.retryUnmatched(); return "ok"
         case "rescan": App.rescan(); return "ok"
+        case "ytdlp-update": YtDlpUpdater.update(); return "ok"
+        case "ytdlp": return JSON.stringify({ version: YtDlpUpdater.version, busy: YtDlpUpdater.busy, status: YtDlpUpdater.status })
         case "fps": FrameStats.visible = arg !== "off"; return "ok"
         case "accent": App.accent = arg; return "ok"
         case "theme": App.themeMode = arg; return "ok"

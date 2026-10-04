@@ -3,6 +3,7 @@ name: Release
 # Pushing a tag like v0.1.0 builds the pacman package for that tag and
 # publishes it, with a pacman repository database, as a GitHub release.
 # The "latest/download" URL of the releases then works as a pacman Server.
+# The Windows installer is built for the same tag and added to the release.
 # Running it by hand builds everything as a rehearsal without publishing.
 on:
   push:
@@ -55,3 +56,41 @@ jobs:
             packaging/*.pkg.tar.zst
             packaging/mvplayer.db*
             packaging/mvplayer.files*
+
+  windows:
+    # The release has to exist before the installer can be attached to it.
+    needs: release
+    runs-on: windows-2025
+    defaults:
+      run:
+        shell: msys2 {0}
+    steps:
+      - uses: msys2/setup-msys2@v2
+        with:
+          msystem: UCRT64
+          update: true
+          install: git
+          pacboy: >-
+            gcc:p cmake:p ninja:p pkgconf:p qt6-base:p qt6-declarative:p qt6-shadertools:p
+            mpv:p taglib:p chromaprint:p ffmpeg:p ntldd:p python:p
+      - uses: actions/checkout@v7
+      - name: Install Inno Setup
+        shell: pwsh
+        run: choco install innosetup --no-progress -y
+      - name: Build the installer
+        # A tag sets the version; a manual run builds CMakeLists.txt's own.
+        run: |
+          case "$GITHUB_REF" in
+            refs/tags/v*) ci/winpkg.sh "${GITHUB_REF_NAME#v}" ;;
+            *) ci/winpkg.sh ;;
+          esac
+      - name: Add the installer to the release
+        if: startsWith(github.ref, 'refs/tags/')
+        shell: bash
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: gh release upload "$GITHUB_REF_NAME" packaging/windows/out/*-setup.exe
+      - uses: actions/upload-artifact@v7
+        with:
+          name: windows-installer
+          path: packaging/windows/out/*-setup.exe
