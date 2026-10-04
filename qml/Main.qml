@@ -72,6 +72,14 @@ ApplicationWindow {
         return shown
     }
 
+    // An accepted video leaves the review list; it stops rather than play on
+    // out of sight, and its file is tidied up meanwhile.
+    function approveVideo(id) {
+        if (player.current && player.current.videoId === id)
+            player.stop()
+        App.approveVideo(id)
+    }
+
     // A rejected video is deleted: it cannot go on playing.
     function rejectVideo(id) {
         if (player.current && player.current.videoId === id)
@@ -110,6 +118,13 @@ ApplicationWindow {
             queue = list
             history = []
             load(row)
+            // A video under review plays in its thumbnail, next to the
+            // others and with its verdict buttons; a click on it enlarges it.
+            if (list[row].review) {
+                window.view = "grid"
+                playerView.openCollapsed(decodeWidth)
+                return
+            }
             window.releaseTextFocus()
             window.view = "player"
             playerView.openFrom(decodeWidth)
@@ -253,7 +268,7 @@ ApplicationWindow {
                     currentVideoId: player.current ? player.current.videoId : -1
                     currentPlaying: window.playingNow
                     onActivated: (row) => player.playRow(row)
-                    onApproved: (id) => App.approveVideo(id)
+                    onApproved: (id) => window.approveVideo(id)
                     onRejected: (id) => window.rejectVideo(id)
                     onStepped: (id, delta) => window.stepReview(id, delta)
                 }
@@ -278,6 +293,9 @@ ApplicationWindow {
             anchorAvailable: grid.currentThumbAvailable && grid.visible
             onExpandRequested: window.showPlayer()
             onCloseRequested: player.stop()
+            onReviewApproved: window.approveVideo(player.current.videoId)
+            onReviewRejected: window.rejectVideo(player.current.videoId)
+            onReviewStepped: (delta) => window.stepReview(player.current.videoId, delta)
             onTogglePauseRequested: window.togglePause()
             onToggleFullscreenRequested: window.setFullscreen(!window.fullscreen)
         }
@@ -417,7 +435,7 @@ ApplicationWindow {
             const sp = arg.split(" ")
             return "" + window.stepReview(parseInt(sp[0]), parseInt(sp[1] || "1"))
         }
-        case "approve": App.approveVideo(parseInt(arg)); return "ok"
+        case "approve": window.approveVideo(parseInt(arg)); return "ok"
         case "reject": window.rejectVideo(parseInt(arg)); return "ok"
         case "grab": // grab <file>: a picture of the settings panel when open, else of the window
             (settings.opened ? settings.contentItem : frame).grabToImage(r => r.saveToFile(arg))
