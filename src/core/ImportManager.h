@@ -82,7 +82,7 @@ public:
     bool scanning() const { return m_scanning; }
     int queuedCount() const { return m_queue.size(); }
     int activeCount() const { return m_active; }
-    bool busy() const { return m_scanning || m_auditing || m_auditingAudio || m_upgrading || m_reviewJobs > 0 || m_blocked || m_active > 0 || !m_queue.isEmpty(); }
+    bool busy() const { return m_scanning || m_upgrading || m_reviewJobs > 0 || m_blocked || m_active > 0 || !m_queue.isEmpty(); }
 
     static QString dataDir(const QString &mvDir);
 
@@ -100,8 +100,6 @@ private:
     void onScanFinished(const LibraryScanner::Result &r);
     void onJobFinished(qint64 trackId);
     void runJob(qint64 trackId, const ImportSettings &cfg);
-    void auditStills();
-    void auditAudio(const ImportSettings &cfg);
     // Rebuilds a video's file with the track's audio as its main audio.
     bool putLibraryAudioIn(const VideoInfo &video, const TrackInfo &track, const AudioAlign::Result &align,
                            const ImportSettings &cfg, QString *error, bool review = false);
@@ -129,9 +127,6 @@ private:
     QSet<qint64> m_pending; // queued or running
     int m_active = 0;
     bool m_scanning = false;
-    bool m_auditing = false;
-    std::atomic<bool> m_auditingAudio{false};
-    bool m_audioAuditDue = false;
     std::atomic<int> m_reviewJobs{0};
     std::atomic<bool> m_upgrading{false};
     std::atomic<int> m_upgradeDone{0};

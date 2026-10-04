@@ -160,36 +160,6 @@ VideoInfo Database::resolved(VideoInfo v) const
     return v;
 }
 
-// Up to 0.1.2 videos were stored by their absolute path. The folder may have
-// been moved since, or come from another system, so a path that is not under
-// the MV folder is taken by its place in the layout: "<Album Artist>/<file>".
-void Database::makeVideoPathsRelative(QSqlDatabase &db)
-{
-    const auto relative = [this](const QString &old) {
-        const QString inside = storedPath(old);
-        if (inside != old || old.isEmpty() || !old.contains(QLatin1Char('/')))
-            return inside;
-        return old.section(QLatin1Char('/'), -2);
-    };
-
-    QVector<std::tuple<qint64, QString, QString>> rows;
-    QSqlQuery select(db);
-    if (select.exec(QStringLiteral("SELECT id, path, thumb FROM videos"))) {
-        while (select.next())
-            rows.append({select.value(0).toLongLong(), select.value(1).toString(), select.value(2).toString()});
-    }
-    db.transaction();
-    for (const auto &[id, path, thumb] : rows) {
-        QSqlQuery q(db);
-        q.prepare(QStringLiteral("UPDATE videos SET path = ?, thumb = ? WHERE id = ?"));
-        q.addBindValue(relative(path));
-        q.addBindValue(relative(thumb));
-        q.addBindValue(id);
-        run(q);
-    }
-    db.commit();
-}
-
 QSqlDatabase Database::conn()
 {
     auto it = t_conn.names.constFind(m_file);
@@ -212,6 +182,10 @@ QSqlDatabase Database::conn()
     return db;
 }
 
+// The layout below is the only one this version reads. A database written
+// with another layout is refused, not converted.
+constexpr int kSchema = 4;
+
 bool Database::init(QString *error)
 {
     QSqlDatabase db = conn();
@@ -219,6 +193,22 @@ bool Database::init(QString *error)
         if (error)
             *error = db.lastError().text();
         return false;
+    }
+    {
+        QSqlQuery q(db);
+        const bool exists = q.exec(QStringLiteral("SELECT 1 FROM sqlite_master WHERE type = 'table' AND name = 'videos'"))
+            && q.next();
+        int schema = 0;
+        if (q.exec(QStringLiteral("PRAGMA user_version")) && q.next())
+            schema = q.value(0).toInt();
+        if (exists && schema != kSchema) {
+            if (error) {
+                *error = QStringLiteral("%1 was written by another version of mvplayer (layout %2, this one uses %3);"
+                                        " move it away or delete it to start a new library")
+                             .arg(m_file).arg(schema).arg(kSchema);
+            }
+            return false;
+        }
     }
     const QStringList ddl = {
         QStringLiteral(
@@ -233,7 +223,9 @@ bool Database::init(QString *error)
             " audio_source TEXT, audio_detail TEXT,"
             " yt_title TEXT, yt_channel TEXT,"
             " tags_json TEXT,"
-            " added_at INTEGER)"),
+            " added_at INTEGER,"
+            " yt_abr REAL,"
+            " review INTEGER NOT NULL DEFAULT 0, review_start REAL, review_end REAL, review_group INTEGER)"),
         QStringLiteral(
             "CREATE TABLE IF NOT EXISTS tracks ("
             " id INTEGER PRIMARY KEY,"
@@ -248,128 +240,19 @@ bool Database::init(QString *error)
             " video_id INTEGER REFERENCES videos(id) ON DELETE SET NULL,"
             " attempts INTEGER NOT NULL DEFAULT 0,"
             " last_attempt INTEGER NOT NULL DEFAULT 0,"
-            " message TEXT)"),
+            " message TEXT,"
+            " recording INTEGER, fingerprint BLOB, fp_size INTEGER,"
+            " searched_title TEXT)"),
+        // Videos turned down for a track: by recording, or by track where
+        // the recording is not known.
+        QStringLiteral("CREATE TABLE IF NOT EXISTS rejected_videos ("
+                       " key TEXT NOT NULL, yt_id TEXT NOT NULL, PRIMARY KEY (key, yt_id))"),
         QStringLiteral("CREATE INDEX IF NOT EXISTS tracks_state ON tracks(state)"),
         QStringLiteral("CREATE INDEX IF NOT EXISTS tracks_video ON tracks(video_id)"),
+        QStringLiteral("CREATE INDEX IF NOT EXISTS tracks_recording ON tracks(recording)"),
+        QStringLiteral("PRAGMA user_version = %1").arg(kSchema),
     };
     for (const QString &sql : ddl) {
-        QSqlQuery q(db);
-        if (!q.exec(sql)) {
-            if (error)
-                *error = q.lastError().text();
-            return false;
-        }
-    }
-
-    // Up to 0.1.1 a track whose candidates could not be downloaded was filed
-    // as having no video. Give those another go, once.
-    QSqlQuery version(db);
-    int schema = 0;
-    if (version.exec(QStringLiteral("PRAGMA user_version")) && version.next())
-        schema = version.value(0).toInt();
-    if (schema < 2) {
-        QSqlQuery q(db);
-        q.exec(QStringLiteral("UPDATE tracks SET state = 'pending' WHERE state = 'not_found' AND message LIKE '%ERROR:%'"));
-        q.exec(QStringLiteral("PRAGMA user_version = 2"));
-    }
-    if (schema < 3) {
-        makeVideoPathsRelative(db);
-        QSqlQuery q(db);
-        q.exec(QStringLiteral("PRAGMA user_version = 3"));
-    }
-
-    // Added after 0.1.0: existing rows keep 0 and are audited once.
-    QSqlQuery info(db);
-    bool hasFlag = false;
-    if (info.exec(QStringLiteral("PRAGMA table_info(videos)"))) {
-        while (info.next())
-            hasFlag |= info.value(1).toString() == QLatin1String("still_checked");
-    }
-    if (!hasFlag) {
-        QSqlQuery q(db);
-        if (!q.exec(QStringLiteral("ALTER TABLE videos ADD COLUMN still_checked INTEGER NOT NULL DEFAULT 0"))) {
-            if (error)
-                *error = q.lastError().text();
-            return false;
-        }
-    }
-
-    // Added after 0.2.0: the bitrate of the YouTube audio a video was built
-    // from. Existing rows keep NULL: fetched without an account.
-    bool hasAbr = false;
-    if (info.exec(QStringLiteral("PRAGMA table_info(videos)"))) {
-        while (info.next())
-            hasAbr |= info.value(1).toString() == QLatin1String("yt_abr");
-    }
-    if (!hasAbr) {
-        QSqlQuery q(db);
-        if (!q.exec(QStringLiteral("ALTER TABLE videos ADD COLUMN yt_abr REAL"))) {
-            if (error)
-                *error = q.lastError().text();
-            return false;
-        }
-    }
-
-    // Added after 0.2.0: existing rows keep 0 and their audio is reviewed once.
-    bool hasAudioFlag = false;
-    if (info.exec(QStringLiteral("PRAGMA table_info(videos)"))) {
-        while (info.next())
-            hasAudioFlag |= info.value(1).toString() == QLatin1String("audio_checked");
-    }
-    if (!hasAudioFlag) {
-        QSqlQuery q(db);
-        if (!q.exec(QStringLiteral("ALTER TABLE videos ADD COLUMN audio_checked INTEGER NOT NULL DEFAULT 0"))) {
-            if (error)
-                *error = q.lastError().text();
-            return false;
-        }
-    }
-
-    // Added after 0.2.0: videos that wait for the user's verdict, and the
-    // videos turned down for a track (by recording, or by track where the
-    // recording is not known).
-    bool hasReview = false;
-    if (info.exec(QStringLiteral("PRAGMA table_info(videos)"))) {
-        while (info.next())
-            hasReview |= info.value(1).toString() == QLatin1String("review");
-    }
-    QStringList reviewDdl;
-    if (!hasReview) {
-        reviewDdl << QStringLiteral("ALTER TABLE videos ADD COLUMN review INTEGER NOT NULL DEFAULT 0")
-                  << QStringLiteral("ALTER TABLE videos ADD COLUMN review_start REAL")
-                  << QStringLiteral("ALTER TABLE videos ADD COLUMN review_end REAL")
-                  << QStringLiteral("ALTER TABLE videos ADD COLUMN review_group INTEGER");
-    }
-    reviewDdl << QStringLiteral("CREATE TABLE IF NOT EXISTS rejected_videos ("
-                                " key TEXT NOT NULL, yt_id TEXT NOT NULL, PRIMARY KEY (key, yt_id))");
-    for (const QString &sql : std::as_const(reviewDdl)) {
-        QSqlQuery q(db);
-        if (!q.exec(sql)) {
-            if (error)
-                *error = q.lastError().text();
-            return false;
-        }
-    }
-
-    // Added after 0.1.2: which recording a file holds, and the fingerprint
-    // that tells. Existing rows are identified by the next scan.
-    bool hasRecording = false;
-    if (info.exec(QStringLiteral("PRAGMA table_info(tracks)"))) {
-        while (info.next())
-            hasRecording |= info.value(1).toString() == QLatin1String("recording");
-    }
-    QStringList more;
-    if (!hasRecording) {
-        more << QStringLiteral("ALTER TABLE tracks ADD COLUMN recording INTEGER")
-             << QStringLiteral("ALTER TABLE tracks ADD COLUMN fingerprint BLOB")
-             << QStringLiteral("ALTER TABLE tracks ADD COLUMN fp_size INTEGER")
-             // The title a file was last searched under. Until now every
-             // file ran its own lookup, under its own title.
-             << QStringLiteral("ALTER TABLE tracks ADD COLUMN searched_title TEXT")
-             << QStringLiteral("UPDATE tracks SET searched_title = title WHERE state IN ('done', 'not_found')");
-    }
-    more << QStringLiteral("CREATE INDEX IF NOT EXISTS tracks_recording ON tracks(recording)");
-    for (const QString &sql : std::as_const(more)) {
         QSqlQuery q(db);
         if (!q.exec(sql)) {
             if (error)
@@ -729,9 +612,8 @@ qint64 Database::insertVideo(const VideoInfo &v)
     q.prepare(QStringLiteral(
         "INSERT INTO videos (yt_id, path, thumb, title, artist, album_artist, album, genre, year,"
         " track_no, duration, width, height, fps, vcodec, audio_source, audio_detail, yt_title,"
-        " yt_channel, tags_json, added_at, yt_abr, review, review_start, review_end, review_group,"
-        " still_checked, audio_checked)"
-        " VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,1,1)"));
+        " yt_channel, tags_json, added_at, yt_abr, review, review_start, review_end, review_group)"
+        " VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)"));
     q.addBindValue(v.ytId);
     q.addBindValue(storedPath(v.path));
     q.addBindValue(storedPath(v.thumb));
@@ -858,55 +740,6 @@ bool Database::videoRejectedFor(const TrackInfo &track, const QString &ytId)
     q.addBindValue(rejectionKey(track));
     q.addBindValue(ytId);
     return run(q) && q.next();
-}
-
-QVector<VideoInfo> Database::videosNotStillChecked()
-{
-    QVector<VideoInfo> out;
-    QSqlQuery q(conn());
-    q.prepare(QStringLiteral("SELECT %1 FROM videos WHERE still_checked = 0 ORDER BY id").arg(QLatin1String(kVideoCols)));
-    if (run(q)) {
-        while (q.next())
-            out << resolved(readVideo(q));
-    }
-    return out;
-}
-
-void Database::markStillChecked(qint64 videoId)
-{
-    QSqlQuery q(conn());
-    q.prepare(QStringLiteral("UPDATE videos SET still_checked = 1 WHERE id = ?"));
-    q.addBindValue(videoId);
-    run(q);
-}
-
-QVector<VideoInfo> Database::videosNotAudioChecked()
-{
-    QVector<VideoInfo> out;
-    QSqlQuery q(conn());
-    q.prepare(QStringLiteral("SELECT %1 FROM videos WHERE audio_checked = 0"
-                             " AND COALESCE(audio_source, '') != 'library' ORDER BY id").arg(QLatin1String(kVideoCols)));
-    if (run(q)) {
-        while (q.next())
-            out << resolved(readVideo(q));
-    }
-    return out;
-}
-
-void Database::markAudioChecked(qint64 videoId)
-{
-    QSqlQuery q(conn());
-    q.prepare(QStringLiteral("UPDATE videos SET audio_checked = 1 WHERE id = ?"));
-    q.addBindValue(videoId);
-    run(q);
-}
-
-void Database::requeueTracksOfVideo(qint64 videoId)
-{
-    QSqlQuery q(conn());
-    q.prepare(QStringLiteral("UPDATE tracks SET state = 'pending', video_id = NULL, message = '' WHERE video_id = ?"));
-    q.addBindValue(videoId);
-    run(q);
 }
 
 void Database::removeVideo(qint64 id)

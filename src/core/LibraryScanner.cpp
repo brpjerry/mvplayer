@@ -223,8 +223,8 @@ Result scan(const QStringList &rootsIn, Database &db, const std::atomic<bool> *c
     }
 
     // ---- Identify by sound ---------------------------------------------------
-    // Needed for: files not seen before, tracks from before fingerprints were
-    // kept, and tracks whose file changed size since theirs was taken.
+    // Needed for: files not seen before, tracks that have no fingerprint,
+    // and tracks whose file changed size since theirs was taken.
     QHash<qint64, AudioPrint::Print> prints; // current fingerprints of tracks in the library
     QHash<qint64, AudioPrint::Print> stale;
     QHash<qint64, AudioPrint::Print> gonePrints;

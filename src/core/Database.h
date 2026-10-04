@@ -82,22 +82,12 @@ public:
     void rejectVideoFor(const TrackInfo &track, const QString &ytId);
     bool videoRejectedFor(const TrackInfo &track, const QString &ytId);
     void removeVideo(qint64 id);
-    // Videos imported before their picture was reliably checked for stills.
-    QVector<VideoInfo> videosNotStillChecked();
-    void markStillChecked(qint64 videoId);
-    // Videos whose main audio is YouTube's and has not been reviewed: where
-    // the library's own audio is the better one, it belongs in the video.
-    QVector<VideoInfo> videosNotAudioChecked();
-    void markAudioChecked(qint64 videoId);
-    // Makes the tracks that point at a video pending again.
-    void requeueTracksOfVideo(qint64 videoId);
 
 private:
     QSqlDatabase conn();
     QString storedPath(const QString &path) const;
     QString resolvedPath(const QString &stored) const;
     VideoInfo resolved(VideoInfo v) const;
-    void makeVideoPathsRelative(QSqlDatabase &db);
 
     QString m_file;
     QString m_mvDir;

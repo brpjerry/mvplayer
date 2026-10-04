@@ -193,16 +193,6 @@ void ImportManager::start()
     requeueRetryable();
 
     m_periodic.start();
-    // Earlier versions let some still-image uploads through; look at those
-    // imports once, in the background.
-    if (cfg.skipStillImages) {
-        m_auditing = true;
-        m_auditPool.start([this] { auditStills(); });
-    }
-    // Earlier versions also kept YouTube's audio where the library's own did
-    // not line up with the video. Those are put right once, after the scan
-    // has found where every track is now.
-    m_audioAuditDue = cfg.replaceAudio;
     rescan();
     pump();
 }
@@ -224,8 +214,6 @@ void ImportManager::stop()
     m_pending.clear();
     m_active = 0;
     m_scanning = false;
-    m_auditing = false;
-    m_auditingAudio = false;
     m_upgrading = false;
 }
 
@@ -329,45 +317,6 @@ void ImportManager::appendLog(const QJsonObject &entry)
         f.write(QJsonDocument(line).toJson(QJsonDocument::Compact) + '\n');
 }
 
-void ImportManager::auditStills()
-{
-    QVector<qint64> removed;
-    const QVector<VideoInfo> videos = m_db->videosNotStillChecked();
-    for (const VideoInfo &v : videos) {
-        if (m_cancel)
-            return;
-        if (!QFile::exists(v.path))
-            continue;
-        const Muxer::StillCheck check = Muxer::checkStill(v.path, true, &m_cancel);
-        if (m_cancel || !check.valid)
-            continue;
-        if (!check.still) {
-            m_db->markStillChecked(v.id);
-            continue;
-        }
-        qInfo().noquote() << QStringLiteral("[audit] removing still-image video “%1” (%2); its track will be looked up again")
-                                 .arg(v.title, v.ytTitle);
-        m_db->requeueTracksOfVideo(v.id);
-        m_db->removeVideo(v.id);
-        QFile::remove(v.path);
-        if (!v.thumb.isEmpty())
-            QFile::remove(v.thumb);
-        removed << v.id;
-    }
-    QMetaObject::invokeMethod(this, [this, removed] {
-        m_auditing = false;
-        if (!m_started)
-            return;
-        for (qint64 id : removed)
-            emit videoRemoved(id);
-        if (!removed.isEmpty()) {
-            for (const TrackInfo &t : m_db->pendingRecordings())
-                enqueue(t.id);
-        }
-        pump();
-    }, Qt::QueuedConnection);
-}
-
 bool ImportManager::putLibraryAudioIn(const VideoInfo &video, const TrackInfo &track, const AudioAlign::Result &align,
                                       const ImportSettings &cfg, QString *error, bool review)
 {
@@ -400,98 +349,11 @@ bool ImportManager::putLibraryAudioIn(const VideoInfo &video, const TrackInfo &t
     v.reviewEnd = span.end;
     v.reviewGroup = review ? v.id : 0;
     m_db->updateVideoMedia(v);
-    m_db->markAudioChecked(v.id);
     qInfo().noquote() << (review ? QStringLiteral("[audio] “%1” (%2) could not be confirmed as the track's recording: it waits for your review")
                                        .arg(video.title, video.ytTitle)
                                  : QStringLiteral("[audio] “%1” now plays the library's audio (%2)").arg(video.title, audioDetail));
     emit videoChanged(v.id);
     return true;
-}
-
-void ImportManager::auditAudio(const ImportSettings &cfg)
-{
-    QVector<qint64> removed;
-    for (const VideoInfo &v : m_db->videosNotAudioChecked()) {
-        if (m_cancel)
-            return;
-        if (!QFile::exists(v.path))
-            continue;
-        // The tracks whose audio should be what this video plays.
-        QVector<TrackInfo> owed;
-        bool unreadable = false;
-        for (const TrackInfo &t : m_db->tracksForVideo(v.id)) {
-            if (!libraryIsBetter(t, storedYoutubeQuality(v)))
-                continue;
-            unreadable |= !QFile::exists(t.path);
-            owed << t;
-        }
-        if (unreadable)
-            continue; // the music folder is not there right now: look again next time
-        if (owed.isEmpty()) {
-            m_db->markAudioChecked(v.id);
-            continue;
-        }
-        std::sort(owed.begin(), owed.end(), betterSource);
-
-        std::vector<int16_t> mvPcm;
-        QString error;
-        if (!AudioAlign::decodeMono(v.path, &mvPcm, &m_cancel, &error))
-            continue;
-        bool fixed = false;
-        // The track that is the song without demonstrably being the recording.
-        std::optional<TrackInfo> unconfirmed;
-        AudioAlign::Result unconfirmedAlign;
-        for (const TrackInfo &t : std::as_const(owed)) {
-            std::vector<int16_t> trackPcm;
-            if (m_cancel || !AudioAlign::decodeMono(t.path, &trackPcm, &m_cancel, &error))
-                continue;
-            const AudioAlign::Result ar = fitted(AudioAlign::align(trackPcm, mvPcm), t, v.ytTitle);
-            if (!audioMatches(ar))
-                continue;
-            if (audioReplaceable(ar) && putLibraryAudioIn(v, t, ar, cfg, &error)) {
-                fixed = true;
-                break;
-            }
-            if (!unconfirmed || ar.goodSec > unconfirmedAlign.goodSec) {
-                unconfirmed = t;
-                unconfirmedAlign = ar;
-            }
-        }
-        if (m_cancel)
-            return;
-        if (fixed)
-            continue;
-        if (unconfirmed) {
-            // For the user to say; left as it is if it cannot be prepared.
-            const AudioAlign::Result placed = placedWhole(unconfirmedAlign);
-            if (!placed.byOffset || !putLibraryAudioIn(v, *unconfirmed, placed, cfg, &error, true)) {
-                qWarning().noquote() << "[audio] cannot prepare" << v.title << "for review:" << error;
-                continue;
-            }
-            // There may be other uploads to choose from: the track looks again.
-            m_db->setTrackPending(unconfirmed->id);
-            continue;
-        }
-
-        // Not even the song of any of its tracks: this is not their video.
-        const QString why = QStringLiteral("“%1” is not this recording").arg(v.ytTitle);
-        for (const TrackInfo &t : std::as_const(owed))
-            m_db->setTrackResult(t.id, QStringLiteral("not_found"), 0, why);
-        if (m_db->tracksForVideo(v.id).isEmpty()) {
-            qInfo().noquote() << QStringLiteral("[audio] removing “%1” (%2): it is not the recording of any of its tracks")
-                                     .arg(v.title, v.ytTitle);
-            m_db->removeVideo(v.id);
-            QFile::remove(v.path);
-            if (!v.thumb.isEmpty())
-                QFile::remove(v.thumb);
-            removed << v.id;
-        } else {
-            // Still the video of a track of lesser quality than its audio.
-            m_db->markAudioChecked(v.id);
-        }
-    }
-    for (qint64 id : std::as_const(removed))
-        emit videoRemoved(id);
 }
 
 void ImportManager::approveVideo(qint64 videoId)
@@ -791,24 +653,6 @@ void ImportManager::onScanFinished(const LibraryScanner::Result &r)
         if (!add.isEmpty())
             m_watcher.addPaths(add);
 
-        if (m_audioAuditDue) {
-            m_audioAuditDue = false;
-            m_auditingAudio = true;
-            const ImportSettings cfg = settings();
-            m_auditPool.start([this, cfg] {
-                auditAudio(cfg);
-                m_auditingAudio = false;
-                QMetaObject::invokeMethod(this, [this] {
-                    if (!m_started)
-                        return;
-                    // Tracks that lost their video are looked up again.
-                    for (const TrackInfo &t : m_db->pendingRecordings())
-                        enqueue(t.id);
-                    emit activityChanged();
-                    pump();
-                }, Qt::QueuedConnection);
-            });
-        }
         m_db->requeueUntriedTitles();
         for (const TrackInfo &t : m_db->pendingRecordings())
             enqueue(t.id);
@@ -1113,6 +957,7 @@ void ImportManager::runJob(qint64 trackId, const ImportSettings &cfg)
         });
 
         if (m_db->videoRejectedFor(track, c.id)) {
+            anyChecked = true; // examined, by the user
             checked(c, QStringLiteral("rejected"));
             reasons << QStringLiteral("“%1” was turned down for this track").arg(c.title);
             continue;

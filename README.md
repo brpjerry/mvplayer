@@ -129,11 +129,7 @@ fits outright, and then waits for you:
 
 Headless: `--approve <youtube id>` and `--reject <youtube id>`.
 
-Videos imported by 0.2.0 and earlier that kept YouTube's audio next to a
-better track are put right on the first start: the track's audio is put in
-where it is the recording, the video goes to review where that cannot be
-shown, and it is removed where it is not even the song. Turning off "Use my
-library's audio" in Settings lifts all of this.
+Turning off "Use my library's audio" in Settings lifts all of this.
 
 The music folders are watched; added tracks are picked up within a few
 seconds, edited tags on the next periodic rescan. Tracks with no video are
@@ -183,8 +179,12 @@ When a recording has no video and one of its files carries a title that has
 not been searched for — the original script in one place, romanised in
 another — it is searched once more under that title.
 
-The first scan after upgrading from 0.1.2 fingerprints the whole library once
-(about half a minute for 30 hours of FLAC on a laptop).
+Fingerprinting costs about half a minute for 30 hours of FLAC on a laptop.
+
+A library database is tied to the version that wrote it: there is no
+conversion between layouts. A database of another layout is refused with a
+message saying so; move it away or delete it (`.mvplayer/library.db` in the
+MV folder) to start a new library.
 
 ### YouTube Premium
 
