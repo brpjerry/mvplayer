@@ -54,7 +54,37 @@ constexpr qint64 kLogRotateBytes = 8 * 1024 * 1024;
 // Is the waveform match complete enough to swap the audio without audible seams?
 bool audioReplaceable(const AudioAlign::Result &r)
 {
-    return !r.segments.isEmpty() && r.pcmMatchedSec >= 20 && r.pcmMatchedSec >= 0.85 * r.fpMatchedSec;
+    if (r.segments.isEmpty() || r.pcmMatchedSec < 20)
+        return false;
+    if (r.pcmMatchedSec >= 0.85 * r.fpMatchedSec)
+        return true;
+    // The same master with stretches the video changed (effects, dialogue):
+    // every segment sits at one offset and the waveforms agree closely there.
+    // The track goes in where it matches; the video keeps its own sound
+    // in between.
+    qint64 lo = r.segments.first().lag, hi = lo;
+    double weighted = 0, total = 0;
+    for (const AudioAlign::Segment &s : r.segments) {
+        lo = std::min(lo, s.lag);
+        hi = std::max(hi, s.lag);
+        weighted += s.corr * double(s.mvEnd - s.mvStart);
+        total += double(s.mvEnd - s.mvStart);
+    }
+    return hi - lo <= AudioAlign::kRate / 200 && total > 0 && weighted / total >= 0.9
+        && r.pcmMatchedSec >= 0.6 * r.fpMatchedSec;
+}
+
+// The library's file is the better audio: it is what the video must play.
+// YouTube's is only ever the main audio when the file is the lesser one.
+bool libraryIsBetter(const TrackInfo &track, double youtubeQuality)
+{
+    return trackQuality(track) > youtubeQuality * 1.15;
+}
+
+// Quality of the YouTube audio an existing video was built from (Opus).
+double storedYoutubeQuality(const VideoInfo &v)
+{
+    return (v.ytAbr > 0 ? v.ytAbr : 130) * 1.5;
 }
 
 } // namespace
@@ -129,6 +159,10 @@ void ImportManager::start()
         m_auditing = true;
         m_auditPool.start([this] { auditStills(); });
     }
+    // Earlier versions also kept YouTube's audio where the library's own did
+    // not line up with the video. Those are put right once, after the scan
+    // has found where every track is now.
+    m_audioAuditDue = cfg.replaceAudio;
     rescan();
     pump();
 }
@@ -151,6 +185,7 @@ void ImportManager::stop()
     m_active = 0;
     m_scanning = false;
     m_auditing = false;
+    m_auditingAudio = false;
     m_upgrading = false;
 }
 
@@ -293,6 +328,104 @@ void ImportManager::auditStills()
     }, Qt::QueuedConnection);
 }
 
+bool ImportManager::putLibraryAudioIn(const VideoInfo &video, const TrackInfo &track, const AudioAlign::Result &align,
+                                      const ImportSettings &cfg, QString *error)
+{
+    const QString workDir = QDir(dataDir(cfg.mvDir)).filePath(QStringLiteral("tmp/audio-%1").arg(video.id));
+    QDir(workDir).removeRecursively();
+    QDir().mkpath(workDir);
+    const auto cleanup = qScopeGuard([&] { QDir(workDir).removeRecursively(); });
+
+    // The picture and YouTube's audio come from the file as it is.
+    Muxer::Plan plan;
+    plan.videoFile = video.path;
+    plan.ytAudioFile = video.path;
+    plan.workDir = workDir;
+    plan.outFile = video.path;
+    plan.track = track;
+    plan.ytId = video.ytId;
+    plan.align = align;
+    plan.replaceAudio = true;
+    QString audioDetail;
+    if (!Muxer::mux(plan, &m_cancel, &audioDetail, error))
+        return false;
+
+    VideoInfo v = video;
+    v.audioSource = QStringLiteral("library");
+    v.audioDetail = audioDetail;
+    m_db->updateVideoMedia(v);
+    m_db->markAudioChecked(v.id);
+    qInfo().noquote() << QStringLiteral("[audio] “%1” now plays the library's audio (%2)").arg(video.title, audioDetail);
+    emit videoChanged(v.id);
+    return true;
+}
+
+void ImportManager::auditAudio(const ImportSettings &cfg)
+{
+    QVector<qint64> removed;
+    for (const VideoInfo &v : m_db->videosNotAudioChecked()) {
+        if (m_cancel)
+            return;
+        if (!QFile::exists(v.path))
+            continue;
+        // The tracks whose audio should be what this video plays.
+        QVector<TrackInfo> owed;
+        bool unreadable = false;
+        for (const TrackInfo &t : m_db->tracksForVideo(v.id)) {
+            if (!libraryIsBetter(t, storedYoutubeQuality(v)))
+                continue;
+            unreadable |= !QFile::exists(t.path);
+            owed << t;
+        }
+        if (unreadable)
+            continue; // the music folder is not there right now: look again next time
+        if (owed.isEmpty()) {
+            m_db->markAudioChecked(v.id);
+            continue;
+        }
+        std::sort(owed.begin(), owed.end(), betterSource);
+
+        std::vector<int16_t> mvPcm;
+        QString error;
+        if (!AudioAlign::decodeMono(v.path, &mvPcm, &m_cancel, &error))
+            continue;
+        bool fixed = false;
+        for (const TrackInfo &t : std::as_const(owed)) {
+            std::vector<int16_t> trackPcm;
+            if (m_cancel || !AudioAlign::decodeMono(t.path, &trackPcm, &m_cancel, &error))
+                continue;
+            const AudioAlign::Result ar = AudioAlign::align(trackPcm, mvPcm);
+            if (audioMatches(ar) && audioReplaceable(ar) && putLibraryAudioIn(v, t, ar, cfg, &error)) {
+                fixed = true;
+                break;
+            }
+        }
+        if (m_cancel)
+            return;
+        if (fixed)
+            continue;
+
+        // No track's audio fits: for them this is not their video after all.
+        const QString why = QStringLiteral("“%1” has a different mix: the library's audio cannot be put in").arg(v.ytTitle);
+        for (const TrackInfo &t : std::as_const(owed))
+            m_db->setTrackResult(t.id, QStringLiteral("not_found"), 0, why);
+        if (m_db->tracksForVideo(v.id).isEmpty()) {
+            qInfo().noquote() << QStringLiteral("[audio] removing “%1” (%2): it has a different mix from the library's tracks")
+                                     .arg(v.title, v.ytTitle);
+            m_db->removeVideo(v.id);
+            QFile::remove(v.path);
+            if (!v.thumb.isEmpty())
+                QFile::remove(v.thumb);
+            removed << v.id;
+        } else {
+            // Still the video of a track of lesser quality than its audio.
+            m_db->markAudioChecked(v.id);
+        }
+    }
+    for (qint64 id : std::as_const(removed))
+        emit videoRemoved(id);
+}
+
 void ImportManager::checkQuality()
 {
     if (!m_started || m_upgrading.exchange(true))
@@ -339,7 +472,8 @@ void ImportManager::upgradeVideos(const ImportSettings &cfg)
         st.detail = detail;
         st.stage = outcome == QLatin1String("done") ? QStringLiteral("Upgraded")
             : outcome == QLatin1String("failed") ? QStringLiteral("Failed") : QStringLiteral("Already the best available");
-        if (outcome != QLatin1String("skipped"))
+        // "Already the best" with nothing to say about it is not worth a line each.
+        if (outcome != QLatin1String("skipped") || detail.isEmpty() || !detail.at(0).isDigit())
             qInfo().noquote() << QStringLiteral("[quality] %1 — %2: %3 (%4)").arg(st.artist, st.title, st.stage, detail);
         emit jobChanged(st);
         ++m_upgradeDone;
@@ -440,13 +574,14 @@ QString ImportManager::upgradeVideo(const VideoInfo &video, const ImportSettings
             plan.align = AudioAlign::align(trackPcm, mvPcm);
             plan.track = *source;
             plan.replaceAudio = audioMatches(plan.align) && audioReplaceable(plan.align)
-                && trackQuality(*source) > youtubeQuality(audioInfo) * 1.15;
+                && libraryIsBetter(*source, youtubeQuality(audioInfo));
         }
     }
     if (m_cancel)
         return fail(QStringLiteral("cancelled"));
     // Never trade the library's audio for YouTube's, however good.
-    if (video.audioSource == QLatin1String("library") && !plan.replaceAudio) {
+    if (!plan.replaceAudio && (video.audioSource == QLatin1String("library")
+                               || (source && cfg.replaceAudio && libraryIsBetter(*source, youtubeQuality(audioInfo))))) {
         *detail = QStringLiteral("its library audio cannot be put back");
         return QStringLiteral("skipped");
     }
@@ -506,6 +641,24 @@ void ImportManager::onScanFinished(const LibraryScanner::Result &r)
         if (!add.isEmpty())
             m_watcher.addPaths(add);
 
+        if (m_audioAuditDue) {
+            m_audioAuditDue = false;
+            m_auditingAudio = true;
+            const ImportSettings cfg = settings();
+            m_auditPool.start([this, cfg] {
+                auditAudio(cfg);
+                m_auditingAudio = false;
+                QMetaObject::invokeMethod(this, [this] {
+                    if (!m_started)
+                        return;
+                    // Tracks that lost their video are looked up again.
+                    for (const TrackInfo &t : m_db->pendingRecordings())
+                        enqueue(t.id);
+                    emit activityChanged();
+                    pump();
+                }, Qt::QueuedConnection);
+            });
+        }
         m_db->requeueUntriedTitles();
         for (const TrackInfo &t : m_db->pendingRecordings())
             enqueue(t.id);
@@ -792,10 +945,21 @@ void ImportManager::runJob(qint64 trackId, const ImportSettings &cfg)
                 anyChecked = true;
                 const AudioAlign::Result ar = AudioAlign::align(trackPcm, pcm);
                 if (audioMatches(ar)) {
-                    checked(c, QStringLiteral("shared"));
-                    finish(QStringLiteral("done"), existing->id,
-                           QStringLiteral("shares the video of “%1”").arg(existing->title));
-                    return;
+                    // A video that plays YouTube's audio is only for a track
+                    // of lesser quality; this one's audio has to go in.
+                    const bool wanted = cfg.replaceAudio && existing->audioSource != QLatin1String("library")
+                        && libraryIsBetter(track, storedYoutubeQuality(*existing));
+                    if (!wanted || (audioReplaceable(ar) && putLibraryAudioIn(*existing, track, ar, cfg, &error))) {
+                        checked(c, QStringLiteral("shared"));
+                        finish(QStringLiteral("done"), existing->id,
+                               QStringLiteral("shares the video of “%1”").arg(existing->title));
+                        return;
+                    }
+                    if (m_cancel)
+                        return cleanup();
+                    checked(c, QStringLiteral("different-mix"));
+                    reasons << QStringLiteral("“%1” has a different mix: the library's audio cannot be put in").arg(c.title);
+                    continue;
                 }
             }
             if (m_cancel)
@@ -838,6 +1002,34 @@ void ImportManager::runJob(qint64 trackId, const ImportSettings &cfg)
             reasons << QStringLiteral("“%1” is a different recording").arg(c.title);
             QDir(dir).removeRecursively();
             continue;
+        }
+
+        // The library's audio is the better one but does not line up with
+        // this video's: another mix or master. YouTube's audio must not take
+        // its place, so this is not a video for the track. (A lossy file may
+        // still be the lesser one next to the account's audio.)
+        if (cfg.replaceAudio && libraryIsBetter(track, youtubeQuality(info)) && !audioReplaceable(ar)) {
+            bool premiumWins = false;
+            if (!track.lossless && yt.hasCookies()) {
+                QString premiumFile;
+                QJsonObject premiumInfo;
+                ++nAudio;
+                if (yt.downloadAudio(c.id, dir, &premiumFile, &premiumInfo, &error, true)
+                    && !libraryIsBetter(track, youtubeQuality(premiumInfo))) {
+                    premiumWins = true;
+                    audioFile = premiumFile;
+                    info = premiumInfo;
+                }
+                if (m_cancel)
+                    return cleanup();
+            }
+            if (!premiumWins) {
+                checked(c, QStringLiteral("different-mix"),
+                        QStringLiteral("waveform %1s of %2s").arg(ar.pcmMatchedSec, 0, 'f', 0).arg(ar.fpMatchedSec, 0, 'f', 0));
+                reasons << QStringLiteral("“%1” has a different mix: the library's audio cannot be put in").arg(c.title);
+                QDir(dir).removeRecursively();
+                continue;
+            }
         }
 
         if (cfg.skipStillImages) {
@@ -919,7 +1111,7 @@ void ImportManager::runJob(qint64 trackId, const ImportSettings &cfg)
 
     // With a Premium account the audio comes at about twice the bitrate. The
     // candidates were compared on the ordinary audio, which needs no account.
-    if (yt.hasCookies()) {
+    if (yt.hasCookies() && !QFileInfo(ytAudio).fileName().startsWith(QLatin1String("premium."))) {
         report(QStringLiteral("Fetching Premium audio"), -1, chosen.title);
         QString premiumFile;
         QJsonObject premiumInfo;
@@ -951,17 +1143,12 @@ void ImportManager::runJob(qint64 trackId, const ImportSettings &cfg)
     plan.track = track;
     plan.ytId = chosen.id;
     plan.align = alignment;
-    plan.replaceAudio = cfg.replaceAudio && audioReplaceable(alignment)
-        && trackQuality(track) > youtubeQuality(ytInfo) * 1.15;
+    plan.replaceAudio = cfg.replaceAudio && audioReplaceable(alignment) && libraryIsBetter(track, youtubeQuality(ytInfo));
 
     report(plan.replaceAudio ? QStringLiteral("Muxing library audio") : QStringLiteral("Muxing"), -1, chosen.title);
     QString audioDetail;
     bool muxed = Muxer::mux(plan, &m_cancel, &audioDetail, &error);
-    if (!muxed && !m_cancel && plan.replaceAudio) {
-        qWarning().noquote() << "[import] audio replacement failed, keeping YouTube audio:" << error;
-        plan.replaceAudio = false;
-        muxed = Muxer::mux(plan, &m_cancel, &audioDetail, &error);
-    }
+    // No falling back to YouTube's audio when the library's cannot be put in.
     if (!muxed) {
         if (m_cancel)
             return cleanup();

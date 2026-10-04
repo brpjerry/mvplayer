@@ -76,6 +76,10 @@ public:
     // Videos imported before their picture was reliably checked for stills.
     QVector<VideoInfo> videosNotStillChecked();
     void markStillChecked(qint64 videoId);
+    // Videos whose main audio is YouTube's and has not been reviewed: where
+    // the library's own audio is the better one, it belongs in the video.
+    QVector<VideoInfo> videosNotAudioChecked();
+    void markAudioChecked(qint64 videoId);
     // Makes the tracks that point at a video pending again.
     void requeueTracksOfVideo(qint64 videoId);
 

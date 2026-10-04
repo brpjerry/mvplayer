@@ -305,6 +305,21 @@ bool Database::init(QString *error)
         }
     }
 
+    // Added after 0.2.0: existing rows keep 0 and their audio is reviewed once.
+    bool hasAudioFlag = false;
+    if (info.exec(QStringLiteral("PRAGMA table_info(videos)"))) {
+        while (info.next())
+            hasAudioFlag |= info.value(1).toString() == QLatin1String("audio_checked");
+    }
+    if (!hasAudioFlag) {
+        QSqlQuery q(db);
+        if (!q.exec(QStringLiteral("ALTER TABLE videos ADD COLUMN audio_checked INTEGER NOT NULL DEFAULT 0"))) {
+            if (error)
+                *error = q.lastError().text();
+            return false;
+        }
+    }
+
     // Added after 0.1.2: which recording a file holds, and the fingerprint
     // that tells. Existing rows are identified by the next scan.
     bool hasRecording = false;
@@ -683,8 +698,8 @@ qint64 Database::insertVideo(const VideoInfo &v)
     q.prepare(QStringLiteral(
         "INSERT INTO videos (yt_id, path, thumb, title, artist, album_artist, album, genre, year,"
         " track_no, duration, width, height, fps, vcodec, audio_source, audio_detail, yt_title,"
-        " yt_channel, tags_json, added_at, yt_abr, still_checked)"
-        " VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,1)"));
+        " yt_channel, tags_json, added_at, yt_abr, still_checked, audio_checked)"
+        " VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,1,1)"));
     q.addBindValue(v.ytId);
     q.addBindValue(storedPath(v.path));
     q.addBindValue(storedPath(v.thumb));
@@ -764,6 +779,27 @@ void Database::markStillChecked(qint64 videoId)
 {
     QSqlQuery q(conn());
     q.prepare(QStringLiteral("UPDATE videos SET still_checked = 1 WHERE id = ?"));
+    q.addBindValue(videoId);
+    run(q);
+}
+
+QVector<VideoInfo> Database::videosNotAudioChecked()
+{
+    QVector<VideoInfo> out;
+    QSqlQuery q(conn());
+    q.prepare(QStringLiteral("SELECT %1 FROM videos WHERE audio_checked = 0"
+                             " AND COALESCE(audio_source, '') != 'library' ORDER BY id").arg(QLatin1String(kVideoCols)));
+    if (run(q)) {
+        while (q.next())
+            out << resolved(readVideo(q));
+    }
+    return out;
+}
+
+void Database::markAudioChecked(qint64 videoId)
+{
+    QSqlQuery q(conn());
+    q.prepare(QStringLiteral("UPDATE videos SET audio_checked = 1 WHERE id = ?"));
     q.addBindValue(videoId);
     run(q);
 }

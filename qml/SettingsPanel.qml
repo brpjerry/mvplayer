@@ -490,7 +490,7 @@ Popup {
 
             SwitchRow {
                 label: "Use my library's audio"
-                hint: "When your track is higher quality than YouTube's, it is synced to the video and used as the main audio."
+                hint: "When your track is higher quality than YouTube's, it is synced to the video and used as the main audio. A video it cannot be synced to is not imported."
                 checked: App.replaceAudio
                 onToggled: (c) => App.replaceAudio = c
             }

@@ -94,14 +94,24 @@ echo "== moved library"
 # A library written by 0.1.2 (absolute video paths) whose MV folder and music
 # folder are both somewhere else now: the video must still be found and its
 # track must keep it, with no new lookup.
+#
+# Its videos play YouTube's audio although the tracks are FLAC, as 0.1.2 left
+# them when the audio could not be swapped. "Song one" is the same recording
+# as its video: the FLAC goes in. "Song two" has the video of something else:
+# that is not its video, and it goes.
 mkdir -p "$WORK/mvlib/A"
-cp "$WORK/out.mkv" "$WORK/mvlib/A/Song one [abc].mkv"
+ffmpeg -v error -y -i "$WORK/mv.mkv" -i "$WORK/lib/A/one.flac" -map 0:v:0 -map 1:a:0 -c:v copy -c:a libopus -b:a 96k \
+    -shortest "$WORK/mvlib/A/Song one [abc].mkv"
+ffmpeg -v error -y -i "$WORK/mv.mkv" -map 0:v:0 -map 0:a:0 -c copy -t 20 "$WORK/mvlib/A/Song two [bad].mkv"
 python3 - "$WORK/mvlib/.mvplayer/library.db" <<'PY'
 import sqlite3, sys
 db = sqlite3.connect(sys.argv[1])
 db.execute("INSERT INTO videos (yt_id, path, thumb, title, added_at, still_checked) "
            "VALUES ('abc', '/old/place/MVs/A/Song one [abc].mkv', '/old/place/MVs/A/Song one [abc].jpg', 'Song one', 1, 1)")
 db.execute("UPDATE tracks SET state = 'done', video_id = (SELECT id FROM videos) WHERE title = 'Song one'")
+db.execute("INSERT INTO videos (yt_id, path, title, yt_title, added_at, still_checked) "
+           "VALUES ('bad', '/old/place/MVs/A/Song two [bad].mkv', 'Song two', 'Something else', 1, 1)")
+db.execute("UPDATE tracks SET state = 'done', video_id = (SELECT id FROM videos WHERE yt_id = 'bad') WHERE title = 'Song two'")
 db.execute("PRAGMA user_version = 2")
 db.commit()
 PY
@@ -117,12 +127,16 @@ echo "$OUT" | grep -E "^\[scan\]|^done:"
 python3 - "$WORK/mvlib2/.mvplayer/library.db" <<'PY'
 import sqlite3, sys
 db = sqlite3.connect(sys.argv[1])
-assert db.execute("SELECT path, thumb FROM videos").fetchall() == [("A/Song one [abc].mkv", "A/Song one [abc].jpg")]
+assert db.execute("SELECT path, thumb, audio_source FROM videos").fetchall() == [("A/Song one [abc].mkv", "A/Song one [abc].jpg", "library")]
 states = dict(db.execute("SELECT title, state FROM tracks"))
 assert states == {"Song one": "done", "Song two": "not_found"}, states
 assert db.execute("SELECT COUNT(*) FROM tracks WHERE video_id IS NOT NULL AND path LIKE '%/lib2/A/one.flac'").fetchone()[0] == 1
 print("moved library ok")
 PY
+[[ ! -e "$WORK/mvlib2/A/Song two [bad].mkv" ]]
+STREAMS=$(cd "$WORK/mvlib2/A" && ffprobe -v error -show_entries stream=codec_name -of csv=p=0 "Song one [abc].mkv" | tr -d '\r' | tr '\n' ' ')
+echo "streams: $STREAMS"
+[[ "$STREAMS" == "h264 flac opus " ]]
 
 echo "== recordings"
 # The same library on a device that keeps it as Opus, under other file names,
@@ -191,26 +205,48 @@ if [[ -n "$EXE" ]]; then
     PREMIUM="$WORK/fake-premium.cmd"
 fi
 ! "$BUILD/mvplayer-import" --music-dir "$WORK/lib3" --mv-dir "$WORK/mvlib2" --cookies "$WORK/track.flac" >/dev/null
-OUT=$(MVPLAYER_YTDLP="$PREMIUM" timeout 120 "$BUILD/mvplayer-import" --music-dir "$WORK/lib3" --mv-dir "$WORK/mvlib2" \
+# A track of lesser quality than YouTube's audio, so its video plays YouTube's.
+mkdir -p "$WORK/lib4/C" "$WORK/mvlib4/C"
+ffmpeg -v error -y -i "$WORK/lib2/A/one.flac" -c:a libopus -b:a 32k -metadata title="Low" "$WORK/lib4/C/low.opus"
+touch -d "10 seconds ago" "$WORK/lib4/C/low.opus"
+ffmpeg -v error -y -i "$WORK/mv.mkv" -i "$WORK/lib2/A/one.flac" -map 0:v:0 -map 1:a:0 -c:v copy -c:a libopus -b:a 96k \
+    -shortest "$WORK/mvlib4/C/Low [xyz].mkv"
+echo 200 > "$WORK/calls"
+MVPLAYER_YTDLP="$FAKE" timeout 60 "$BUILD/mvplayer-import" --music-dir "$WORK/lib4" --mv-dir "$WORK/mvlib4" >/dev/null 2>&1
+python3 - "$WORK/mvlib4/.mvplayer/library.db" <<'PY'
+import sqlite3, sys
+db = sqlite3.connect(sys.argv[1])
+db.execute("INSERT INTO videos (yt_id, path, title, audio_source, added_at, still_checked, audio_checked) "
+           "VALUES ('xyz', 'C/Low [xyz].mkv', 'Low', 'youtube', 1, 1, 1)")
+db.execute("UPDATE tracks SET state = 'done', video_id = (SELECT id FROM videos)")
+db.commit()
+PY
+OUT=$(MVPLAYER_YTDLP="$PREMIUM" timeout 120 "$BUILD/mvplayer-import" --music-dir "$WORK/lib4" --mv-dir "$WORK/mvlib4" \
     --cookies "$WORK/cookies.txt" --check-quality 2>&1)
-echo "$OUT" | grep -E "^\[quality\]"
+echo "$OUT" | grep -E "^\[quality\]|^\[audio\]|warning"
 [[ "$OUT" == *"1 upgraded, 0 failed"* ]]
 [[ $(wc -l < "$WORK/premium-args") -eq 2 ]]
 ! grep -q -e "--cookies $WORK/cookies.txt" "$WORK/premium-args"
 grep -q "secret" "$WORK/cookies.txt"
 # (By its relative name: MSYS2 does not translate a path with brackets for ffprobe.)
-STREAMS=$(cd "$WORK/mvlib2/A" && ffprobe -v error -show_entries stream=codec_type,codec_name -of csv=p=0 "Song one [abc].mkv" | tr -d '\r' | tr '\n' ' ')
+STREAMS=$(cd "$WORK/mvlib4/C" && ffprobe -v error -show_entries stream=codec_type,codec_name -of csv=p=0 "Low [xyz].mkv" | tr -d '\r' | tr '\n' ' ')
 echo "streams: $STREAMS"
 [[ "$STREAMS" == "h264,video opus,audio " ]]
-python3 - "$WORK/mvlib2/.mvplayer/library.db" <<'PY'
+python3 - "$WORK/mvlib4/.mvplayer/library.db" <<'PY'
 import sqlite3, sys
 db = sqlite3.connect(sys.argv[1])
 assert db.execute("SELECT yt_abr, audio_source FROM videos").fetchall() == [(250.0, "youtube")]
 PY
 # Already built from the account's audio: nothing is asked again.
-MVPLAYER_YTDLP="$PREMIUM" timeout 120 "$BUILD/mvplayer-import" --music-dir "$WORK/lib3" --mv-dir "$WORK/mvlib2" \
+MVPLAYER_YTDLP="$PREMIUM" timeout 120 "$BUILD/mvplayer-import" --music-dir "$WORK/lib4" --mv-dir "$WORK/mvlib4" \
     --cookies "$WORK/cookies.txt" --check-quality >/dev/null 2>&1
 [[ $(wc -l < "$WORK/premium-args") -eq 2 ]]
+# The library's FLAC is never traded for the account's audio: "Uta ichi" has
+# it in its video, and only an Opus copy of the track is left to rebuild from.
+OUT=$(MVPLAYER_YTDLP="$PREMIUM" timeout 120 "$BUILD/mvplayer-import" --music-dir "$WORK/lib3" --mv-dir "$WORK/mvlib2" \
+    --cookies "$WORK/cookies.txt" --check-quality 2>&1)
+[[ "$OUT" == *"0 upgraded, 0 failed"* ]]
+[[ $(cd "$WORK/mvlib2/A" && ffprobe -v error -show_entries stream=codec_name -of csv=p=0 "Song one [abc].mkv" | tr -d '\r' | tr '\n' ' ') == "h264 flac opus " ]]
 
 echo "== binaries start"
 "$BUILD/mvplayer-import" --help >/dev/null

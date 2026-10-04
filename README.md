@@ -95,7 +95,16 @@ For every track without a video (`src/core/ImportManager.cpp`):
    YouTube's audio, its samples are copied bit-for-bit into the matching
    regions and the video's own audio (level-matched) fills the gaps, with 20 ms
    crossfades. The result is the default FLAC audio track; YouTube's audio is
-   kept as a second track. Otherwise the YouTube audio is used as is.
+   kept as a second track.
+
+YouTube's audio is only ever a video's main audio when the track is the
+lesser of the two (a low-bitrate file). When the track is the better one and
+does not line up with a video's sound — another mix or master, a live take —
+that video is passed over, and if no candidate fits the track counts as
+having no video. Videos imported by 0.2.0 and earlier that kept YouTube's
+audio next to a better track are put right on the first start: the track's
+audio is put in where it fits, and the video is removed where it does not.
+Turning off "Use my library's audio" in Settings lifts all of this.
 
 The music folders are watched; added tracks are picked up within a few
 seconds, edited tags on the next periodic rescan. Tracks with no video are

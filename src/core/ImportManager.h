@@ -1,5 +1,6 @@
 #pragma once
 
+#include "core/AudioAlign.h"
 #include "core/Database.h"
 #include "core/LibraryScanner.h"
 
@@ -76,7 +77,7 @@ public:
     bool scanning() const { return m_scanning; }
     int queuedCount() const { return m_queue.size(); }
     int activeCount() const { return m_active; }
-    bool busy() const { return m_scanning || m_auditing || m_upgrading || m_blocked || m_active > 0 || !m_queue.isEmpty(); }
+    bool busy() const { return m_scanning || m_auditing || m_auditingAudio || m_upgrading || m_blocked || m_active > 0 || !m_queue.isEmpty(); }
 
     static QString dataDir(const QString &mvDir);
 
@@ -95,6 +96,10 @@ private:
     void onJobFinished(qint64 trackId);
     void runJob(qint64 trackId, const ImportSettings &cfg);
     void auditStills();
+    void auditAudio(const ImportSettings &cfg);
+    // Rebuilds a video's file with the track's audio as its main audio.
+    bool putLibraryAudioIn(const VideoInfo &video, const TrackInfo &track, const AudioAlign::Result &align,
+                           const ImportSettings &cfg, QString *error);
     void upgradeVideos(const ImportSettings &cfg);
     // "done" when the video was rebuilt, "skipped" when it is as good as it gets.
     QString upgradeVideo(const VideoInfo &video, const ImportSettings &cfg, QString *detail);
@@ -120,6 +125,8 @@ private:
     int m_active = 0;
     bool m_scanning = false;
     bool m_auditing = false;
+    std::atomic<bool> m_auditingAudio{false};
+    bool m_audioAuditDue = false;
     std::atomic<bool> m_upgrading{false};
     std::atomic<int> m_upgradeDone{0};
     std::atomic<int> m_upgradeTotal{0};
