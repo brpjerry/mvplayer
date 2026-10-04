@@ -13,6 +13,11 @@
 // a scene in the middle, or run on after the song ends. The result is a list
 // of segments on the video timeline, each mapping sample-accurately onto the
 // track; everything between segments exists only in the video.
+//
+// Nor is an upload always the album master: it is commonly quieter, equalised
+// differently, of inverted polarity, or a few milliseconds longer or shorter
+// over the song. The waveforms are therefore compared in the mid band, by the
+// size of their correlation, and at an offset that is followed as it drifts.
 namespace AudioAlign {
 
 constexpr int kRate = 11025; // analysis sample rate (mono)
@@ -29,8 +34,10 @@ struct Result {
     double videoSec = 0;
     double fpMatchedSec = 0;   // video time whose fingerprint matches the track
     QVector<Segment> segments; // regions where the waveforms line up
-    double pcmMatchedSec = 0;
+    double pcmMatchedSec = 0;  // length of the segments
+    double goodSec = 0;        // of that, where the two demonstrably are the same audio
     double gain = 1.0;         // track level relative to the video's audio
+    bool inverted = false;     // the video's audio has the opposite polarity
     QString summary() const;
 };
 

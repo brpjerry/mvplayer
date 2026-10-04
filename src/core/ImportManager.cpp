@@ -51,27 +51,16 @@ constexpr int kFailStreakLimit = 8;         // consecutive network failures that
 constexpr int kMaxPauseSecs = 2 * 60 * 60;
 constexpr qint64 kLogRotateBytes = 8 * 1024 * 1024;
 
-// Is the waveform match complete enough to swap the audio without audible seams?
+// Is this the track's own recording, so that its audio can take the video's
+// place? About two thirds of the track (or of a shorter video) have to be
+// demonstrably the same waveform. Measured on a real library: another master
+// of the recording (quieter, re-equalised, drifting, inverted) shows 67% and
+// more; a remix over the same vocal 59%, live takes and covers over the same
+// backing 25–51%.
 bool audioReplaceable(const AudioAlign::Result &r)
 {
-    if (r.segments.isEmpty() || r.pcmMatchedSec < 20)
-        return false;
-    if (r.pcmMatchedSec >= 0.85 * r.fpMatchedSec)
-        return true;
-    // The same master with stretches the video changed (effects, dialogue):
-    // every segment sits at one offset and the waveforms agree closely there.
-    // The track goes in where it matches; the video keeps its own sound
-    // in between.
-    qint64 lo = r.segments.first().lag, hi = lo;
-    double weighted = 0, total = 0;
-    for (const AudioAlign::Segment &s : r.segments) {
-        lo = std::min(lo, s.lag);
-        hi = std::max(hi, s.lag);
-        weighted += s.corr * double(s.mvEnd - s.mvStart);
-        total += double(s.mvEnd - s.mvStart);
-    }
-    return hi - lo <= AudioAlign::kRate / 200 && total > 0 && weighted / total >= 0.9
-        && r.pcmMatchedSec >= 0.6 * r.fpMatchedSec;
+    const double whole = std::min(r.trackSec, r.videoSec);
+    return !r.segments.isEmpty() && r.goodSec >= 0.65 * whole && r.goodSec >= 0.6 * r.fpMatchedSec;
 }
 
 // The library's file is the better audio: it is what the video must play.

@@ -75,7 +75,7 @@ struct NativeSegment {
 
 // The analysis ran at 11 kHz; nudge each lag to the exact sample at the
 // track's own rate so crossfades stay phase-coherent.
-qint64 refineNativeLag(const RawPcm &T, const RawPcm &M, qint64 start, qint64 end, qint64 lag, int rate)
+qint64 refineNativeLag(const RawPcm &T, const RawPcm &M, qint64 start, qint64 end, qint64 lag, int rate, int sign)
 {
     const int radius = rate / AudioAlign::kRate + 3;
     const qint64 N = std::min<qint64>(end - start - 2 * radius, qint64(rate) * 4);
@@ -102,7 +102,7 @@ qint64 refineNativeLag(const RawPcm &T, const RawPcm &M, qint64 start, qint64 en
             dot += double(m[i]) * tp[i];
             t2 += double(tp[i]) * tp[i];
         }
-        const double c = t2 > 0 ? dot / std::sqrt(t2) : -1e300;
+        const double c = t2 > 0 ? sign * dot / std::sqrt(t2) : -1e300;
         if (c > best) {
             best = c;
             bestLag = lag + s;
@@ -131,7 +131,7 @@ bool compose(const RawPcm &T, const RawPcm &M, const QVector<NativeSegment> &seg
     const int ch = M.channels;
     const qint64 fade = std::max<qint64>(8, rate / 50); // 20 ms
     const qint64 half = fade / 2;
-    const bool applyGain = std::abs(20 * std::log10(gain)) > 0.3;
+    const bool applyGain = gain < 0 || std::abs(20 * std::log10(gain)) > 0.3;
     const qint64 block = 1 << 15;
     std::vector<int32_t> buf(size_t(block) * ch);
 
@@ -239,7 +239,7 @@ bool mux(const Plan &plan, const std::atomic<bool> *cancel, QString *audioDetail
                 NativeSegment n;
                 n.start = std::clamp<qint64>(std::llround(s.mvStart * k), 0, M.frames);
                 n.end = std::clamp<qint64>(std::llround(s.mvEnd * k), 0, M.frames);
-                n.lag = refineNativeLag(T, M, n.start, n.end, std::llround(s.lag * k), rate);
+                n.lag = refineNativeLag(T, M, n.start, n.end, std::llround(s.lag * k), rate, plan.align.inverted ? -1 : 1);
                 // Never read outside the track.
                 n.start = std::max(n.start, n.lag);
                 n.end = std::min(n.end, T.frames + n.lag);
@@ -251,7 +251,10 @@ bool mux(const Plan &plan, const std::atomic<bool> *cancel, QString *audioDetail
                     *error = QStringLiteral("no usable segments after refinement");
                 return false;
             }
-            const double gain = std::clamp(plan.align.gain, 0.25, 4.0);
+            // The track is copied as it is; where the upload's polarity is the
+            // other way round, it is the video's own audio that is turned over,
+            // so the two meet in phase at the joins.
+            const double gain = std::clamp(plan.align.gain, 0.25, 4.0) * (plan.align.inverted ? -1 : 1);
             if (!compose(T, M, segs, gain, rate, outRaw, cancel, error)) {
                 if (error && error->isEmpty())
                     *error = QStringLiteral("cancelled");

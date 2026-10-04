@@ -44,6 +44,26 @@ assert abs(gain - 3.0) < 0.2, f"gain {gain}"
 print("alignment ok")
 PY
 
+echo "== align: another master"
+# The upload of a song is often not the album master: quieter, with the
+# treble rolled off, of inverted polarity, and a few milliseconds longer over
+# its length. It is still the same recording, and has to be found as one piece.
+ffmpeg -v error -y -i "$WORK/track.flac" \
+    -af "asetrate=48000*0.99998,aresample=48000,lowpass=f=5000,volume=-4dB,aeval=-val(0)|-val(1)" \
+    -c:a libopus -b:a 96k "$WORK/master.opus"
+SUMMARY=$("$BUILD/mvplayer-import" align "$WORK/track.flac" "$WORK/master.opus")
+echo "$SUMMARY"
+python3 - "$SUMMARY" <<'PY'
+import re, sys
+s = sys.argv[1]
+segs = re.findall(r"\[video ([\d.]+)–([\d.]+)s", s)
+assert len(segs) == 1 and float(segs[0][1]) - float(segs[0][0]) > 49, segs
+assert "polarity inverted" in s, s
+assert int(re.search(r"(\d+)% of it plainly the same", s).group(1)) >= 90, s
+assert abs(float(re.search(r"gain ([-\d.]+) dB", s).group(1)) - 4.0) < 1.0, s
+print("another master ok")
+PY
+
 echo "== mux"
 "$BUILD/mvplayer-import" mux "$WORK/track.flac" "$WORK/mv.mkv" "$WORK/out.mkv"
 STREAMS=$(ffprobe -v error -show_entries stream=codec_type,codec_name -of csv=p=0 "$WORK/out.mkv" | tr '\n' ' ')
