@@ -1,5 +1,5 @@
 cmake_minimum_required(VERSION 3.21)
-set(MV_VERSION "0.1.2" CACHE STRING "Version recorded in the build")
+set(MV_VERSION "0.2.0" CACHE STRING "Version recorded in the build")
 project(mvplayer VERSION ${MV_VERSION} LANGUAGES CXX)
 
 set(CMAKE_CXX_STANDARD 20)
@@ -27,6 +27,7 @@ qt_add_library(mvcore STATIC
     src/core/Matcher.h src/core/Matcher.cpp
     src/core/YtDlp.h src/core/YtDlp.cpp
     src/core/AudioAlign.h src/core/AudioAlign.cpp
+    src/core/AudioPrint.h src/core/AudioPrint.cpp
     src/core/Muxer.h src/core/Muxer.cpp
     src/core/LibraryScanner.h src/core/LibraryScanner.cpp
     src/core/ImportManager.h src/core/ImportManager.cpp

@@ -21,18 +21,6 @@
 
 namespace {
 
-double trackQuality(const TrackInfo &t)
-{
-    if (t.lossless)
-        return 1e6;
-    double eff = 1.0;
-    if (t.codec == QLatin1String("opus"))
-        eff = 1.5;
-    else if (t.codec == QLatin1String("aac") || t.codec == QLatin1String("vorbis"))
-        eff = 1.2;
-    return t.bitrate * eff;
-}
-
 double youtubeQuality(const QJsonObject &info)
 {
     double abr = info.value(QLatin1String("abr")).toDouble();
@@ -51,8 +39,11 @@ double youtubeQuality(const QJsonObject &info)
 bool audioMatches(const AudioAlign::Result &r)
 {
     const double m = r.fpMatchedSec;
-    if (m < 0.3 * r.videoSec)
-        return false; // the song is only a small part of something longer
+    // The song is only part of something longer. That includes a short edit
+    // of a song (the cut used as a show's opening, say) against the video of
+    // the full version: it only gets a video of about its own length.
+    if (m < 0.5 * r.videoSec)
+        return false;
     return m >= 0.5 * r.trackSec || (m >= 0.8 * r.videoSec && m >= 45);
 }
 
@@ -184,7 +175,7 @@ void ImportManager::requeueRetryable()
     // Failed lookups come back after 30 minutes, doubling each time; "no
     // video" verdicts after a couple of weeks, in case one has been published.
     m_db->requeueStale(30 * 60, qint64(settings().retryNotFoundDays) * 86400);
-    for (const TrackInfo &t : m_db->tracksInState({QStringLiteral("pending")}))
+    for (const TrackInfo &t : m_db->pendingRecordings())
         enqueue(t.id);
     // The caller starts the work: reporting "idle" from here would end a
     // headless run before its first scan.
@@ -238,7 +229,7 @@ void ImportManager::resumeNow()
     qInfo("[import] resuming");
     appendLog({{QStringLiteral("event"), QStringLiteral("resumed")}});
     // Tracks set aside while paused are still pending in the database.
-    for (const TrackInfo &t : m_db->tracksInState({QStringLiteral("pending")}))
+    for (const TrackInfo &t : m_db->pendingRecordings())
         enqueue(t.id);
     emit activityChanged();
     pump();
@@ -294,7 +285,7 @@ void ImportManager::auditStills()
         for (qint64 id : removed)
             emit videoRemoved(id);
         if (!removed.isEmpty()) {
-            for (const TrackInfo &t : m_db->tracksInState({QStringLiteral("pending")}))
+            for (const TrackInfo &t : m_db->pendingRecordings())
                 enqueue(t.id);
         }
         pump();
@@ -304,7 +295,7 @@ void ImportManager::auditStills()
 void ImportManager::retryUnmatched()
 {
     m_db->resetTracks({QStringLiteral("not_found"), QStringLiteral("failed")});
-    for (const TrackInfo &t : m_db->tracksInState({QStringLiteral("pending")}))
+    for (const TrackInfo &t : m_db->pendingRecordings())
         enqueue(t.id);
     emit activityChanged();
     pump();
@@ -328,8 +319,9 @@ void ImportManager::onScanFinished(const LibraryScanner::Result &r)
         if (!add.isEmpty())
             m_watcher.addPaths(add);
 
-        for (qint64 id : r.queued)
-            enqueue(id);
+        m_db->requeueUntriedTitles();
+        for (const TrackInfo &t : m_db->pendingRecordings())
+            enqueue(t.id);
         for (qint64 id : r.videosChanged)
             emit videoChanged(id);
     }
@@ -375,6 +367,11 @@ void ImportManager::onJobFinished(qint64 trackId)
 {
     m_pending.remove(trackId);
     m_active = qMax(0, m_active - 1);
+    // No video under this title: the recording's other titles get their turn.
+    if (m_started && m_db->requeueUntriedTitles() > 0) {
+        for (const TrackInfo &t : m_db->pendingRecordings())
+            enqueue(t.id);
+    }
     pump();
 }
 

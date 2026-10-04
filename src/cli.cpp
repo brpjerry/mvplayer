@@ -10,6 +10,7 @@
 //       Reports whether the picture is a still image.
 
 #include "core/AudioAlign.h"
+#include "core/AudioPrint.h"
 #include "core/ImportManager.h"
 #include "core/Muxer.h"
 #include "core/TagReader.h"
@@ -55,7 +56,7 @@ int main(int argc, char **argv)
         {QStringLiteral("retry"), QStringLiteral("Retry tracks that previously failed or had no video.")},
         {QStringLiteral("ytdlp-arg"), QStringLiteral("Extra argument passed to yt-dlp (repeatable)."), QStringLiteral("arg")},
     });
-    parser.addPositionalArgument(QStringLiteral("command"), QStringLiteral("Optional: align <track> <video> | mux <track> <video> <out.mkv> | check-video <video> [keyframes]"));
+    parser.addPositionalArgument(QStringLiteral("command"), QStringLiteral("Optional: align <track> <video> | mux <track> <video> <out.mkv> | check-video <video> [keyframes] | same-recording <file> <file>"));
     parser.process(app);
 
     const QStringList pos = parser.positionalArguments();
@@ -69,6 +70,21 @@ int main(int argc, char **argv)
             return 1;
         }
         out << AudioAlign::align(a, b).summary() << Qt::endl;
+        return 0;
+    }
+
+    if (pos.value(0) == QLatin1String("same-recording")) {
+        if (pos.size() != 3)
+            parser.showHelp(2);
+        AudioPrint::Print a, b;
+        QString err;
+        if (!AudioPrint::ofFile(pos[1], &a, nullptr, &err) || !AudioPrint::ofFile(pos[2], &b, nullptr, &err)) {
+            out << "error: " << err << Qt::endl;
+            return 1;
+        }
+        out << (AudioPrint::sameRecording(a, b) ? "same" : "different") << ": "
+            << QString::number(AudioPrint::distance(a, b) * 100, 'f', 1) << "% of fingerprint bits differ, "
+            << a.size() << " and " << b.size() << " items" << Qt::endl;
         return 0;
     }
 
