@@ -1075,23 +1075,43 @@ void ImportManager::runJob(qint64 trackId, const ImportSettings &cfg)
                 anyChecked = true;
                 const AudioAlign::Result ar = fitted(AudioAlign::align(trackPcm, pcm), track, existing->ytTitle);
                 if (audioMatches(ar)) {
-                    // A video that plays YouTube's audio is only for a track
-                    // of lesser quality; this one's audio has to go in.
-                    const bool wanted = cfg.replaceAudio && !existing->review
-                        && existing->audioSource != QLatin1String("library")
-                        && libraryIsBetter(track, storedYoutubeQuality(*existing));
-                    if (!wanted || (audioReplaceable(ar) && putLibraryAudioIn(*existing, track, ar, cfg, &error))) {
+                    // The video belongs to another track already. This one
+                    // joins it when it is demonstrably the same recording (a
+                    // single and its album cut) — measured against the audio
+                    // the video plays, which is that other track's where the
+                    // library's was put in. Being the same song is not
+                    // enough: a live take does not get the studio video.
+                    // A track of lesser quality than YouTube's audio has no
+                    // audio of its own at stake and shares on the song alone.
+                    const bool own = cfg.replaceAudio && libraryIsBetter(track, storedYoutubeQuality(*existing));
+                    if (existing->review || !own) {
                         checked(c, QStringLiteral("shared"),
-                                QStringLiteral("already in the library through “%1”, and the same recording").arg(existing->title), &ar);
+                                existing->review ? QStringLiteral("already waiting for review through “%1”").arg(existing->title)
+                                                 : QStringLiteral("already in the library through “%1”, and the song by its fingerprints").arg(existing->title),
+                                &ar);
+                        finish(QStringLiteral("done"), existing->id,
+                               QStringLiteral("shares the video of “%1”").arg(existing->title));
+                        return;
+                    }
+                    if (audioReplaceable(ar)
+                        && (existing->audioSource == QLatin1String("library") || putLibraryAudioIn(*existing, track, ar, cfg, &error))) {
+                        checked(c, QStringLiteral("shared"),
+                                QStringLiteral("already in the library through “%1”, and the same recording: %2% of it is demonstrably the same waveform")
+                                    .arg(existing->title)
+                                    .arg(qRound(100 * ar.goodSec / qMax(1.0, std::min(ar.trackSec, ar.videoSec)))),
+                                &ar);
                         finish(QStringLiteral("done"), existing->id,
                                QStringLiteral("shares the video of “%1”").arg(existing->title));
                         return;
                     }
                     if (m_cancel)
                         return cleanup();
-                    checked(c, QStringLiteral("different-mix"),
-                            QStringLiteral("already in the library with YouTube's audio, and the track's cannot be put in"), &ar);
-                    reasons << QStringLiteral("“%1” has a different mix: the library's audio cannot be put in").arg(c.title);
+                    checked(c, QStringLiteral("different-recording"),
+                            QStringLiteral("already in the library as the video of “%1”; this track is the song but not that recording: %2% of it is demonstrably the same waveform (65% needed)")
+                                .arg(existing->title)
+                                .arg(qRound(100 * ar.goodSec / qMax(1.0, std::min(ar.trackSec, ar.videoSec)))),
+                            &ar);
+                    reasons << QStringLiteral("“%1” is the video of another recording of the song").arg(c.title);
                     continue;
                 }
                 checked(c, QStringLiteral("different"),
