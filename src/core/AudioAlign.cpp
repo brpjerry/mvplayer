@@ -366,6 +366,45 @@ FrameScan scanFrames(const std::vector<float> &M, const std::vector<float> &T, q
     return fs;
 }
 
+constexpr int kContourHop = kRate / 100; // 10 ms
+constexpr int kContourReach = 30 * 100;  // offsets tried either way: 30 s
+
+// The offset at which the loudness of the two moves together.
+void contour(const std::vector<float> &M, const std::vector<float> &T, qint64 *lag, double *corr)
+{
+    const auto envelope = [](const std::vector<float> &x) {
+        std::vector<float> e(x.size() / kContourHop);
+        double mean = 0;
+        for (size_t i = 0; i < e.size(); ++i) {
+            e[i] = std::sqrt(dot(&x[i * kContourHop], &x[i * kContourHop], kContourHop) / kContourHop);
+            mean += e[i];
+        }
+        mean /= std::max<size_t>(e.size(), 1);
+        for (float &v : e)
+            v -= float(mean);
+        return e;
+    };
+    const std::vector<float> m = envelope(M), t = envelope(T);
+    const qint64 nm = qint64(m.size()), nt = qint64(t.size());
+    double best = 0;
+    qint64 bestLag = 0;
+    for (qint64 L = -kContourReach; L <= kContourReach; ++L) {
+        // m[i] against t[i - L]
+        const qint64 a = std::max<qint64>(0, L), b = std::min(nm, nt + L);
+        if (b - a < 20 * 100)
+            continue;
+        const double d = dotLong(&m[a], &t[a - L], b - a);
+        const double e = dotLong(&m[a], &m[a], b - a) * dotLong(&t[a - L], &t[a - L], b - a);
+        const double c = e > 0 ? d / std::sqrt(e) : 0;
+        if (c > best) {
+            best = c;
+            bestLag = L;
+        }
+    }
+    *lag = bestLag * kContourHop;
+    *corr = best;
+}
+
 } // namespace
 
 QString Result::summary() const
@@ -387,6 +426,10 @@ QString Result::summary() const
         parts << QStringLiteral("%1% of it plainly the same").arg(qRound(100 * goodSec / pcmMatchedSec));
     if (inverted)
         parts << QStringLiteral("polarity inverted");
+    if (!segments.isEmpty())
+        parts << QStringLiteral("loudness agrees at %1s (%2)").arg(double(contourLag) / kRate, 0, 'f', 2).arg(contourCorr, 0, 'f', 2);
+    if (byOffset)
+        parts << QStringLiteral("same performance in another mix: placed whole by its offset");
     return parts.join(QStringLiteral(", "));
 }
 
@@ -448,6 +491,7 @@ Result align(const std::vector<int16_t> &track, const std::vector<int16_t> &vide
     std::vector<float> T(track.begin(), track.end());
     midBand(M);
     midBand(T);
+    contour(M, T, &res.contourLag, &res.contourCorr);
     std::vector<double> cumT2(T.size() + 1, 0.0);
     for (size_t i = 0; i < T.size(); ++i)
         cumT2[i + 1] = cumT2[i] + double(T[i]) * T[i];

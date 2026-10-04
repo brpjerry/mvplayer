@@ -59,8 +59,45 @@ constexpr qint64 kLogRotateBytes = 8 * 1024 * 1024;
 // backing 25–51%.
 bool audioReplaceable(const AudioAlign::Result &r)
 {
+    if (r.byOffset)
+        return true;
     const double whole = std::min(r.trackSec, r.videoSec);
     return !r.segments.isEmpty() && r.goodSec >= 0.65 * whole && r.goodSec >= 0.6 * r.fpMatchedSec;
+}
+
+// The same performance in another mix — reverb added, the voice at another
+// level — has the waveform of the track only here and there, like a cover
+// over the same backing. The waveforms cannot tell those apart; what the two
+// are called can. So when the fingerprints cover the song, the waveforms
+// agree in places at a single offset, and neither side is marked as a version
+// the other is not (live, remix, cover, ...), it is taken for the track's
+// recording, and the track is placed whole at that offset.
+AudioAlign::Result fitted(AudioAlign::Result r, const TrackInfo &track, const QString &videoTitle)
+{
+    if (r.segments.isEmpty() || audioReplaceable(r))
+        return r;
+    const double whole = std::min(r.trackSec, r.videoSec);
+    if (r.fpMatchedSec < 0.8 * whole || r.goodSec < 0.2 * whole || !Matcher::sameVersion(track, videoTitle))
+        return r;
+    // A weak waveform match can sit a beat off. The offset has to be the one
+    // at which the loudness of the two rises and falls together.
+    const AudioAlign::Segment *found = nullptr;
+    for (const AudioAlign::Segment &s : std::as_const(r.segments)) {
+        if (std::llabs(s.lag - r.contourLag) <= AudioAlign::kRate / 50
+            && (!found || s.mvEnd - s.mvStart > found->mvEnd - found->mvStart))
+            found = &s;
+    }
+    if (!found || r.contourCorr < 0.5)
+        return r;
+    AudioAlign::Segment main = *found;
+    const qint64 trackSamples = std::llround(r.trackSec * AudioAlign::kRate);
+    const qint64 videoSamples = std::llround(r.videoSec * AudioAlign::kRate);
+    main.mvStart = std::max<qint64>(main.lag, 0);
+    main.mvEnd = std::min(trackSamples + main.lag, videoSamples);
+    r.segments = {main};
+    r.pcmMatchedSec = double(main.mvEnd - main.mvStart) / AudioAlign::kRate;
+    r.byOffset = true;
+    return r;
 }
 
 // The library's file is the better audio: it is what the video must play.
@@ -383,7 +420,7 @@ void ImportManager::auditAudio(const ImportSettings &cfg)
             std::vector<int16_t> trackPcm;
             if (m_cancel || !AudioAlign::decodeMono(t.path, &trackPcm, &m_cancel, &error))
                 continue;
-            const AudioAlign::Result ar = AudioAlign::align(trackPcm, mvPcm);
+            const AudioAlign::Result ar = fitted(AudioAlign::align(trackPcm, mvPcm), t, v.ytTitle);
             if (audioMatches(ar) && audioReplaceable(ar) && putLibraryAudioIn(v, t, ar, cfg, &error)) {
                 fixed = true;
                 break;
@@ -560,7 +597,7 @@ QString ImportManager::upgradeVideo(const VideoInfo &video, const ImportSettings
         std::vector<int16_t> trackPcm, mvPcm;
         if (AudioAlign::decodeMono(source->path, &trackPcm, &m_cancel, &error)
             && AudioAlign::decodeMono(audioFile, &mvPcm, &m_cancel, &error)) {
-            plan.align = AudioAlign::align(trackPcm, mvPcm);
+            plan.align = fitted(AudioAlign::align(trackPcm, mvPcm), *source, video.ytTitle);
             plan.track = *source;
             plan.replaceAudio = audioMatches(plan.align) && audioReplaceable(plan.align)
                 && libraryIsBetter(*source, youtubeQuality(audioInfo));
@@ -932,7 +969,7 @@ void ImportManager::runJob(qint64 trackId, const ImportSettings &cfg)
             std::vector<int16_t> pcm;
             if (QFile::exists(existing->path) && AudioAlign::decodeMono(existing->path, &pcm, &m_cancel, &error)) {
                 anyChecked = true;
-                const AudioAlign::Result ar = AudioAlign::align(trackPcm, pcm);
+                const AudioAlign::Result ar = fitted(AudioAlign::align(trackPcm, pcm), track, existing->ytTitle);
                 if (audioMatches(ar)) {
                     // A video that plays YouTube's audio is only for a track
                     // of lesser quality; this one's audio has to go in.
@@ -983,7 +1020,7 @@ void ImportManager::runJob(qint64 trackId, const ImportSettings &cfg)
             continue;
         }
         anyChecked = true;
-        const AudioAlign::Result ar = AudioAlign::align(trackPcm, mvPcm);
+        const AudioAlign::Result ar = fitted(AudioAlign::align(trackPcm, mvPcm), track, c.title);
         qInfo().noquote() << QStringLiteral("[align] %1 ~ “%2” [%3]: %4").arg(track.title, c.title, c.id, ar.summary());
         if (!audioMatches(ar)) {
             checked(c, QStringLiteral("different"),

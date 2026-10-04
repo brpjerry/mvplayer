@@ -96,6 +96,13 @@ For every track without a video (`src/core/ImportManager.cpp`):
    comparison is made in the mid band, by the size of the correlation, at an
    offset that is followed as it drifts. Where the two merely match poorly
    and the video adds nothing of its own, the track still goes in.
+   The track's audio takes the video's place when about two thirds of it is
+   demonstrably the same waveform. The same performance in another mix
+   (reverb added, the voice at another level) shows less than that, as does
+   a cover over the same backing; there the fingerprints have to cover the
+   song, the loudness of the two has to move together at the offset found,
+   and neither may be marked as a version the other is not (live, remix,
+   cover, by title or album). The track is then placed whole at that offset.
 5. **Mux** (`src/core/Muxer.cpp`): if the track is higher quality than
    YouTube's audio, its samples are copied bit-for-bit into the matching
    regions and the video's own audio (level-matched) fills the gaps, with 20 ms
@@ -104,8 +111,7 @@ For every track without a video (`src/core/ImportManager.cpp`):
 
 YouTube's audio is only ever a video's main audio when the track is the
 lesser of the two (a low-bitrate file). When the track is the better one and
-is not the recording in the video — a live take, a cover, a remix, under
-about two thirds of it demonstrably the same waveform — that video is passed over, and if no candidate fits the track counts as
+is not the recording in the video — a live take, a cover, a remix — that video is passed over, and if no candidate fits the track counts as
 having no video. Videos imported by 0.2.0 and earlier that kept YouTube's
 audio next to a better track are put right on the first start: the track's
 audio is put in where it fits, and the video is removed where it does not.

@@ -38,6 +38,15 @@ struct Result {
     double goodSec = 0;        // of that, where the two demonstrably are the same audio
     double gain = 1.0;         // track level relative to the video's audio
     bool inverted = false;     // the video's audio has the opposite polarity
+    // Where the track sits going by loudness alone: the offset (in samples at
+    // kRate, as Segment::lag) at which the two rise and fall together, and
+    // how well they do. Coarse, but it cannot lock onto the wrong beat the
+    // way a weak waveform match can.
+    qint64 contourLag = 0;
+    double contourCorr = 0;
+    // Set by the importer when the same performance was recognised in another
+    // mix: the one segment places the whole track by its offset.
+    bool byOffset = false;
     QString summary() const;
 };
 
