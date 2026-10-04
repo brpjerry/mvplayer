@@ -101,8 +101,11 @@ echo "== moved library"
 # that is not its video, and it goes.
 mkdir -p "$WORK/mvlib/A"
 ffmpeg -v error -y -i "$WORK/mv.mkv" -i "$WORK/lib/A/one.flac" -map 0:v:0 -map 1:a:0 -c:v copy -c:a libopus -b:a 96k \
-    -shortest "$WORK/mvlib/A/Song one [abc].mkv"
-ffmpeg -v error -y -i "$WORK/mv.mkv" -map 0:v:0 -map 0:a:0 -c copy -t 20 "$WORK/mvlib/A/Song two [bad].mkv"
+    -shortest "$WORK/one.mkv"
+ffmpeg -v error -y -i "$WORK/mv.mkv" -map 0:v:0 -map 0:a:0 -c copy -t 20 "$WORK/bad.mkv"
+# (Moved into place: MSYS2 does not translate a path with brackets for ffmpeg.)
+mv "$WORK/one.mkv" "$WORK/mvlib/A/Song one [abc].mkv"
+mv "$WORK/bad.mkv" "$WORK/mvlib/A/Song two [bad].mkv"
 python3 - "$WORK/mvlib/.mvplayer/library.db" <<'PY'
 import sqlite3, sys
 db = sqlite3.connect(sys.argv[1])
@@ -210,7 +213,8 @@ mkdir -p "$WORK/lib4/C" "$WORK/mvlib4/C"
 ffmpeg -v error -y -i "$WORK/lib2/A/one.flac" -c:a libopus -b:a 32k -metadata title="Low" "$WORK/lib4/C/low.opus"
 touch -d "10 seconds ago" "$WORK/lib4/C/low.opus"
 ffmpeg -v error -y -i "$WORK/mv.mkv" -i "$WORK/lib2/A/one.flac" -map 0:v:0 -map 1:a:0 -c:v copy -c:a libopus -b:a 96k \
-    -shortest "$WORK/mvlib4/C/Low [xyz].mkv"
+    -shortest "$WORK/low.mkv"
+mv "$WORK/low.mkv" "$WORK/mvlib4/C/Low [xyz].mkv"
 echo 200 > "$WORK/calls"
 MVPLAYER_YTDLP="$FAKE" timeout 60 "$BUILD/mvplayer-import" --music-dir "$WORK/lib4" --mv-dir "$WORK/mvlib4" >/dev/null 2>&1
 python3 - "$WORK/mvlib4/.mvplayer/library.db" <<'PY'
