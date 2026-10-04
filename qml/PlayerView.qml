@@ -286,6 +286,10 @@ Item {
         MouseArea {
             id: boxMouse
             anchors.fill: parent
+            // Out of the scene while there is nothing to click: at rest the
+            // box lies over the whole grid, and the hover Qt re-delivers on
+            // every frame would go to it instead of the card underneath.
+            visible: box.enabled
             hoverEnabled: true
             acceptedButtons: Qt.LeftButton
             cursorShape: root.collapsed ? Qt.PointingHandCursor
@@ -324,7 +328,7 @@ Item {
 
         IconButton {
             id: closeMini
-            visible: root.collapsed && !(root.current !== null && root.current.review === true)
+            visible: box.enabled && root.collapsed && !(root.current !== null && root.current.review === true)
             opacity: boxMouse.containsMouse || hovered ? 1 : 0
             anchors.right: parent.right
             anchors.top: parent.top
