@@ -47,12 +47,12 @@ struct RawPcm {
 };
 
 bool decodeRaw(const QString &in, const QString &out, int rate, int channels, const std::atomic<bool> *cancel,
-               QString *error)
+               QString *error, int stream = 0)
 {
     const QStringList args = {
         QStringLiteral("-v"), QStringLiteral("error"), QStringLiteral("-nostdin"), QStringLiteral("-y"),
         QStringLiteral("-i"), in,
-        QStringLiteral("-map"), QStringLiteral("0:a:0"), QStringLiteral("-vn"),
+        QStringLiteral("-map"), QStringLiteral("0:a:%1").arg(stream), QStringLiteral("-vn"),
         QStringLiteral("-af"), QStringLiteral("aresample=%1:first_pts=0").arg(rate),
         QStringLiteral("-ac"), QString::number(channels),
         QStringLiteral("-c:a"), QStringLiteral("pcm_s32le"), QStringLiteral("-f"), QStringLiteral("s32le"), out,
@@ -225,7 +225,7 @@ bool mux(const Plan &plan, const std::atomic<bool> *cancel, QString *audioDetail
         const QString reviewRaw = QDir(plan.workDir).filePath(QStringLiteral("review.raw"));
 
         if (!decodeRaw(t.path, trackRaw, rate, ch, cancel, error)
-            || !decodeRaw(plan.ytAudioFile, mvRaw, rate, ch, cancel, error))
+            || !decodeRaw(plan.ytAudioFile, mvRaw, rate, ch, cancel, error, plan.ytAudioStream))
             return false;
         {
             RawPcm T, M;
@@ -300,7 +300,7 @@ bool mux(const Plan &plan, const std::atomic<bool> *cancel, QString *audioDetail
                  << QStringLiteral("-ac") << QString::number(ch) << QStringLiteral("-i") << reviewRaw;
         }
         args << QStringLiteral("-map") << QStringLiteral("0:v:0") << QStringLiteral("-map") << QStringLiteral("1:a:0")
-             << QStringLiteral("-map") << QStringLiteral("2:a:0");
+             << QStringLiteral("-map") << QStringLiteral("2:a:%1").arg(plan.ytAudioStream);
         if (plan.review)
             args << QStringLiteral("-map") << QStringLiteral("3:a:0");
         args << QStringLiteral("-c:v") << QStringLiteral("copy")
@@ -326,7 +326,7 @@ bool mux(const Plan &plan, const std::atomic<bool> *cancel, QString *audioDetail
         }
     } else {
         args << QStringLiteral("-i") << plan.videoFile << QStringLiteral("-i") << plan.ytAudioFile
-             << QStringLiteral("-map") << QStringLiteral("0:v:0") << QStringLiteral("-map") << QStringLiteral("1:a:0")
+             << QStringLiteral("-map") << QStringLiteral("0:v:0") << QStringLiteral("-map") << QStringLiteral("1:a:%1").arg(plan.ytAudioStream)
              << QStringLiteral("-c") << QStringLiteral("copy")
              << QStringLiteral("-disposition:a:0") << QStringLiteral("default")
              << QStringLiteral("-metadata:s:a:0") << QStringLiteral("title=YouTube audio");

@@ -354,7 +354,7 @@ void ImportManager::appendLog(const QJsonObject &entry)
 }
 
 bool ImportManager::putLibraryAudioIn(const VideoInfo &video, const TrackInfo &track, const AudioAlign::Result &align,
-                                      const ImportSettings &cfg, QString *error, bool review)
+                                      const ImportSettings &cfg, QString *error, bool review, int ytAudioStream)
 {
     const QString workDir = QDir(dataDir(cfg.mvDir)).filePath(QStringLiteral("tmp/audio-%1").arg(video.id));
     QDir(workDir).removeRecursively();
@@ -365,6 +365,7 @@ bool ImportManager::putLibraryAudioIn(const VideoInfo &video, const TrackInfo &t
     Muxer::Plan plan;
     plan.videoFile = video.path;
     plan.ytAudioFile = video.path;
+    plan.ytAudioStream = ytAudioStream;
     plan.workDir = workDir;
     plan.outFile = video.path;
     plan.track = track;
@@ -844,6 +845,7 @@ void ImportManager::runJob(qint64 trackId, const ImportSettings &cfg)
         static const QHash<QString, QString> decisions = {
             {QStringLiteral("match"), QStringLiteral("accept")}, {QStringLiteral("shared"), QStringLiteral("accept")},
             {QStringLiteral("unconfirmed"), QStringLiteral("review")}, {QStringLiteral("option"), QStringLiteral("review")},
+            {QStringLiteral("shared-review"), QStringLiteral("review")},
             {QStringLiteral("error"), QStringLiteral("undecided")},
         };
         QJsonObject o{
@@ -1070,8 +1072,12 @@ void ImportManager::runJob(qint64 trackId, const ImportSettings &cfg)
             }
             // Already in the MV library through another track (a single and
             // its album cut, say). It still has to be this recording.
+            // What the video sounds like: a video under review carries the
+            // track it waits for, YouTube's audio, and the review stream; an
+            // accepted one plays its track's audio where that was put in.
+            const int heard = existing->review ? 1 : 0;
             std::vector<int16_t> pcm;
-            if (QFile::exists(existing->path) && AudioAlign::decodeMono(existing->path, &pcm, &m_cancel, &error)) {
+            if (QFile::exists(existing->path) && AudioAlign::decodeMono(existing->path, &pcm, &m_cancel, &error, heard)) {
                 anyChecked = true;
                 const AudioAlign::Result ar = fitted(AudioAlign::align(trackPcm, pcm), track, existing->ytTitle);
                 if (audioMatches(ar)) {
@@ -1084,9 +1090,38 @@ void ImportManager::runJob(qint64 trackId, const ImportSettings &cfg)
                     // A track of lesser quality than YouTube's audio has no
                     // audio of its own at stake and shares on the song alone.
                     const bool own = cfg.replaceAudio && libraryIsBetter(track, storedYoutubeQuality(*existing));
+                    if (existing->review && own && audioReplaceable(ar)) {
+                        // It waits for a verdict on behalf of a track that is
+                        // only the song (a live take, looked up first). This
+                        // track is demonstrably its recording: the video is
+                        // this track's, and no longer a question.
+                        const qint64 group = existing->reviewGroup > 0 ? existing->reviewGroup : existing->id;
+                        const QVector<TrackInfo> waiting = m_db->tracksForVideo(existing->id);
+                        if (putLibraryAudioIn(*existing, track, ar, cfg, &error, false, heard)) {
+                            // Those tracks keep whatever other options they
+                            // had; with none left, this was not their video.
+                            QVector<VideoInfo> left = m_db->reviewOptions(group);
+                            if (!left.isEmpty()) {
+                                m_db->relinkTracks(existing->id, left.first().id);
+                            } else {
+                                for (const TrackInfo &w : waiting) {
+                                    m_db->setTrackResult(w.id, QStringLiteral("not_found"), 0,
+                                                         QStringLiteral("“%1” is the video of “%2” [%3]").arg(c.title, track.title, track.album));
+                                }
+                            }
+                            checked(c, QStringLiteral("shared"),
+                                    QStringLiteral("was waiting for review for another track; this one is its recording (%1% the same waveform) and takes it")
+                                        .arg(qRound(100 * ar.goodSec / qMax(1.0, std::min(ar.trackSec, ar.videoSec)))),
+                                    &ar);
+                            finish(QStringLiteral("done"), existing->id, QStringLiteral("takes “%1” out of review").arg(c.title));
+                            return;
+                        }
+                        if (m_cancel)
+                            return cleanup();
+                    }
                     if (existing->review || !own) {
-                        checked(c, QStringLiteral("shared"),
-                                existing->review ? QStringLiteral("already waiting for review through “%1”").arg(existing->title)
+                        checked(c, existing->review ? QStringLiteral("shared-review") : QStringLiteral("shared"),
+                                existing->review ? QStringLiteral("already waiting for review through “%1”: one more track for the same verdict").arg(existing->title)
                                                  : QStringLiteral("already in the library through “%1”, and the song by its fingerprints").arg(existing->title),
                                 &ar);
                         finish(QStringLiteral("done"), existing->id,

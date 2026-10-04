@@ -52,7 +52,9 @@ struct Result {
 
 // Decodes the first audio stream of `file` to mono 16-bit PCM at kRate,
 // positioned on the container timeline (starts at t=0).
-bool decodeMono(const QString &file, std::vector<int16_t> *pcm, const std::atomic<bool> *cancel, QString *error);
+// `stream`: which of the file's audio streams, from 0.
+bool decodeMono(const QString &file, std::vector<int16_t> *pcm, const std::atomic<bool> *cancel, QString *error,
+                int stream = 0);
 
 // Chromaprint items of decoded audio, about eight per second.
 QVector<quint32> fingerprintItems(const std::vector<int16_t> &pcm);
