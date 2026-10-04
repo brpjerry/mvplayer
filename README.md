@@ -144,10 +144,24 @@ block lasts, then one job tests the water before the rest follow. The import
 panel shows the pause and has a "Resume now" button; `pauseSeconds` under
 `[import]` in the config file changes the first wait.
 
-Every lookup is recorded in `<MV folder>/.mvplayer/import-log.jsonl`, one
-JSON object per track: the queries run, every candidate with its score and
-why it was dropped, what each examined candidate turned out to be, and how
-many requests it took. It is there for tuning the matching rules.
+Everything the importer decides is recorded in
+`<MV folder>/.mvplayer/import-log.jsonl`, one JSON object per line:
+
+- `lookup`: one per track looked up — the queries, every search result with
+  its score and why it was dropped or shortlisted, and for each video that
+  was examined the decision (`accept`, `review`, `reject`, `undecided`), the
+  reason in words, and the measurements behind it: fingerprint coverage, the
+  share of the track that is demonstrably the same waveform, the loudness
+  correlation and offset, segments, gain, polarity. Also what was brought into
+  the library and how many requests it took.
+- `track`: what the scan made of a file new to the library — queued, skipped
+  by its title, another file of a known recording, a known track at a new place.
+- `verdict`: a video under review accepted or turned down.
+- `paused` / `resumed`: the request circuit breaker.
+
+`tools/import-report.py <MV folder>` turns the log and the database into a
+table of tracks, the videos examined for each, the decisions, reasons and
+numbers (`--tsv` for a spreadsheet).
 
 Importing can be interrupted at any point — closing the window, logging out,
 Ctrl+C. Unfinished tracks stay queued and are picked up on the next start;

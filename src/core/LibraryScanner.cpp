@@ -100,6 +100,23 @@ Result scan(const QStringList &rootsIn, Database &db, const std::atomic<bool> *c
     QVector<TrackInfo> fresh;
     QHash<qint64, TrackInfo> current; // tracks in the library, as the database has them now
 
+    const auto note = [&](const TrackInfo &t, const QString &what, const QString &why, const QJsonObject &more = {}) {
+        QJsonObject e{
+            {QStringLiteral("event"), QStringLiteral("track")},
+            {QStringLiteral("what"), what},
+            {QStringLiteral("trackId"), t.id},
+            {QStringLiteral("recording"), t.recording},
+            {QStringLiteral("track"), t.title},
+            {QStringLiteral("artist"), t.artist},
+            {QStringLiteral("album"), t.album},
+            {QStringLiteral("path"), t.path},
+            {QStringLiteral("state"), t.state},
+            {QStringLiteral("reason"), why},
+        };
+        for (auto it = more.begin(); it != more.end(); ++it)
+            e.insert(it.key(), it.value());
+        res.events << e;
+    };
     const auto save = [&](TrackInfo &t) {
         if (!db.upsertTrack(t))
             return false;
@@ -214,8 +231,11 @@ Result scan(const QStringList &rootsIn, Database &db, const std::atomic<bool> *c
             if (g != byContent.end()) {
                 const int i = *g;
                 byContent.erase(g);
-                if (moveHere(t, gone[i]))
+                if (moveHere(t, gone[i])) {
+                    note(t, QStringLiteral("moved"), QStringLiteral("a known track at a new place (the same file): keeps its video and state"),
+                         {{QStringLiteral("from"), gone[i].path}});
                     continue;
+                }
             }
             rest << t;
         }
@@ -252,8 +272,10 @@ Result scan(const QStringList &rootsIn, Database &db, const std::atomic<bool> *c
             // Never looked up, so there is nothing to carry over or share.
             t.state = QStringLiteral("skipped");
             t.message = why;
-            if (save(t))
+            if (save(t)) {
                 ++res.added;
+                note(t, QStringLiteral("skipped"), QStringLiteral("not looked up: its title marks it as a %1").arg(why));
+            }
             continue;
         }
         todo.append({t, true});
@@ -324,6 +346,10 @@ Result scan(const QStringList &rootsIn, Database &db, const std::atomic<bool> *c
                         : hasPrint && (pass == Sound || sameTags(t, g)) && AudioPrint::sameRecording(batch[i], *gp);
                     if (same && moveHere(t, g)) {
                         placed.insert(i);
+                        note(t, QStringLiteral("moved"),
+                             QStringLiteral("a known track at a new place (%1): keeps its video and state")
+                                 .arg(pass == Tags ? QStringLiteral("by its tags") : QStringLiteral("by its sound")),
+                             {{QStringLiteral("from"), g.path}});
                         break;
                     }
                 }
@@ -369,12 +395,20 @@ Result scan(const QStringList &rootsIn, Database &db, const std::atomic<bool> *c
                     // with its lookup passes that on to the other.
                     db.joinRecording(t.id, member->id, !isNew && progress(t.state) > progress(member->state));
                     t.recording = member->recording;
+                    current.insert(t.id, t);
+                    reload(t.recording);
+                    note(current.value(t.id), QStringLiteral("joined"),
+                         QStringLiteral("the same recording as “%1” [%2]: shares its lookup and video").arg(member->title, member->album),
+                         {{QStringLiteral("fingerprintDistance"), std::round(AudioPrint::distance(print, prints.value(member->id)) * 1000) / 1000},
+                          {QStringLiteral("sameAs"), member->id}});
                 } else {
                     t.recording = db.newRecording();
                     db.setRecording(t.id, t.recording);
+                    current.insert(t.id, t);
+                    reload(t.recording);
+                    if (todo[from + i].isNew && !placed.contains(i))
+                        note(t, QStringLiteral("new"), QStringLiteral("a recording not seen before: queued for a lookup"));
                 }
-                current.insert(t.id, t);
-                reload(t.recording);
             }
             db.setFingerprint(t.id, AudioPrint::pack(print), t.size);
             prints.insert(t.id, print);

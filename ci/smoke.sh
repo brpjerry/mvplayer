@@ -258,6 +258,22 @@ assert [y for _, y in db.execute("SELECT key, yt_id FROM rejected_videos")] == [
 assert "turned down" in db.execute("SELECT message FROM tracks").fetchone()[0]
 print("review ok")
 PY
+# The log says what was decided about the upload, why, and on what numbers;
+# the report puts it in a table.
+python3 - "$WORK/mvlib5/.mvplayer/import-log.jsonl" <<'PY'
+import json, sys
+events = [json.loads(l) for l in open(sys.argv[1], encoding="utf-8")]
+look = [e for e in events if e.get("event") == "lookup"][0]
+c = look["checked"][0]
+assert look["decision"] == "review" and c["decision"] == "review" and c["reason"], look
+m = c["measured"]
+assert m["fingerprintCoverage"] > 0.8 and 0.2 < m["sameWaveform"] < 0.65 and "loudnessCorrelation" in m, m
+assert [e["verdict"] for e in events if e.get("event") == "verdict"] == ["accept", "reject"]
+assert any(e.get("event") == "track" and e["what"] == "new" for e in events)
+PY
+REPORT=$(python3 "$(dirname "$0")/../tools/import-report.py" "$WORK/mvlib5")
+echo "$REPORT" | tail -1 | cut -c1-200
+[[ "$REPORT" == *"review → you: reject"* && "$REPORT" == *"46%"* ]]
 
 echo "== premium account"
 # A yt-dlp that knows an account by its cookies: it lists audio at 250 kbit/s
