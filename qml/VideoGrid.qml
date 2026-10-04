@@ -11,6 +11,9 @@ Item {
 
     // row in App.videos
     signal activated(int row)
+    // the verdict on a video that waits for review
+    signal approved(var videoId)
+    signal rejected(var videoId)
 
     readonly property alias view: grid
     readonly property alias wheel: wheel
@@ -65,6 +68,8 @@ Item {
             current: videoId === root.currentVideoId
             playing: current && root.currentPlaying
             onActivated: root.activated(index)
+            onApproved: root.approved(videoId)
+            onRejected: root.rejected(videoId)
             onCurrentChanged: current ? root.claimCurrent(card) : root.releaseCurrent(card)
             Component.onCompleted: if (current) root.claimCurrent(card)
             Component.onDestruction: root.releaseCurrent(card)

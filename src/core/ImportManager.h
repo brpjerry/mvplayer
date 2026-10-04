@@ -60,6 +60,11 @@ public:
     void rescan();
     void retryUnmatched();
 
+    // The user's verdict on a video that waits for review: it joins the
+    // library, or its tracks have no video and it is deleted.
+    void approveVideo(qint64 videoId);
+    void rejectVideo(qint64 videoId);
+
     // Looks at every video in the library again with the account's cookies
     // and rebuilds those YouTube now offers in better quality.
     void checkQuality();
@@ -77,7 +82,7 @@ public:
     bool scanning() const { return m_scanning; }
     int queuedCount() const { return m_queue.size(); }
     int activeCount() const { return m_active; }
-    bool busy() const { return m_scanning || m_auditing || m_auditingAudio || m_upgrading || m_blocked || m_active > 0 || !m_queue.isEmpty(); }
+    bool busy() const { return m_scanning || m_auditing || m_auditingAudio || m_upgrading || m_reviewJobs > 0 || m_blocked || m_active > 0 || !m_queue.isEmpty(); }
 
     static QString dataDir(const QString &mvDir);
 
@@ -99,7 +104,7 @@ private:
     void auditAudio(const ImportSettings &cfg);
     // Rebuilds a video's file with the track's audio as its main audio.
     bool putLibraryAudioIn(const VideoInfo &video, const TrackInfo &track, const AudioAlign::Result &align,
-                           const ImportSettings &cfg, QString *error);
+                           const ImportSettings &cfg, QString *error, bool review = false);
     void upgradeVideos(const ImportSettings &cfg);
     // "done" when the video was rebuilt, "skipped" when it is as good as it gets.
     QString upgradeVideo(const VideoInfo &video, const ImportSettings &cfg, QString *detail);
@@ -127,6 +132,7 @@ private:
     bool m_auditing = false;
     std::atomic<bool> m_auditingAudio{false};
     bool m_audioAuditDue = false;
+    std::atomic<int> m_reviewJobs{0};
     std::atomic<bool> m_upgrading{false};
     std::atomic<int> m_upgradeDone{0};
     std::atomic<int> m_upgradeTotal{0};

@@ -63,6 +63,10 @@ QVariant VideoModel::data(const QModelIndex &index, int role) const
     case AudioDetailRole: return v.audioDetail;
     case AddedAtRole: return v.addedAt;
     case YtIdRole: return v.ytId;
+    case YtTitleRole: return v.ytTitle;
+    case ReviewRole: return v.review;
+    case ReviewStartRole: return v.reviewStart;
+    case ReviewEndRole: return v.reviewEnd;
     }
     return {};
 }
@@ -86,6 +90,10 @@ QHash<int, QByteArray> VideoModel::roleNames() const
         {AudioDetailRole, "audioDetail"},
         {AddedAtRole, "addedAt"},
         {YtIdRole, "ytId"},
+        {YtTitleRole, "ytTitle"},
+        {ReviewRole, "review"},
+        {ReviewStartRole, "reviewStart"},
+        {ReviewEndRole, "reviewEnd"},
     };
 }
 
@@ -224,6 +232,8 @@ void VideoFilterModel::setSortMode(const QString &mode)
 bool VideoFilterModel::filterAcceptsRow(int sourceRow, const QModelIndex &) const
 {
     const VideoInfo &v = m_source->at(sourceRow);
+    if (v.review != (m_facetType == QLatin1String("review")))
+        return false;
     if (m_facetType == QLatin1String("albumArtist")) {
         if (!splitMulti(v.albumArtist).contains(m_facetValue))
             return false;

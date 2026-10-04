@@ -27,6 +27,8 @@ Rectangle {
     color: overlay ? Qt.rgba(Theme.surface.r, Theme.surface.g, Theme.surface.b, 0.92) : Theme.surface
 
     readonly property bool hasMedia: current !== null
+    // What a video under review is playing right now; empty otherwise.
+    readonly property string reviewLabel: audioSwitch.reviewing ? chipLabel.text : ""
 
     HoverHandler { id: hover }
     // Swallow clicks so they do not reach the video underneath in fullscreen.
@@ -197,7 +199,15 @@ Rectangle {
             id: audioSwitch
             anchors.verticalCenter: parent.verticalCenter
             readonly property bool available: root.hasMedia && root.mpv.audioTracks.length > 1
-            readonly property bool library: root.mpv.audioTrack <= 1
+            // A video under review plays a third stream that changes source
+            // every ten seconds: YouTube's audio first, then the library's,
+            // wherever the track reaches.
+            readonly property bool reviewing: root.mpv.audioTracks.length > 2 && root.mpv.audioTrack === 3
+                                              && root.current !== null && root.current.review === true
+            readonly property bool reviewLibrary: reviewing && Math.floor(root.mpv.position / 10) % 2 === 1
+                                                  && root.mpv.position >= root.current.reviewStart
+                                                  && root.mpv.position < root.current.reviewEnd
+            readonly property bool library: reviewing ? reviewLibrary : root.mpv.audioTrack <= 1
             width: available ? chipLabel.implicitWidth + 22 : 0
             height: 26
             opacity: available ? 1 : 0
@@ -220,7 +230,8 @@ Rectangle {
                 Text {
                     id: chipLabel
                     anchors.centerIn: parent
-                    text: audioSwitch.library ? (root.current && root.current.audioDetail ? root.current.audioDetail : "Library audio")
+                    text: audioSwitch.reviewing ? (audioSwitch.reviewLibrary ? "Library audio (FLAC)" : "YouTube audio")
+                        : audioSwitch.library ? (root.current && root.current.audioDetail ? root.current.audioDetail : "Library audio")
                                               : "YouTube audio"
                     color: audioSwitch.library ? Theme.accentHi : Theme.textDim
                     font.pixelSize: 11
@@ -233,10 +244,16 @@ Rectangle {
                 anchors.fill: parent
                 hoverEnabled: true
                 cursorShape: Qt.PointingHandCursor
-                onClicked: root.mpv.audioTrack = audioSwitch.library ? 2 : 1
+                onClicked: {
+                    if (root.mpv.audioTracks.length > 2)
+                        root.mpv.audioTrack = root.mpv.audioTrack % 3 + 1 // review stream, library, YouTube
+                    else
+                        root.mpv.audioTrack = audioSwitch.library ? 2 : 1
+                }
             }
             Tooltip {
-                text: audioSwitch.library ? "Your library's audio · click for YouTube's" : "YouTube's audio · click for your library's"
+                text: audioSwitch.reviewing ? "Alternating every 10 s between YouTube's audio and your library's · click for one of them"
+                    : audioSwitch.library ? "Your library's audio · click for YouTube's" : "YouTube's audio · click for your library's"
                 shown: chipMouse.containsMouse
             }
         }

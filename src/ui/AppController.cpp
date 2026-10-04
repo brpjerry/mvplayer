@@ -272,6 +272,8 @@ void AppController::rebuildFacets()
         const QString key = QLatin1String(def.key);
         QHash<QString, int> counts;
         for (const VideoInfo &v : m_model->videos()) {
+            if (v.review)
+                continue;
             QStringList values;
             if (key == QLatin1String("albumArtist"))
                 values = splitMulti(v.albumArtist);
@@ -300,6 +302,8 @@ void AppController::rebuildFacets()
         };
     }
     m_facets = out;
+    m_reviewCount = int(std::count_if(m_model->videos().begin(), m_model->videos().end(),
+                                      [](const VideoInfo &v) { return v.review; }));
     emit facetsChanged();
 }
 
@@ -424,6 +428,19 @@ void AppController::removeCookies()
     if (m_manager)
         m_manager->setSettings(m_cfg);
     emit settingsChanged();
+}
+
+void AppController::approveVideo(qint64 videoId)
+{
+    if (m_manager)
+        m_manager->approveVideo(videoId);
+}
+
+void AppController::rejectVideo(qint64 videoId)
+{
+    if (m_manager)
+        m_manager->rejectVideo(videoId);
+    refreshCounts();
 }
 
 bool AppController::checkingQuality() const

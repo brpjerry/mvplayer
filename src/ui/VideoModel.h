@@ -28,6 +28,10 @@ public:
         AudioDetailRole,
         AddedAtRole,
         YtIdRole,
+        YtTitleRole,
+        ReviewRole,
+        ReviewStartRole,
+        ReviewEndRole,
     };
 
     explicit VideoModel(QObject *parent = nullptr);
@@ -73,7 +77,9 @@ public:
     void setSortMode(const QString &mode);
     int count() const { return rowCount(); }
 
-    // type: all | recent | albumArtist | artist | genre | album | year
+    // type: all | recent | albumArtist | artist | genre | album | year, or
+    // review: the videos that wait for the user's verdict, which are in no
+    // other view.
     Q_INVOKABLE void setFacet(const QString &type, const QString &value = QString());
     Q_INVOKABLE QVariantMap get(int row) const;
     Q_INVOKABLE QVariantList snapshot() const;

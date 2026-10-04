@@ -13,12 +13,16 @@ Item {
     required property url thumb
     required property string quality
     required property string audioSource
+    required property bool review      // waits for the user's verdict
+    required property string ytTitle
 
     property bool current: false   // this video is loaded in the player
     property bool playing: false   // ...and not paused
     readonly property Item thumbnail: thumbItem
 
     signal activated()
+    signal approved()
+    signal rejected()
 
     readonly property bool hovered: mouse.containsMouse
 
@@ -84,7 +88,7 @@ Item {
                 model: {
                     const list = []
                     if (root.quality === "4K" || root.quality === "8K") list.push(root.quality)
-                    if (root.audioSource === "library") list.push("LOSSLESS")
+                    if (root.audioSource === "library" && !root.review) list.push("LOSSLESS")
                     return list
                 }
                 Rectangle {
@@ -155,7 +159,8 @@ Item {
             anchors.right: parent.right
             anchors.top: titleLabel.bottom
             anchors.topMargin: 3
-            text: root.artist.replace(/; /g, ", ") + (root.year > 0 ? "  ·  " + root.year : "")
+            // Under review, what matters is which upload this is.
+            text: root.review ? root.ytTitle : root.artist.replace(/; /g, ", ") + (root.year > 0 ? "  ·  " + root.year : "")
             color: Theme.textDim
             font.pixelSize: 12
             elide: Text.ElideRight
@@ -168,5 +173,49 @@ Item {
         hoverEnabled: true
         cursorShape: Qt.PointingHandCursor
         onClicked: root.activated()
+    }
+
+    // The verdict: accept it into the library, or turn it down.
+    Row {
+        visible: root.review
+        x: body.x + thumbItem.width - width - 8
+        y: body.y + 8
+        spacing: 6
+        Repeater {
+            model: [
+                { accept: true, icon: Icons.check, tint: "#3fbf7f", tip: "This is the track's video" },
+                { accept: false, icon: Icons.close, tint: "#ff5d5d", tip: "Not this track's video: delete it" }
+            ]
+            Rectangle {
+                id: verdict
+                required property var modelData
+                width: 34
+                height: 34
+                radius: 17
+                color: verdictMouse.containsMouse ? modelData.tint : Theme.scrim
+                border.width: 1
+                border.color: modelData.tint
+                scale: verdictMouse.pressed ? 0.92 : 1
+                Behavior on color { ColorAnimation { duration: Theme.fast } }
+                Behavior on scale { NumberAnimation { duration: Theme.fast } }
+                Icon {
+                    anchors.centerIn: parent
+                    path: verdict.modelData.icon
+                    size: 20
+                    color: verdictMouse.containsMouse ? "#ffffff" : verdict.modelData.tint
+                }
+                MouseArea {
+                    id: verdictMouse
+                    anchors.fill: parent
+                    hoverEnabled: true
+                    cursorShape: Qt.PointingHandCursor
+                    onClicked: verdict.modelData.accept ? root.approved() : root.rejected()
+                }
+                Tooltip {
+                    text: verdict.modelData.tip
+                    shown: verdictMouse.containsMouse
+                }
+            }
+        }
     }
 }

@@ -21,6 +21,7 @@ Item {
         const t = App.videos.facetType
         if (t === "all") return "All Videos"
         if (t === "recent") return "Recently Added"
+        if (t === "review") return "To Review"
         return App.videos.facetValue
     }
     readonly property string browseSubtitle: {
@@ -175,6 +176,40 @@ Item {
                 id: importPanel
                 x: pill.width - width
                 y: pill.height + 10
+            }
+        }
+
+        // Videos that are the song but could not be confirmed as the track's
+        // recording wait here for a verdict.
+        IconButton {
+            id: reviewButton
+            readonly property bool open: App.videos.facetType === "review"
+            anchors.verticalCenter: parent.verticalCenter
+            visible: App.reviewCount > 0 || open
+            icon: Icons.review
+            checked: open
+            tooltip: open ? "Back to the library" : App.reviewCount + (App.reviewCount === 1 ? " video" : " videos") + " to review"
+            tooltipBelow: true
+            onClicked: App.videos.setFacet(open ? "all" : "review")
+
+            Rectangle {
+                visible: App.reviewCount > 0
+                anchors.right: parent.right
+                anchors.top: parent.top
+                anchors.rightMargin: -1
+                anchors.topMargin: 1
+                width: Math.max(16, countLabel.implicitWidth + 8)
+                height: 16
+                radius: 8
+                color: Theme.accent
+                Text {
+                    id: countLabel
+                    anchors.centerIn: parent
+                    text: App.reviewCount
+                    color: Theme.accentInk
+                    font.pixelSize: 10
+                    font.weight: Font.DemiBold
+                }
             }
         }
 

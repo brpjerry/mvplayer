@@ -45,6 +45,8 @@ class AppController : public QObject
     Q_PROPERTY(JobModel *jobs READ jobs CONSTANT)
     Q_PROPERTY(QVariantList facets READ facets NOTIFY facetsChanged)
     Q_PROPERTY(int videoCount READ videoCount NOTIFY facetsChanged)
+    // Videos that wait for the user to accept or reject them.
+    Q_PROPERTY(int reviewCount READ reviewCount NOTIFY facetsChanged)
 
     Q_PROPERTY(QStringList musicDirs READ musicDirs NOTIFY settingsChanged)
     Q_PROPERTY(QString mvDir READ mvDir WRITE setMvDir NOTIFY settingsChanged)
@@ -91,7 +93,10 @@ public:
     VideoFilterModel *videos() const { return m_filter; }
     JobModel *jobs() const { return m_jobs; }
     QVariantList facets() const { return m_facets; }
-    int videoCount() const { return m_model->rowCount(); }
+    int videoCount() const { return m_model->rowCount() - m_reviewCount; }
+    int reviewCount() const { return m_reviewCount; }
+    Q_INVOKABLE void approveVideo(qint64 videoId);
+    Q_INVOKABLE void rejectVideo(qint64 videoId);
 
     QStringList musicDirs() const { return m_cfg.musicDirs; }
     Q_INVOKABLE void addMusicDir(const QString &dir);
@@ -180,6 +185,7 @@ private:
     QTimer m_facetTimer;
     QVariantMap m_trackCounts;
     int m_sessionDone = 0;
+    int m_reviewCount = 0;
     QString m_accent = QStringLiteral("auto");
     QString m_sidebarFacet = QStringLiteral("albumArtist");
     SystemTheme m_systemTheme;

@@ -84,7 +84,8 @@ TrackInfo readTrack(const QSqlQuery &q)
 
 const char *kVideoCols =
     "id, yt_id, path, thumb, title, artist, album_artist, album, genre, year, track_no, duration, "
-    "width, height, fps, vcodec, audio_source, audio_detail, yt_title, yt_channel, tags_json, added_at, yt_abr";
+    "width, height, fps, vcodec, audio_source, audio_detail, yt_title, yt_channel, tags_json, added_at, yt_abr, "
+    "review, review_start, review_end";
 
 VideoInfo readVideo(const QSqlQuery &q)
 {
@@ -113,6 +114,9 @@ VideoInfo readVideo(const QSqlQuery &q)
     v.tags = jsonObj(q.value(i++).toString());
     v.addedAt = q.value(i++).toLongLong();
     v.ytAbr = q.value(i++).toDouble();
+    v.review = q.value(i++).toBool();
+    v.reviewStart = q.value(i++).toDouble();
+    v.reviewEnd = q.value(i++).toDouble();
     return v;
 }
 
@@ -314,6 +318,31 @@ bool Database::init(QString *error)
     if (!hasAudioFlag) {
         QSqlQuery q(db);
         if (!q.exec(QStringLiteral("ALTER TABLE videos ADD COLUMN audio_checked INTEGER NOT NULL DEFAULT 0"))) {
+            if (error)
+                *error = q.lastError().text();
+            return false;
+        }
+    }
+
+    // Added after 0.2.0: videos that wait for the user's verdict, and the
+    // videos turned down for a track (by recording, or by track where the
+    // recording is not known).
+    bool hasReview = false;
+    if (info.exec(QStringLiteral("PRAGMA table_info(videos)"))) {
+        while (info.next())
+            hasReview |= info.value(1).toString() == QLatin1String("review");
+    }
+    QStringList reviewDdl;
+    if (!hasReview) {
+        reviewDdl << QStringLiteral("ALTER TABLE videos ADD COLUMN review INTEGER NOT NULL DEFAULT 0")
+                  << QStringLiteral("ALTER TABLE videos ADD COLUMN review_start REAL")
+                  << QStringLiteral("ALTER TABLE videos ADD COLUMN review_end REAL");
+    }
+    reviewDdl << QStringLiteral("CREATE TABLE IF NOT EXISTS rejected_videos ("
+                                " key TEXT NOT NULL, yt_id TEXT NOT NULL, PRIMARY KEY (key, yt_id))");
+    for (const QString &sql : std::as_const(reviewDdl)) {
+        QSqlQuery q(db);
+        if (!q.exec(sql)) {
             if (error)
                 *error = q.lastError().text();
             return false;
@@ -698,8 +727,8 @@ qint64 Database::insertVideo(const VideoInfo &v)
     q.prepare(QStringLiteral(
         "INSERT INTO videos (yt_id, path, thumb, title, artist, album_artist, album, genre, year,"
         " track_no, duration, width, height, fps, vcodec, audio_source, audio_detail, yt_title,"
-        " yt_channel, tags_json, added_at, yt_abr, still_checked, audio_checked)"
-        " VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,1,1)"));
+        " yt_channel, tags_json, added_at, yt_abr, review, review_start, review_end, still_checked, audio_checked)"
+        " VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,1,1)"));
     q.addBindValue(v.ytId);
     q.addBindValue(storedPath(v.path));
     q.addBindValue(storedPath(v.thumb));
@@ -722,6 +751,9 @@ qint64 Database::insertVideo(const VideoInfo &v)
     q.addBindValue(jsonText(v.tags));
     q.addBindValue(v.addedAt);
     q.addBindValue(v.ytAbr > 0 ? QVariant(v.ytAbr) : QVariant());
+    q.addBindValue(v.review);
+    q.addBindValue(v.reviewStart);
+    q.addBindValue(v.reviewEnd);
     if (!run(q))
         return 0;
     return q.lastInsertId().toLongLong();
@@ -750,7 +782,7 @@ void Database::updateVideoMedia(const VideoInfo &v)
     QSqlQuery q(conn());
     q.prepare(QStringLiteral(
         "UPDATE videos SET duration = ?, width = ?, height = ?, fps = ?, vcodec = ?, audio_source = ?,"
-        " audio_detail = ?, yt_abr = ? WHERE id = ?"));
+        " audio_detail = ?, yt_abr = ?, review = ?, review_start = ?, review_end = ? WHERE id = ?"));
     q.addBindValue(v.duration);
     q.addBindValue(v.width);
     q.addBindValue(v.height);
@@ -759,8 +791,36 @@ void Database::updateVideoMedia(const VideoInfo &v)
     q.addBindValue(v.audioSource);
     q.addBindValue(v.audioDetail);
     q.addBindValue(v.ytAbr > 0 ? QVariant(v.ytAbr) : QVariant());
+    q.addBindValue(v.review);
+    q.addBindValue(v.reviewStart);
+    q.addBindValue(v.reviewEnd);
     q.addBindValue(v.id);
     run(q);
+}
+
+namespace {
+QString rejectionKey(const TrackInfo &t)
+{
+    return t.recording > 0 ? QStringLiteral("r%1").arg(t.recording) : QStringLiteral("t%1").arg(t.id);
+}
+} // namespace
+
+void Database::rejectVideoFor(const TrackInfo &track, const QString &ytId)
+{
+    QSqlQuery q(conn());
+    q.prepare(QStringLiteral("INSERT OR IGNORE INTO rejected_videos (key, yt_id) VALUES (?, ?)"));
+    q.addBindValue(rejectionKey(track));
+    q.addBindValue(ytId);
+    run(q);
+}
+
+bool Database::videoRejectedFor(const TrackInfo &track, const QString &ytId)
+{
+    QSqlQuery q(conn());
+    q.prepare(QStringLiteral("SELECT 1 FROM rejected_videos WHERE key = ? AND yt_id = ?"));
+    q.addBindValue(rejectionKey(track));
+    q.addBindValue(ytId);
+    return run(q) && q.next();
 }
 
 QVector<VideoInfo> Database::videosNotStillChecked()

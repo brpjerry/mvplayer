@@ -91,6 +91,14 @@ struct VideoInfo {
     QString audioDetail;  // e.g. "FLAC 24/48"
     double ytAbr = 0;     // bitrate of the YouTube audio in the file, kbit/s; 0: not recorded
 
+    // Waiting for the user to say whether this is the track's video: the
+    // fingerprints say it is the song, the waveforms cannot confirm the
+    // recording. Its default audio alternates every ten seconds between
+    // YouTube's and the track's, the latter between these two times.
+    bool review = false;
+    double reviewStart = 0;
+    double reviewEnd = 0;
+
     QString ytTitle;
     QString ytChannel;
     QJsonObject tags;

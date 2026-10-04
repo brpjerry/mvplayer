@@ -62,6 +62,13 @@ ApplicationWindow {
         mpv.togglePause()
     }
 
+    // A rejected video is deleted: it cannot go on playing.
+    function rejectVideo(id) {
+        if (player.current && player.current.videoId === id)
+            player.stop()
+        App.rejectVideo(id)
+    }
+
     // ---- Playback queue ----------------------------------------------------
     QtObject {
         id: player
@@ -236,6 +243,8 @@ ApplicationWindow {
                     currentVideoId: player.current ? player.current.videoId : -1
                     currentPlaying: window.playingNow
                     onActivated: (row) => player.playRow(row)
+                    onApproved: (id) => App.approveVideo(id)
+                    onRejected: (id) => window.rejectVideo(id)
                 }
 
                 Welcome {
@@ -393,8 +402,10 @@ ApplicationWindow {
         case "rescan": App.rescan(); return "ok"
         case "cookies": return (arg === "" ? (App.removeCookies(), "") : App.importCookies(arg)) || "ok"
         case "check-quality": App.checkQuality(); return "ok"
+        case "approve": App.approveVideo(parseInt(arg)); return "ok"
+        case "reject": window.rejectVideo(parseInt(arg)); return "ok"
         case "grab": // grab <file>: a picture of the settings panel when open, else of the window
-            (settings.opened ? settings.contentItem : window.contentItem).grabToImage(r => r.saveToFile(arg))
+            (settings.opened ? settings.contentItem : frame).grabToImage(r => r.saveToFile(arg))
             return "ok"
         case "ytdlp-update": YtDlpUpdater.update(); return "ok"
         case "ytdlp": return JSON.stringify({ version: YtDlpUpdater.version, busy: YtDlpUpdater.busy, status: YtDlpUpdater.status })
@@ -428,7 +439,8 @@ ApplicationWindow {
                 hwdec: mpv.hwdec, videoSize: mpv.videoSize.width + "x" + mpv.videoSize.height,
                 audioTrack: mpv.audioTrack, audioTracks: mpv.audioTracks.length,
                 busy: App.busy, status: App.statusText, counts: App.trackCounts,
-                cookies: App.hasCookies, checkingQuality: App.checkingQuality,
+                cookies: App.hasCookies, checkingQuality: App.checkingQuality, reviewCount: App.reviewCount,
+                facet: App.videos.facetType, reviewLabel: controlBar.reviewLabel,
                 accent: "" + Theme.accent, accentMode: App.accent, theme: App.themeMode, dark: Theme.dark,
                 systemDark: App.systemDark, bg: "" + Theme.bg, musicDirs: App.musicDirs, frameColor: "" + mpv.frameColor,
                 frameColorValid: mpv.frameColorValid, sidebar: App.sidebarFacet,

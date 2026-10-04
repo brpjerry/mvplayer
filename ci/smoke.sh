@@ -203,6 +203,56 @@ PY
 OUT=$(MVPLAYER_YTDLP="$FAKE" timeout 60 "$BUILD/mvplayer-import" --music-dir "$WORK/lib3" --mv-dir "$WORK/mvlib2" 2>&1)
 [[ $(cat "$WORK/calls") -eq 104 && "$OUT" == *"tracks:"*"not_found=2"* ]]
 
+echo "== review"
+# A video that is the song by its fingerprints but cannot be shown to be the
+# track's recording (here: the same notes, 0.4% faster) is neither given the
+# track's audio nor thrown out: it waits for the user. Its default audio
+# alternates between YouTube's and the track's. Accepted, it joins the library
+# with the track's audio; turned down, it is deleted, its track has no video
+# and is not offered it again.
+mkdir -p "$WORK/lib5/D" "$WORK/mvlib5/D"
+ffmpeg -v error -y -f lavfi -i "$(song 277 41 | sed 's/d=20/d=40/')" -metadata title="Five" -metadata artist=D "$WORK/lib5/D/five.flac"
+touch -d "10 seconds ago" "$WORK/lib5/D/five.flac"
+ffmpeg -v error -y -i "$WORK/mv.mkv" -i "$WORK/lib5/D/five.flac" -map 0:v:0 -map 1:a:0 -af atempo=1.004 -c:v copy \
+    -c:a libopus -b:a 96k -shortest "$WORK/live.mkv"
+mv "$WORK/live.mkv" "$WORK/mvlib5/D/Five [liv].mkv"
+MVPLAYER_YTDLP="$FAKE" timeout 60 "$BUILD/mvplayer-import" --music-dir "$WORK/lib5" --mv-dir "$WORK/mvlib5" >/dev/null 2>&1
+echo 300 > "$WORK/calls"
+python3 - "$WORK/mvlib5/.mvplayer/library.db" <<'PY'
+import sqlite3, sys
+db = sqlite3.connect(sys.argv[1])
+db.execute("INSERT INTO videos (yt_id, path, title, yt_title, audio_source, added_at, still_checked, audio_checked) "
+           "VALUES ('liv', 'D/Five [liv].mkv', 'Five', 'Five (some upload)', 'youtube', 1, 1, 0)")
+db.execute("UPDATE tracks SET state = 'done', video_id = (SELECT id FROM videos)")
+db.commit()
+PY
+streams() { (cd "$WORK/mvlib5/D" && ffprobe -v error -show_entries stream=codec_name -of csv=p=0 "Five [liv].mkv" | tr -d '\r' | tr '\n' ' '); }
+review_state() { python3 -c "import sqlite3, sys; print(sqlite3.connect(sys.argv[1]).execute('SELECT review, audio_source FROM videos').fetchall())" "$WORK/mvlib5/.mvplayer/library.db"; }
+OUT=$(MVPLAYER_YTDLP="$FAKE" timeout 120 "$BUILD/mvplayer-import" --music-dir "$WORK/lib5" --mv-dir "$WORK/mvlib5" 2>&1)
+echo "$OUT" | grep -E "^\[audio\]|^done:"
+[[ "$OUT" == *"done: 0 videos and 1 for review; tracks: done=1"* ]]
+[[ "$(streams)" == "h264 flac opus flac " && "$(review_state)" == "[(1, 'library')]" ]]
+OUT=$(MVPLAYER_YTDLP="$FAKE" timeout 120 "$BUILD/mvplayer-import" --music-dir "$WORK/lib5" --mv-dir "$WORK/mvlib5" --approve liv 2>&1)
+echo "$OUT" | grep -E "^\[review\]|^done:"
+[[ "$OUT" == *"done: 1 videos; tracks: done=1"* ]]
+[[ "$(streams)" == "h264 flac opus " && "$(review_state)" == "[(0, 'library')]" ]]
+# Put back under review, and turned down this time.
+python3 -c "import sqlite3, sys; db = sqlite3.connect(sys.argv[1]); db.execute('UPDATE videos SET review = 1'); db.commit()" "$WORK/mvlib5/.mvplayer/library.db"
+OUT=$(MVPLAYER_YTDLP="$FAKE" timeout 120 "$BUILD/mvplayer-import" --music-dir "$WORK/lib5" --mv-dir "$WORK/mvlib5" --reject liv 2>&1)
+echo "$OUT" | grep -E "^\[review\]|^done:"
+[[ "$OUT" == *"done: 0 videos; tracks: not_found=1"* ]]
+[[ ! -e "$WORK/mvlib5/D/Five [liv].mkv" ]]
+python3 - "$WORK/mvlib5/.mvplayer/library.db" <<'PY'
+import sqlite3, sys
+db = sqlite3.connect(sys.argv[1])
+assert db.execute("SELECT COUNT(*) FROM videos").fetchone()[0] == 0
+assert [y for _, y in db.execute("SELECT key, yt_id FROM rejected_videos")] == ["liv"]
+assert db.execute("SELECT message FROM tracks").fetchone()[0].startswith("you turned down")
+print("review ok")
+PY
+# None of that asked YouTube anything.
+[[ $(cat "$WORK/calls") -eq 300 ]]
+
 echo "== premium account"
 # A yt-dlp that knows an account by its cookies: it lists audio at 250 kbit/s
 # and hands it out. The check of existing videos must rebuild the one video

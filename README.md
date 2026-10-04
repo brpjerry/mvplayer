@@ -110,12 +110,27 @@ For every track without a video (`src/core/ImportManager.cpp`):
    kept as a second track.
 
 YouTube's audio is only ever a video's main audio when the track is the
-lesser of the two (a low-bitrate file). When the track is the better one and
-is not the recording in the video — a live take, a cover, a remix — that video is passed over, and if no candidate fits the track counts as
-having no video. Videos imported by 0.2.0 and earlier that kept YouTube's
-audio next to a better track are put right on the first start: the track's
-audio is put in where it fits, and the video is removed where it does not.
-Turning off "Use my library's audio" in Settings lifts all of this.
+lesser of the two (a low-bitrate file). A video that is the song by its
+fingerprints, while the waveforms cannot show it to be the track's recording
+— a live take against the release of that concert on disc, a cover, another
+mix — is not for the importer to decide. It is taken only when no candidate
+fits outright, and then waits for you:
+
+- The review icon in the top bar (next to the import one, with a count) shows
+  these videos in place of the library. They are in no other view.
+- Playing one, the sound changes every ten seconds between YouTube's audio
+  and your track's, level-matched; the chip in the bottom bar says which.
+- ✓ on its thumbnail accepts it: it joins the library with your track's audio.
+  ✗ turns it down: the video is deleted, its track counts as having no video,
+  and that upload is not offered for it again.
+
+Headless: `--approve <youtube id>` and `--reject <youtube id>`.
+
+Videos imported by 0.2.0 and earlier that kept YouTube's audio next to a
+better track are put right on the first start: the track's audio is put in
+where it is the recording, the video goes to review where that cannot be
+shown, and it is removed where it is not even the song. Turning off "Use my
+library's audio" in Settings lifts all of this.
 
 The music folders are watched; added tracks are picked up within a few
 seconds, edited tags on the next periodic rescan. Tracks with no video are

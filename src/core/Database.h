@@ -72,6 +72,9 @@ public:
     void updateVideoTags(const VideoInfo &v);
     // After a video's file was rebuilt from better streams.
     void updateVideoMedia(const VideoInfo &v);
+    // A video the user turned down for a track is not offered for it again.
+    void rejectVideoFor(const TrackInfo &track, const QString &ytId);
+    bool videoRejectedFor(const TrackInfo &track, const QString &ytId);
     void removeVideo(qint64 id);
     // Videos imported before their picture was reliably checked for stills.
     QVector<VideoInfo> videosNotStillChecked();
