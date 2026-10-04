@@ -32,7 +32,26 @@ public:
     // another device); its import state and video stay with it.
     bool moveTrack(qint64 id, const QString &path);
     void removeTrack(qint64 id);
+    // Records the outcome of a lookup, for every file of the track's recording.
     void setTrackResult(qint64 id, const QString &state, qint64 videoId, const QString &message);
+    // Starts a recording of its own for the track.
+    void setRecording(qint64 trackId, qint64 recording);
+    // Makes the track one more file of the recording `memberId` belongs to.
+    // The import state of the recording becomes the track's too, or the other
+    // way round when `trackLeads`.
+    void joinRecording(qint64 trackId, qint64 memberId, bool trackLeads);
+    // The tracks waiting for a lookup, one per recording: its best file.
+    QVector<TrackInfo> pendingRecordings();
+
+    // Audio fingerprints (AudioPrint::pack), by track id. One is current
+    // while the file still has the size it was taken at.
+    struct StoredPrint {
+        QByteArray packed;
+        bool current = false;
+    };
+    QHash<qint64, StoredPrint> fingerprints();
+    void setFingerprint(qint64 trackId, const QByteArray &packed, qint64 fileSize);
+    qint64 newRecording();
     void resetTracks(const QStringList &fromStates);
     // Makes failed / not-found tracks pending again once their last attempt
     // is old enough. The wait for failed tracks doubles with every attempt.

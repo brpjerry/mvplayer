@@ -282,6 +282,12 @@ QString Result::summary() const
     return parts.join(QStringLiteral(", "));
 }
 
+QVector<quint32> fingerprintItems(const std::vector<int16_t> &pcm)
+{
+    const Fingerprint fp = fingerprint(pcm);
+    return QVector<quint32>(fp.items.begin(), fp.items.end());
+}
+
 bool decodeMono(const QString &file, std::vector<int16_t> *pcm, const std::atomic<bool> *cancel, QString *error)
 {
     const QStringList args = {

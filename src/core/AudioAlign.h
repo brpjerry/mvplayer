@@ -38,6 +38,9 @@ struct Result {
 // positioned on the container timeline (starts at t=0).
 bool decodeMono(const QString &file, std::vector<int16_t> *pcm, const std::atomic<bool> *cancel, QString *error);
 
+// Chromaprint items of decoded audio, about eight per second.
+QVector<quint32> fingerprintItems(const std::vector<int16_t> &pcm);
+
 Result align(const std::vector<int16_t> &track, const std::vector<int16_t> &video);
 
 } // namespace AudioAlign

@@ -45,7 +45,7 @@ QJsonObject jsonObj(const QString &s)
 const char *kTrackCols =
     "id, path, mtime, size, title, artist, album_artist, album, genre, year, track_no, disc_no, "
     "duration, codec, bitrate, sample_rate, bits, channels, lossless, tags_json, state, video_id, "
-    "attempts, last_attempt, message";
+    "attempts, last_attempt, message, recording";
 
 TrackInfo readTrack(const QSqlQuery &q)
 {
@@ -76,6 +76,7 @@ TrackInfo readTrack(const QSqlQuery &q)
     t.attempts = q.value(i++).toInt();
     t.lastAttempt = q.value(i++).toLongLong();
     t.message = q.value(i++).toString();
+    t.recording = q.value(i++).toLongLong();
     return t;
 }
 
@@ -284,6 +285,29 @@ bool Database::init(QString *error)
             return false;
         }
     }
+
+    // Added after 0.1.2: which recording a file holds, and the fingerprint
+    // that tells. Existing rows are identified by the next scan.
+    bool hasRecording = false;
+    if (info.exec(QStringLiteral("PRAGMA table_info(tracks)"))) {
+        while (info.next())
+            hasRecording |= info.value(1).toString() == QLatin1String("recording");
+    }
+    QStringList more;
+    if (!hasRecording) {
+        more << QStringLiteral("ALTER TABLE tracks ADD COLUMN recording INTEGER")
+             << QStringLiteral("ALTER TABLE tracks ADD COLUMN fingerprint BLOB")
+             << QStringLiteral("ALTER TABLE tracks ADD COLUMN fp_size INTEGER");
+    }
+    more << QStringLiteral("CREATE INDEX IF NOT EXISTS tracks_recording ON tracks(recording)");
+    for (const QString &sql : std::as_const(more)) {
+        QSqlQuery q(db);
+        if (!q.exec(sql)) {
+            if (error)
+                *error = q.lastError().text();
+            return false;
+        }
+    }
     return true;
 }
 
@@ -335,8 +359,8 @@ bool Database::upsertTrack(TrackInfo &t)
     q.prepare(QStringLiteral(
         "INSERT INTO tracks (path, mtime, size, title, artist, album_artist, album, genre, year,"
         " track_no, disc_no, duration, codec, bitrate, sample_rate, bits, channels, lossless,"
-        " tags_json, state, video_id, attempts, last_attempt, message)"
-        " VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)"
+        " tags_json, state, video_id, attempts, last_attempt, message, recording)"
+        " VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)"
         " ON CONFLICT(path) DO UPDATE SET"
         " mtime=excluded.mtime, size=excluded.size, title=excluded.title, artist=excluded.artist,"
         " album_artist=excluded.album_artist, album=excluded.album, genre=excluded.genre,"
@@ -345,7 +369,7 @@ bool Database::upsertTrack(TrackInfo &t)
         " sample_rate=excluded.sample_rate, bits=excluded.bits, channels=excluded.channels,"
         " lossless=excluded.lossless, tags_json=excluded.tags_json, state=excluded.state,"
         " video_id=excluded.video_id, attempts=excluded.attempts,"
-        " last_attempt=excluded.last_attempt, message=excluded.message"));
+        " last_attempt=excluded.last_attempt, message=excluded.message, recording=excluded.recording"));
     q.addBindValue(t.path);
     q.addBindValue(t.mtime);
     q.addBindValue(t.size);
@@ -370,6 +394,7 @@ bool Database::upsertTrack(TrackInfo &t)
     q.addBindValue(t.attempts);
     q.addBindValue(t.lastAttempt);
     q.addBindValue(t.message);
+    q.addBindValue(t.recording > 0 ? QVariant(t.recording) : QVariant());
     if (!run(q))
         return false;
 
@@ -403,13 +428,93 @@ void Database::setTrackResult(qint64 id, const QString &state, qint64 videoId, c
     QSqlQuery q(conn());
     q.prepare(QStringLiteral(
         "UPDATE tracks SET state = ?, video_id = ?, message = ?, attempts = attempts + 1,"
-        " last_attempt = ? WHERE id = ?"));
+        " last_attempt = ? WHERE id = ? OR recording = (SELECT recording FROM tracks WHERE id = ?)"));
     q.addBindValue(state);
     q.addBindValue(videoId > 0 ? QVariant(videoId) : QVariant());
     q.addBindValue(message);
     q.addBindValue(QDateTime::currentSecsSinceEpoch());
     q.addBindValue(id);
+    q.addBindValue(id);
     run(q);
+}
+
+void Database::setRecording(qint64 trackId, qint64 recording)
+{
+    QSqlQuery q(conn());
+    q.prepare(QStringLiteral("UPDATE tracks SET recording = ? WHERE id = ?"));
+    q.addBindValue(recording);
+    q.addBindValue(trackId);
+    run(q);
+}
+
+void Database::joinRecording(qint64 trackId, qint64 memberId, bool trackLeads)
+{
+    // Values are read from the rows as they are now: a lookup may have
+    // finished since the caller last looked.
+    const auto copyResult = [this](qint64 from, const QString &where, const QVariantList &args) {
+        QSqlQuery q(conn());
+        q.prepare(QStringLiteral(
+            "UPDATE tracks SET (state, video_id, message, attempts, last_attempt) ="
+            " (SELECT state, video_id, message, attempts, last_attempt FROM tracks WHERE id = ?) WHERE ") + where);
+        q.addBindValue(from);
+        for (const QVariant &a : args)
+            q.addBindValue(a);
+        run(q);
+    };
+    const std::optional<TrackInfo> member = track(memberId);
+    if (!member || member->recording <= 0)
+        return;
+    setRecording(trackId, member->recording);
+    if (trackLeads)
+        copyResult(trackId, QStringLiteral("recording = ? AND id != ?"), {member->recording, trackId});
+    else
+        copyResult(memberId, QStringLiteral("id = ?"), {trackId});
+}
+
+QVector<TrackInfo> Database::pendingRecordings()
+{
+    QVector<TrackInfo> out;
+    QHash<qint64, int> byRecording; // recording -> index in out
+    for (const TrackInfo &t : tracksInState({QStringLiteral("pending")})) {
+        const auto it = t.recording > 0 ? byRecording.constFind(t.recording) : byRecording.constEnd();
+        if (it == byRecording.constEnd()) {
+            if (t.recording > 0)
+                byRecording.insert(t.recording, out.size());
+            out << t;
+        } else if (betterSource(t, out[*it])) {
+            out[*it] = t;
+        }
+    }
+    return out;
+}
+
+QHash<qint64, Database::StoredPrint> Database::fingerprints()
+{
+    QHash<qint64, StoredPrint> out;
+    QSqlQuery q(conn());
+    q.prepare(QStringLiteral("SELECT id, fingerprint, fp_size = size FROM tracks WHERE fingerprint IS NOT NULL"));
+    if (run(q)) {
+        while (q.next())
+            out.insert(q.value(0).toLongLong(), {q.value(1).toByteArray(), q.value(2).toBool()});
+    }
+    return out;
+}
+
+void Database::setFingerprint(qint64 trackId, const QByteArray &packed, qint64 fileSize)
+{
+    QSqlQuery q(conn());
+    q.prepare(QStringLiteral("UPDATE tracks SET fingerprint = ?, fp_size = ? WHERE id = ?"));
+    q.addBindValue(packed);
+    q.addBindValue(fileSize);
+    q.addBindValue(trackId);
+    run(q);
+}
+
+qint64 Database::newRecording()
+{
+    QSqlQuery q(conn());
+    q.prepare(QStringLiteral("SELECT COALESCE(MAX(recording), 0) + 1 FROM tracks"));
+    return run(q) && q.next() ? q.value(0).toLongLong() : 1;
 }
 
 void Database::resetTracks(const QStringList &fromStates)

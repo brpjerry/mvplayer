@@ -65,9 +65,10 @@ echo "== circuit breaker"
 # no results. The importer must pause (waits doubling), put the tracks back
 # untouched, and finish them once requests succeed again.
 mkdir -p "$WORK/lib/A" "$WORK/mvlib"
-for n in one two; do
-    ffmpeg -v error -y -f lavfi -i "sine=f=330:d=20" -metadata title="Song $n" -metadata artist=A "$WORK/lib/A/$n.flac"
-done
+# Two different songs: files are told apart by their sound.
+song() { echo "aevalsrc=0.3*sin(2*PI*t*($1+$2*mod(floor(t/1.5)\,7)))+0.2*sin(2*PI*t*($1*1.5+$2*mod(floor(t/2)\,5))):s=48000:d=20"; }
+ffmpeg -v error -y -f lavfi -i "$(song 220 30)" -metadata title="Song one" -metadata artist=A "$WORK/lib/A/one.flac"
+ffmpeg -v error -y -f lavfi -i "$(song 311 47)" -metadata title="Song two" -metadata artist=A "$WORK/lib/A/two.flac"
 cat > "$WORK/fake-ytdlp" <<FAKE
 #!/bin/sh
 n=\$(cat "$WORK/calls" 2>/dev/null || echo 0); n=\$((n+1)); echo \$n > "$WORK/calls"
@@ -120,6 +121,43 @@ states = dict(db.execute("SELECT title, state FROM tracks"))
 assert states == {"Song one": "done", "Song two": "not_found"}, states
 assert db.execute("SELECT COUNT(*) FROM tracks WHERE video_id IS NOT NULL AND path LIKE '%/lib2/A/one.flac'").fetchone()[0] == 1
 print("moved library ok")
+PY
+
+echo "== recordings"
+# The same library on a device that keeps it as Opus, under other file names,
+# with one title romanised, plus a second copy of a song under another title.
+# Every file is recognised by its sound: nothing is looked up again.
+[[ $("$BUILD/mvplayer-import" same-recording "$WORK/lib2/A/one.flac" "$WORK/lib2/A/two.flac") == different:* ]]
+mkdir -p "$WORK/lib3/B"
+ffmpeg -v error -y -i "$WORK/lib2/A/one.flac" -c:a libopus -b:a 64k -metadata title="Uta ichi" "$WORK/lib3/B/01.opus"
+ffmpeg -v error -y -i "$WORK/lib2/A/two.flac" -c:a libopus -b:a 64k "$WORK/lib3/B/02.opus"
+ffmpeg -v error -y -i "$WORK/lib2/A/two.flac" -c:a flac -metadata title="Song two (album cut)" "$WORK/lib3/B/03.flac"
+[[ $("$BUILD/mvplayer-import" same-recording "$WORK/lib2/A/one.flac" "$WORK/lib3/B/01.opus") == same:* ]]
+# "Song two" as a library from before fingerprints were kept: it is matched by its tags.
+python3 - "$WORK/mvlib2/.mvplayer/library.db" <<'PY'
+import sqlite3, sys
+db = sqlite3.connect(sys.argv[1])
+assert db.execute("SELECT COUNT(*) FROM tracks WHERE fingerprint IS NOT NULL AND recording IS NOT NULL").fetchone()[0] == 2
+db.execute("UPDATE tracks SET fingerprint = NULL, fp_size = NULL, recording = NULL WHERE title = 'Song two'")
+db.commit()
+PY
+touch -d "10 seconds ago" "$WORK"/lib3/B/*
+OUT=$(MVPLAYER_YTDLP="$FAKE" MVPLAYER_PAUSE_SECS=1 timeout 60 "$BUILD/mvplayer-import" \
+    --music-dir "$WORK/lib3" --mv-dir "$WORK/mvlib2" 2>&1)
+echo "$OUT" | grep -E "^\[scan\]|^done:"
+[[ "$OUT" == *"3 tracks: 1 new, 2 changed, 0 removed"* && "$OUT" == *"done: 1 videos;"* ]]
+[[ ! -e "$WORK/calls" ]]
+python3 - "$WORK/mvlib2/.mvplayer/library.db" <<'PY'
+import sqlite3, sys
+db = sqlite3.connect(sys.argv[1])
+rows = {t: (s, v, r) for t, s, v, r in db.execute("SELECT title, state, video_id, recording FROM tracks")}
+assert set(rows) == {"Uta ichi", "Song two", "Song two (album cut)"}, rows
+assert rows["Uta ichi"][0] == "done" and rows["Uta ichi"][1] is not None, rows
+assert rows["Song two"][0] == rows["Song two (album cut)"][0] == "not_found", rows
+assert rows["Song two"][2] == rows["Song two (album cut)"][2] != rows["Uta ichi"][2], rows
+# The video follows its track's new title.
+assert db.execute("SELECT title FROM videos").fetchall() == [("Uta ichi",)]
+print("recordings ok")
 PY
 
 echo "== binaries start"

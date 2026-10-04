@@ -82,8 +82,10 @@ For every track without a video (`src/core/ImportManager.cpp`):
    comparing Chromaprint fingerprints with the track. A video is accepted only
    if its soundtrack contains the recording, and its picture is not a still
    image (judged on YouTube's smallest stream by how many pixels really
-   change between samples). If nothing passes, nothing is imported for that
-   track.
+   change between samples). The track also has to make up at least half of
+   the video: a short edit of a song (the cut used as a show's opening, say)
+   does not take the video of the full version, only one of about its own
+   length. If nothing passes, nothing is imported for that track.
 3. **Download** the best video stream and the YouTube thumbnail.
 4. **Align** the track to the video's soundtrack (`src/core/AudioAlign.cpp`):
    fingerprints find where the track sits, cross-correlation makes that
@@ -123,9 +125,24 @@ Each library lives in its MV folder: videos and thumbnails under
 
 The folder is self-contained. To move the library to another disk or another
 device (Linux or Windows), copy the whole folder, `.mvplayer` included, and
-choose it as the music video library in Settings. The music library can sit
-at a different path there too: a track that is the same file at a new place
-keeps its video and is not looked up again.
+choose it as the music video library in Settings.
+
+### Which file is which track
+
+A track is known by how it sounds, not by its path or tags
+(`src/core/AudioPrint.cpp`): the scan keeps a Chromaprint fingerprint of every
+file. So a file keeps its video, and is not looked up again, when it is moved
+or renamed, retagged (a romanised title, another album artist), or replaced
+by a copy in another format — the music library on the other device can be an
+Opus conversion of the FLAC one the videos were imported from.
+
+Files that hold the same recording — a single and its album cut, or two
+copies — count as one: one lookup, one video, and the video carries the tags
+of the best-quality file. An instrumental, a live take, another language
+version or a short edit is a different recording with a lookup of its own.
+
+The first scan after upgrading from 0.1.2 fingerprints the whole library once
+(about half a minute for 30 hours of FLAC on a laptop).
 
 ### Headless
 

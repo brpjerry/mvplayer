@@ -30,6 +30,10 @@ struct TrackInfo {
 
     QJsonObject tags;     // every tag in the file, key -> "a; b"
 
+    // Files that hold the same recording (see AudioPrint) share this number
+    // and with it one lookup and one video. 0: not identified yet.
+    qint64 recording = 0;
+
     // Import state: pending | done | not_found | failed | skipped
     QString state = QStringLiteral("pending");
     qint64 videoId = 0;
@@ -37,6 +41,31 @@ struct TrackInfo {
     qint64 lastAttempt = 0;
     QString message;
 };
+
+inline double trackQuality(const TrackInfo &t)
+{
+    if (t.lossless)
+        return 1e6;
+    double eff = 1.0;
+    if (t.codec == QLatin1String("opus"))
+        eff = 1.5;
+    else if (t.codec == QLatin1String("aac") || t.codec == QLatin1String("vorbis"))
+        eff = 1.2;
+    return t.bitrate * eff;
+}
+
+// Of several files with the same recording, the one whose audio and tags
+// stand for it: the best quality, then the one known longest.
+inline bool betterSource(const TrackInfo &a, const TrackInfo &b)
+{
+    const double qa = trackQuality(a), qb = trackQuality(b);
+    if (qa != qb)
+        return qa > qb;
+    const qint64 ra = qint64(a.bitsPerSample) * a.sampleRate, rb = qint64(b.bitsPerSample) * b.sampleRate;
+    if (ra != rb)
+        return ra > rb;
+    return a.id < b.id;
+}
 
 // A music video in the MV library.
 struct VideoInfo {
