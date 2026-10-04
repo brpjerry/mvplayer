@@ -198,7 +198,8 @@ echo "$OUT" | grep -E "^\[quality\]"
 [[ $(wc -l < "$WORK/premium-args") -eq 2 ]]
 ! grep -q -e "--cookies $WORK/cookies.txt" "$WORK/premium-args"
 grep -q "secret" "$WORK/cookies.txt"
-STREAMS=$(ffprobe -v error -show_entries stream=codec_type,codec_name -of csv=p=0 "$WORK/mvlib2/A/Song one [abc].mkv" | tr '\n' ' ')
+# (By its relative name: MSYS2 does not translate a path with brackets for ffprobe.)
+STREAMS=$(cd "$WORK/mvlib2/A" && ffprobe -v error -show_entries stream=codec_type,codec_name -of csv=p=0 "Song one [abc].mkv" | tr '\n' ' ')
 echo "streams: $STREAMS"
 [[ "$STREAMS" == "h264,video opus,audio " ]]
 python3 - "$WORK/mvlib2/.mvplayer/library.db" <<'PY'
