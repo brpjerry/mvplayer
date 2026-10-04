@@ -121,6 +121,12 @@ keeps their videos.
 Each library lives in its MV folder: videos and thumbnails under
 `<Album Artist>/`, state in `.mvplayer/library.db`.
 
+The folder is self-contained. To move the library to another disk or another
+device (Linux or Windows), copy the whole folder, `.mvplayer` included, and
+choose it as the music video library in Settings. The music library can sit
+at a different path there too: a track that is the same file at a new place
+keeps its video and is not looked up again.
+
 ### Headless
 
 ```sh

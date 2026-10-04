@@ -172,7 +172,7 @@ void AppController::openLibrary()
         m_model->reset({});
         return;
     }
-    m_db = std::make_unique<Database>(QDir(dataDir).filePath(QStringLiteral("library.db")));
+    m_db = std::make_unique<Database>(QDir(dataDir).filePath(QStringLiteral("library.db")), m_cfg.mvDir);
     QString error;
     if (!m_db->init(&error)) {
         qWarning().noquote() << "cannot open library database:" << error;

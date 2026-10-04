@@ -133,7 +133,7 @@ int main(int argc, char **argv)
         cfg.pauseBaseSecs = qEnvironmentVariableIntValue("MVPLAYER_PAUSE_SECS");
 
     QDir().mkpath(ImportManager::dataDir(cfg.mvDir));
-    Database db(QDir(ImportManager::dataDir(cfg.mvDir)).filePath(QStringLiteral("library.db")));
+    Database db(QDir(ImportManager::dataDir(cfg.mvDir)).filePath(QStringLiteral("library.db")), cfg.mvDir);
     QString err;
     if (!db.init(&err)) {
         out << "error: cannot open library database: " << err << Qt::endl;
