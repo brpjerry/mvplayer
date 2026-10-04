@@ -28,6 +28,12 @@ public:
         AudioDetailRole,
         AddedAtRole,
         YtIdRole,
+        YtTitleRole,
+        ReviewRole,
+        ReviewStartRole,
+        ReviewEndRole,
+        ReviewOptionRole,  // which of its group's options this is, from 1
+        ReviewOptionsRole, // how many options the group has
     };
 
     explicit VideoModel(QObject *parent = nullptr);
@@ -44,9 +50,12 @@ public:
     const VideoInfo &at(int row) const { return m_videos.at(row); }
     const QString &searchText(int row) const { return m_search.at(row); }
     QVariantMap toMap(int row) const;
+    // The videos waiting as options alongside `v` (itself included), by id.
+    QVector<qint64> reviewOptions(const VideoInfo &v) const;
 
 private:
     static QString buildSearchText(const VideoInfo &v);
+    void reviewOptionsChanged();
 
     QVector<VideoInfo> m_videos;
     QVector<QString> m_search; // folded text of every tag, parallel to m_videos
@@ -73,11 +82,17 @@ public:
     void setSortMode(const QString &mode);
     int count() const { return rowCount(); }
 
-    // type: all | recent | albumArtist | artist | genre | album | year
+    // type: all | recent | albumArtist | artist | genre | album | year, or
+    // review: the videos that wait for the user's verdict, which are in no
+    // other view.
     Q_INVOKABLE void setFacet(const QString &type, const QString &value = QString());
     Q_INVOKABLE QVariantMap get(int row) const;
     Q_INVOKABLE QVariantList snapshot() const;
     Q_INVOKABLE int rowOfVideo(qint64 videoId) const;
+    // Of several videos that wait as options for the same track, the review
+    // view shows one. Steps to the next (+1) or previous (-1) option and
+    // returns the video now shown.
+    Q_INVOKABLE qint64 stepReview(qint64 videoId, int delta);
 
 signals:
     void searchTextChanged();
@@ -99,5 +114,6 @@ private:
     QString m_facetType = QStringLiteral("all");
     QString m_facetValue;
     QString m_sortMode = QStringLiteral("title");
+    QHash<qint64, qint64> m_reviewShown; // review group -> the option on show
     QCollator m_collator;
 };

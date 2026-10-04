@@ -20,7 +20,19 @@ struct Plan {
     // `align.segments` says they are the same recording.
     bool replaceAudio = false;
     AudioAlign::Result align;
+
+    // For a video that waits for the user's verdict (needs replaceAudio): a
+    // third audio stream, played by default, that alternates every ten
+    // seconds between YouTube's audio and the track's, level-matched.
+    bool review = false;
 };
+
+// Where the track's audio sits in a review stream, in seconds of the video.
+struct ReviewSpan {
+    double start = 0;
+    double end = 0;
+};
+constexpr int kReviewSeconds = 10; // length of each stretch in the review stream
 
 struct Probe {
     int width = 0;
@@ -32,7 +44,12 @@ struct Probe {
 
 // Writes plan.outFile. On success `audioDetail` describes the main audio
 // stream (e.g. "FLAC 24/48").
-bool mux(const Plan &plan, const std::atomic<bool> *cancel, QString *audioDetail, QString *error);
+bool mux(const Plan &plan, const std::atomic<bool> *cancel, QString *audioDetail, QString *error,
+         ReviewSpan *reviewSpan = nullptr);
+
+// Once the user has accepted a video: removes the review stream and makes the
+// track's audio the default.
+bool dropReviewStream(const QString &file, const std::atomic<bool> *cancel, QString *error);
 
 bool probe(const QString &file, Probe *out);
 

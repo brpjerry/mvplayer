@@ -44,6 +44,26 @@ assert abs(gain - 3.0) < 0.2, f"gain {gain}"
 print("alignment ok")
 PY
 
+echo "== align: another master"
+# The upload of a song is often not the album master: quieter, with the
+# treble rolled off, of inverted polarity, and a few milliseconds longer over
+# its length. It is still the same recording, and has to be found as one piece.
+ffmpeg -v error -y -i "$WORK/track.flac" \
+    -af "asetrate=48000*0.99998,aresample=48000,lowpass=f=5000,volume=-4dB,aeval=-val(0)|-val(1)" \
+    -c:a libopus -b:a 96k "$WORK/master.opus"
+SUMMARY=$("$BUILD/mvplayer-import" align "$WORK/track.flac" "$WORK/master.opus")
+echo "$SUMMARY"
+python3 - "$SUMMARY" <<'PY'
+import re, sys
+s = sys.argv[1]
+segs = re.findall(r"\[video ([\d.]+)–([\d.]+)s", s)
+assert len(segs) == 1 and float(segs[0][1]) - float(segs[0][0]) > 49, segs
+assert "polarity inverted" in s, s
+assert int(re.search(r"(\d+)% of it plainly the same", s).group(1)) >= 90, s
+assert abs(float(re.search(r"gain ([-\d.]+) dB", s).group(1)) - 4.0) < 1.0, s
+print("another master ok")
+PY
+
 echo "== mux"
 "$BUILD/mvplayer-import" mux "$WORK/track.flac" "$WORK/mv.mkv" "$WORK/out.mkv"
 STREAMS=$(ffprobe -v error -show_entries stream=codec_type,codec_name -of csv=p=0 "$WORK/out.mkv" | tr '\n' ' ')
@@ -91,18 +111,18 @@ grep -q '"outcome":"postponed"' "$WORK/mvlib/.mvplayer/import-log.jsonl"
 grep -q '"event":"paused"' "$WORK/mvlib/.mvplayer/import-log.jsonl"
 
 echo "== moved library"
-# A library written by 0.1.2 (absolute video paths) whose MV folder and music
-# folder are both somewhere else now: the video must still be found and its
-# track must keep it, with no new lookup.
+# A library whose MV folder and music folder are both somewhere else now: the
+# video is still found (its path is kept relative to the MV folder) and its
+# track keeps it, with no new lookup.
 mkdir -p "$WORK/mvlib/A"
+# (Moved into place: MSYS2 does not translate a path with brackets for ffmpeg.)
 cp "$WORK/out.mkv" "$WORK/mvlib/A/Song one [abc].mkv"
 python3 - "$WORK/mvlib/.mvplayer/library.db" <<'PY'
 import sqlite3, sys
 db = sqlite3.connect(sys.argv[1])
-db.execute("INSERT INTO videos (yt_id, path, thumb, title, added_at, still_checked) "
-           "VALUES ('abc', '/old/place/MVs/A/Song one [abc].mkv', '/old/place/MVs/A/Song one [abc].jpg', 'Song one', 1, 1)")
+db.execute("INSERT INTO videos (yt_id, path, thumb, title, audio_source, added_at) "
+           "VALUES ('abc', 'A/Song one [abc].mkv', 'A/Song one [abc].jpg', 'Song one', 'library', 1)")
 db.execute("UPDATE tracks SET state = 'done', video_id = (SELECT id FROM videos) WHERE title = 'Song one'")
-db.execute("PRAGMA user_version = 2")
 db.commit()
 PY
 mv "$WORK/mvlib" "$WORK/mvlib2"
@@ -123,6 +143,12 @@ assert states == {"Song one": "done", "Song two": "not_found"}, states
 assert db.execute("SELECT COUNT(*) FROM tracks WHERE video_id IS NOT NULL AND path LIKE '%/lib2/A/one.flac'").fetchone()[0] == 1
 print("moved library ok")
 PY
+
+# A database of another layout is refused, not converted.
+mkdir -p "$WORK/mvold/.mvplayer"
+python3 -c "import sqlite3, sys; db = sqlite3.connect(sys.argv[1]); db.execute('CREATE TABLE videos (id INTEGER PRIMARY KEY)'); db.execute('PRAGMA user_version = 3'); db.commit()" "$WORK/mvold/.mvplayer/library.db"
+! OUT=$("$BUILD/mvplayer-import" --music-dir "$WORK/lib2" --mv-dir "$WORK/mvold" 2>&1)
+[[ "$OUT" == *"written by another version"* ]]
 
 echo "== recordings"
 # The same library on a device that keeps it as Opus, under other file names,
@@ -165,6 +191,142 @@ print("recordings ok")
 PY
 OUT=$(MVPLAYER_YTDLP="$FAKE" timeout 60 "$BUILD/mvplayer-import" --music-dir "$WORK/lib3" --mv-dir "$WORK/mvlib2" 2>&1)
 [[ $(cat "$WORK/calls") -eq 104 && "$OUT" == *"tracks:"*"not_found=2"* ]]
+
+echo "== review"
+# A stand-in for YouTube with one upload for the track "Five": the same notes
+# 0.4% faster, so the song by its fingerprints but not demonstrably the
+# track's recording. It is neither given the track's audio outright nor
+# passed over: it is brought in to wait for the user, with a default audio
+# stream that alternates between YouTube's and the track's. Accepted, it
+# joins the library with the track's audio; turned down, it is deleted, its
+# track has no video and is not offered that upload again.
+mkdir -p "$WORK/lib5/Dee"
+ffmpeg -v error -y -f lavfi -i "$(song 277 41 | sed 's/d=20/d=40/')" -metadata title="Five" -metadata artist=Dee "$WORK/lib5/Dee/five.flac"
+touch -d "10 seconds ago" "$WORK/lib5/Dee/five.flac"
+ffmpeg -v error -y -i "$WORK/lib5/Dee/five.flac" -af atempo=1.004 -c:a libopus -b:a 96k "$WORK/site-audio.opus"
+ffmpeg -v error -y -i "$WORK/mv.mkv" -map 0:v:0 -c copy -t 40 "$WORK/site-video.mkv"
+echo '{"entries": [{"id": "liv", "ie_key": "Youtube", "title": "Dee - Five", "channel": "Dee", "duration": 40, "view_count": 1000, "channel_is_verified": true}]}' > "$WORK/site-search.json"
+cat > "$WORK/fake-site" <<FAKE
+#!/bin/sh
+echo "\$*" >> "$WORK/site-args"
+case " \$* " in
+*ytsearch*) cat "$WORK/site-search.json" ;;
+*)  out=; prev=
+    for a in "\$@"; do [ "\$prev" = "-o" ] && out=\$a; prev=\$a; done
+    dir=\$(dirname "\$out")
+    case "\$out" in
+    *audio.*) cp "$WORK/site-audio.opus" "\$dir/audio.opus"; echo '{"abr": 96, "acodec": "opus"}' > "\$dir/audio.info.json" ;;
+    *video.*) cp "$WORK/site-video.mkv" "\$dir/video.mkv" ;;
+    esac ;;
+esac
+FAKE
+chmod +x "$WORK/fake-site"
+SITE="$WORK/fake-site"
+if [[ -n "$EXE" ]]; then
+    printf '@"%s" "%%~dp0fake-site" %%*\r\n' "$(cygpath -w "$(command -v sh)")" > "$WORK/fake-site.cmd"
+    SITE="$WORK/fake-site.cmd"
+fi
+streams() { (cd "$WORK/mvlib5/Dee" && ffprobe -v error -show_entries stream=codec_name -of csv=p=0 "Five [liv].mkv" | tr -d '\r' | tr '\n' ' '); }
+review_state() { python3 -c "import sqlite3, sys; print(sqlite3.connect(sys.argv[1]).execute('SELECT review, audio_source FROM videos').fetchall())" "$WORK/mvlib5/.mvplayer/library.db"; }
+OUT=$(MVPLAYER_YTDLP="$SITE" timeout 120 "$BUILD/mvplayer-import" --allow-still-images --music-dir "$WORK/lib5" --mv-dir "$WORK/mvlib5" 2>&1)
+echo "$OUT" | grep -E "^\[import\]|^done:"
+[[ "$OUT" == *"for your review (1 option)"* && "$OUT" == *"done: 0 videos and 1 for review; tracks: done=1"* ]]
+[[ "$(streams)" == "h264 flac opus flac " && "$(review_state)" == "[(1, 'library')]" ]]
+# search, audio to listen to, the video. (The look at the picture is left out:
+# its format selector has a ">" in it, which the Windows stand-in, a batch
+# file, would take for a redirection.)
+[[ $(wc -l < "$WORK/site-args") -eq 3 ]]
+OUT=$(MVPLAYER_YTDLP="$SITE" timeout 120 "$BUILD/mvplayer-import" --allow-still-images --music-dir "$WORK/lib5" --mv-dir "$WORK/mvlib5" --approve liv 2>&1)
+echo "$OUT" | grep -E "^\[review\]|^done:"
+[[ "$OUT" == *"done: 1 videos; tracks: done=1"* ]]
+[[ "$(streams)" == "h264 flac opus " && "$(review_state)" == "[(0, 'library')]" ]]
+# Put back under review, and turned down this time.
+python3 -c "import sqlite3, sys; db = sqlite3.connect(sys.argv[1]); db.execute('UPDATE videos SET review = 1, review_group = id'); db.commit()" "$WORK/mvlib5/.mvplayer/library.db"
+OUT=$(MVPLAYER_YTDLP="$SITE" timeout 120 "$BUILD/mvplayer-import" --allow-still-images --music-dir "$WORK/lib5" --mv-dir "$WORK/mvlib5" --reject liv 2>&1)
+echo "$OUT" | grep -E "^\[review\]|^done:"
+[[ "$OUT" == *"done: 0 videos; tracks: not_found=1"* ]]
+[[ ! -e "$WORK/mvlib5/Dee/Five [liv].mkv" ]]
+# Looking again finds the same upload and leaves it alone: one search, nothing fetched.
+OUT=$(MVPLAYER_YTDLP="$SITE" timeout 120 "$BUILD/mvplayer-import" --allow-still-images --music-dir "$WORK/lib5" --mv-dir "$WORK/mvlib5" --retry 2>&1)
+[[ "$OUT" == *"done: 0 videos; tracks: not_found=1"* ]]
+[[ $(wc -l < "$WORK/site-args") -eq 4 ]]
+python3 - "$WORK/mvlib5/.mvplayer/library.db" <<'PY'
+import sqlite3, sys
+db = sqlite3.connect(sys.argv[1])
+assert db.execute("SELECT COUNT(*) FROM videos").fetchone()[0] == 0
+assert [y for _, y in db.execute("SELECT key, yt_id FROM rejected_videos")] == ["liv"]
+assert "turned down" in db.execute("SELECT message FROM tracks").fetchone()[0]
+print("review ok")
+PY
+
+echo "== premium account"
+# A yt-dlp that knows an account by its cookies: it lists audio at 250 kbit/s
+# and hands it out. The check of existing videos must rebuild the one video
+# from it, and must give yt-dlp a copy of the cookies, not the stored file.
+printf '# Netscape HTTP Cookie File\n.youtube.com\tTRUE\t/\tTRUE\t0\tSID\tsecret\n' > "$WORK/cookies.txt"
+cat > "$WORK/fake-premium" <<FAKE
+#!/bin/sh
+echo "\$*" >> "$WORK/premium-args"
+case " \$* " in *" --cookies "*) ;; *) echo "ERROR: no cookies given" >&2; exit 1 ;; esac
+case " \$* " in
+*" -J "*) echo '{"formats": [{"format_id": "774", "vcodec": "none", "acodec": "opus", "abr": 250}]}' ;;
+*)  out=; prev=
+    for a in "\$@"; do [ "\$prev" = "-o" ] && out=\$a; prev=\$a; done
+    dir=\$(dirname "\$out")
+    cp "$WORK/mv.opus" "\$dir/premium.opus"
+    echo '{"abr": 250, "acodec": "opus"}' > "\$dir/premium.info.json" ;;
+esac
+FAKE
+chmod +x "$WORK/fake-premium"
+PREMIUM="$WORK/fake-premium"
+if [[ -n "$EXE" ]]; then
+    printf '@"%s" "%%~dp0fake-premium" %%*\r\n' "$(cygpath -w "$(command -v sh)")" > "$WORK/fake-premium.cmd"
+    PREMIUM="$WORK/fake-premium.cmd"
+fi
+! "$BUILD/mvplayer-import" --music-dir "$WORK/lib3" --mv-dir "$WORK/mvlib2" --cookies "$WORK/track.flac" >/dev/null
+# A track of lesser quality than YouTube's audio, so its video plays YouTube's.
+mkdir -p "$WORK/lib4/C" "$WORK/mvlib4/C"
+ffmpeg -v error -y -i "$WORK/lib2/A/one.flac" -c:a libopus -b:a 32k -metadata title="Low" "$WORK/lib4/C/low.opus"
+touch -d "10 seconds ago" "$WORK/lib4/C/low.opus"
+ffmpeg -v error -y -i "$WORK/mv.mkv" -i "$WORK/lib2/A/one.flac" -map 0:v:0 -map 1:a:0 -c:v copy -c:a libopus -b:a 96k \
+    -shortest "$WORK/low.mkv"
+mv "$WORK/low.mkv" "$WORK/mvlib4/C/Low [xyz].mkv"
+echo 200 > "$WORK/calls"
+MVPLAYER_YTDLP="$FAKE" timeout 60 "$BUILD/mvplayer-import" --music-dir "$WORK/lib4" --mv-dir "$WORK/mvlib4" >/dev/null 2>&1
+python3 - "$WORK/mvlib4/.mvplayer/library.db" <<'PY'
+import sqlite3, sys
+db = sqlite3.connect(sys.argv[1])
+db.execute("INSERT INTO videos (yt_id, path, title, audio_source, added_at) "
+           "VALUES ('xyz', 'C/Low [xyz].mkv', 'Low', 'youtube', 1)")
+db.execute("UPDATE tracks SET state = 'done', video_id = (SELECT id FROM videos)")
+db.commit()
+PY
+OUT=$(MVPLAYER_YTDLP="$PREMIUM" timeout 120 "$BUILD/mvplayer-import" --music-dir "$WORK/lib4" --mv-dir "$WORK/mvlib4" \
+    --cookies "$WORK/cookies.txt" --check-quality 2>&1)
+echo "$OUT" | grep -E "^\[quality\]|^\[audio\]|warning"
+[[ "$OUT" == *"1 upgraded, 0 failed"* ]]
+[[ $(wc -l < "$WORK/premium-args") -eq 2 ]]
+! grep -q -e "--cookies $WORK/cookies.txt" "$WORK/premium-args"
+grep -q "secret" "$WORK/cookies.txt"
+# (By its relative name: MSYS2 does not translate a path with brackets for ffprobe.)
+STREAMS=$(cd "$WORK/mvlib4/C" && ffprobe -v error -show_entries stream=codec_type,codec_name -of csv=p=0 "Low [xyz].mkv" | tr -d '\r' | tr '\n' ' ')
+echo "streams: $STREAMS"
+[[ "$STREAMS" == "h264,video opus,audio " ]]
+python3 - "$WORK/mvlib4/.mvplayer/library.db" <<'PY'
+import sqlite3, sys
+db = sqlite3.connect(sys.argv[1])
+assert db.execute("SELECT yt_abr, audio_source FROM videos").fetchall() == [(250.0, "youtube")]
+PY
+# Already built from the account's audio: nothing is asked again.
+MVPLAYER_YTDLP="$PREMIUM" timeout 120 "$BUILD/mvplayer-import" --music-dir "$WORK/lib4" --mv-dir "$WORK/mvlib4" \
+    --cookies "$WORK/cookies.txt" --check-quality >/dev/null 2>&1
+[[ $(wc -l < "$WORK/premium-args") -eq 2 ]]
+# The library's FLAC is never traded for the account's audio: "Uta ichi" has
+# it in its video, and only an Opus copy of the track is left to rebuild from.
+OUT=$(MVPLAYER_YTDLP="$PREMIUM" timeout 120 "$BUILD/mvplayer-import" --music-dir "$WORK/lib3" --mv-dir "$WORK/mvlib2" \
+    --cookies "$WORK/cookies.txt" --check-quality 2>&1)
+[[ "$OUT" == *"0 upgraded, 0 failed"* ]]
+[[ $(cd "$WORK/mvlib2/A" && ffprobe -v error -show_entries stream=codec_name -of csv=p=0 "Song one [abc].mkv" | tr -d '\r' | tr '\n' ' ') == "h264 flac opus " ]]
 
 echo "== binaries start"
 "$BUILD/mvplayer-import" --help >/dev/null

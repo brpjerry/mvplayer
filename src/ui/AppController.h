@@ -45,6 +45,8 @@ class AppController : public QObject
     Q_PROPERTY(JobModel *jobs READ jobs CONSTANT)
     Q_PROPERTY(QVariantList facets READ facets NOTIFY facetsChanged)
     Q_PROPERTY(int videoCount READ videoCount NOTIFY facetsChanged)
+    // Videos that wait for the user to accept or reject them.
+    Q_PROPERTY(int reviewCount READ reviewCount NOTIFY facetsChanged)
 
     Q_PROPERTY(QStringList musicDirs READ musicDirs NOTIFY settingsChanged)
     Q_PROPERTY(QString mvDir READ mvDir WRITE setMvDir NOTIFY settingsChanged)
@@ -52,6 +54,10 @@ class AppController : public QObject
     Q_PROPERTY(bool replaceAudio READ replaceAudio WRITE setReplaceAudio NOTIFY settingsChanged)
     Q_PROPERTY(bool allowUnofficial READ allowUnofficial WRITE setAllowUnofficial NOTIFY settingsChanged)
     Q_PROPERTY(bool skipStillImages READ skipStillImages WRITE setSkipStillImages NOTIFY settingsChanged)
+    // A YouTube Premium account's cookies.txt, kept beside the settings.
+    Q_PROPERTY(bool hasCookies READ hasCookies NOTIFY settingsChanged)
+    Q_PROPERTY(QString cookiesAdded READ cookiesAdded NOTIFY settingsChanged)
+    Q_PROPERTY(bool checkingQuality READ checkingQuality NOTIFY activityChanged)
 
     Q_PROPERTY(bool busy READ busy NOTIFY activityChanged)
     Q_PROPERTY(bool scanning READ scanning NOTIFY activityChanged)
@@ -87,7 +93,10 @@ public:
     VideoFilterModel *videos() const { return m_filter; }
     JobModel *jobs() const { return m_jobs; }
     QVariantList facets() const { return m_facets; }
-    int videoCount() const { return m_model->rowCount(); }
+    int videoCount() const { return m_model->rowCount() - m_reviewVideos; }
+    int reviewCount() const { return m_reviewCount; }
+    Q_INVOKABLE void approveVideo(qint64 videoId);
+    Q_INVOKABLE void rejectVideo(qint64 videoId);
 
     QStringList musicDirs() const { return m_cfg.musicDirs; }
     Q_INVOKABLE void addMusicDir(const QString &dir);
@@ -101,6 +110,13 @@ public:
     void setAllowUnofficial(bool v);
     bool skipStillImages() const { return m_cfg.skipStillImages; }
     void setSkipStillImages(bool v);
+    bool hasCookies() const { return !m_cfg.cookiesFile.isEmpty(); }
+    QString cookiesAdded() const;
+    // Stores a copy of `file`. Returns what is wrong with it, or nothing.
+    Q_INVOKABLE QString importCookies(const QString &file);
+    Q_INVOKABLE void removeCookies();
+    bool checkingQuality() const;
+    Q_INVOKABLE void checkQuality();
 
     bool busy() const;
     bool scanning() const;
@@ -153,6 +169,7 @@ private:
     void rebuildFacets();
     void refreshCounts();
     void saveSettings();
+    QString cookiesPath() const;
 
     AppOptions m_options;
     std::unique_ptr<QSettings> m_settings;
@@ -168,6 +185,8 @@ private:
     QTimer m_facetTimer;
     QVariantMap m_trackCounts;
     int m_sessionDone = 0;
+    int m_reviewCount = 0;  // tracks with videos waiting for review
+    int m_reviewVideos = 0; // those videos, counting every option
     QString m_accent = QStringLiteral("auto");
     QString m_sidebarFacet = QStringLiteral("albumArtist");
     SystemTheme m_systemTheme;

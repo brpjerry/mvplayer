@@ -27,6 +27,10 @@ bool isNonMvTrack(const TrackInfo &track, QString *why = nullptr);
 
 QStringList searchQueries(const TrackInfo &track);
 
+// False when one of the two is marked as a version the other is not: a live
+// take, a remix, a cover, ... (the track by its title or album).
+bool sameVersion(const TrackInfo &track, const QString &videoTitle);
+
 // Scores every candidate against the track and sorts best-first.
 void rank(const TrackInfo &track, QVector<YtCandidate> &candidates);
 

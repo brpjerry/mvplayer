@@ -15,6 +15,7 @@
 #include "core/Muxer.h"
 #include "core/TagReader.h"
 #include "core/Util.h"
+#include "core/YtDlp.h"
 
 #include <QCommandLineParser>
 #include <QCoreApplication>
@@ -55,6 +56,10 @@ int main(int argc, char **argv)
         {QStringLiteral("allow-still-images"), QStringLiteral("Accept videos whose picture never changes.")},
         {QStringLiteral("retry"), QStringLiteral("Retry tracks that previously failed or had no video.")},
         {QStringLiteral("ytdlp-arg"), QStringLiteral("Extra argument passed to yt-dlp (repeatable)."), QStringLiteral("arg")},
+        {QStringLiteral("cookies"), QStringLiteral("cookies.txt of a YouTube Premium account, for its higher audio bitrate."), QStringLiteral("file")},
+        {QStringLiteral("approve"), QStringLiteral("Accept a video that waits for review, by its YouTube id (repeatable)."), QStringLiteral("id")},
+        {QStringLiteral("reject"), QStringLiteral("Turn down a video that waits for review, by its YouTube id: it is deleted and its tracks have no video (repeatable)."), QStringLiteral("id")},
+        {QStringLiteral("check-quality"), QStringLiteral("Look at the videos already imported again and rebuild those the account is offered in better quality.")},
     });
     parser.addPositionalArgument(QStringLiteral("command"), QStringLiteral("Optional: align <track> <video> | mux <track> <video> <out.mkv> | check-video <video> [keyframes] | same-recording <file> <file>"));
     parser.process(app);
@@ -145,6 +150,17 @@ int main(int argc, char **argv)
     cfg.replaceAudio = !parser.isSet(QStringLiteral("keep-youtube-audio"));
     cfg.skipStillImages = !parser.isSet(QStringLiteral("allow-still-images"));
     cfg.ytdlpArgs = parser.values(QStringLiteral("ytdlp-arg"));
+    if (parser.isSet(QStringLiteral("cookies"))) {
+        cfg.cookiesFile = QFileInfo(parser.value(QStringLiteral("cookies"))).absoluteFilePath();
+        if (!YtDlp::looksLikeCookies(cfg.cookiesFile)) {
+            out << "error: " << cfg.cookiesFile << " is not a cookies.txt with YouTube cookies" << Qt::endl;
+            return 1;
+        }
+    }
+    if (parser.isSet(QStringLiteral("check-quality")) && cfg.cookiesFile.isEmpty()) {
+        out << "error: --check-quality needs --cookies" << Qt::endl;
+        return 1;
+    }
     if (qEnvironmentVariableIsSet("MVPLAYER_PAUSE_SECS"))
         cfg.pauseBaseSecs = qEnvironmentVariableIntValue("MVPLAYER_PAUSE_SECS");
 
@@ -166,7 +182,12 @@ int main(int argc, char **argv)
     });
     QObject::connect(&mgr, &ImportManager::idle, &app, [&] {
         const QHash<QString, int> c = db.trackStateCounts();
-        out << "done: " << db.allVideos().size() << " videos; tracks:";
+        const QVector<VideoInfo> videos = db.allVideos();
+        const auto waiting = std::count_if(videos.begin(), videos.end(), [](const VideoInfo &v) { return v.review; });
+        out << "done: " << videos.size() - waiting << " videos";
+        if (waiting > 0)
+            out << " and " << waiting << " for review";
+        out << "; tracks:";
         for (auto it = c.begin(); it != c.end(); ++it)
             out << " " << it.key() << "=" << it.value();
         out << Qt::endl;
@@ -178,6 +199,16 @@ int main(int argc, char **argv)
     mgr.start();
     if (parser.isSet(QStringLiteral("retry")))
         mgr.retryUnmatched();
+    if (parser.isSet(QStringLiteral("check-quality")))
+        mgr.checkQuality();
+    for (const QString &id : parser.values(QStringLiteral("approve"))) {
+        if (const auto v = db.videoByYtId(id))
+            mgr.approveVideo(v->id);
+    }
+    for (const QString &id : parser.values(QStringLiteral("reject"))) {
+        if (const auto v = db.videoByYtId(id))
+            mgr.rejectVideo(v->id);
+    }
     const int rc = app.exec();
     mgr.stop();
     return rc;

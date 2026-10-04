@@ -8,6 +8,7 @@
 #include <bit>
 #include <cmath>
 #include <cstring>
+#include <numbers>
 
 namespace AudioAlign {
 
@@ -18,7 +19,12 @@ constexpr int kFpWindow = 12;       // fingerprint items averaged when matching 
 constexpr double kFpMaxErr = 9.5;   // mean differing bits (of 32) still counted as a match
 constexpr int kFpMinRun = 24;       // shortest fingerprint match worth keeping (~3 s)
 constexpr double kMinCorr = 0.25;   // weakest correlation peak accepted when refining a lag
-constexpr double kFrameCorr = 0.5;  // per-frame correlation needed to call two frames the same audio
+constexpr double kFrameCorr = 0.5;  // per-frame correlation that alone says two frames are the same audio
+constexpr double kNearCorr = 0.25;  // ... or this much over the half second around the frame,
+constexpr double kOwnCorr = 0.12;   // with the frame itself not plainly unrelated
+constexpr int kNear = 2;            // frames either side that make up that half second
+constexpr int kTrackBlock = 5;      // frames over which the offset is followed (0.5 s)
+constexpr double kTrackCorr = 0.3;  // correlation needed to move the offset by a sample
 constexpr double kSilenceRms = 60;  // 16-bit RMS below which a frame is treated as silent
 constexpr int kMaxHole = 5;         // frames of disagreement bridged inside a segment (0.5 s)
 constexpr int kMinGood = 20;        // matching frames a segment needs (2 s)
@@ -213,25 +219,59 @@ bool refineLag(const std::vector<float> &M, const std::vector<float> &T, const s
         if (t2 <= 0)
             continue;
         const double c = dotLong(&M[wS], &T[t0], N) / std::sqrt(m2 * t2);
-        if (c > best) {
+        // An upload with inverted polarity correlates just as well, negatively.
+        if (std::abs(c) > std::abs(best) || best < -1.5) {
             best = c;
             bestLag = L;
         }
     }
     *lagOut = bestLag;
     *corrOut = best;
-    return best >= kMinCorr;
+    return std::abs(best) >= kMinCorr && best >= -1.5;
 }
 
-enum FrameState : uint8_t { Out, Bad, Neutral, Good };
+// Keeps 150 Hz to 3 kHz, where a remastered or re-equalised copy still has
+// the waveform of the original. Both signals get the same filter.
+void midBand(std::vector<float> &x)
+{
+    const auto biquad = [&x](double b0, double b1, double b2, double a1, double a2) {
+        double x1 = 0, x2 = 0, y1 = 0, y2 = 0;
+        for (float &v : x) {
+            const double in = v;
+            const double out = b0 * in + b1 * x1 + b2 * x2 - a1 * y1 - a2 * y2;
+            x2 = x1;
+            x1 = in;
+            y2 = y1;
+            y1 = out;
+            v = float(out);
+        }
+    };
+    const double q = 0.7071;
+    {
+        const double w = 2 * std::numbers::pi * 150.0 / kRate, alpha = std::sin(w) / (2 * q), c = std::cos(w), a0 = 1 + alpha;
+        biquad((1 + c) / 2 / a0, -(1 + c) / a0, (1 + c) / 2 / a0, -2 * c / a0, (1 - alpha) / a0);
+    }
+    {
+        const double w = 2 * std::numbers::pi * 3000.0 / kRate, alpha = std::sin(w) / (2 * q), c = std::cos(w), a0 = 1 + alpha;
+        biquad((1 - c) / 2 / a0, (1 - c) / a0, (1 - c) / 2 / a0, -2 * c / a0, (1 - alpha) / a0);
+    }
+}
+
+// Soft: the two do not demonstrably match, but the video is no louder than
+// the track there — nothing of its own is going on, the mix just differs.
+enum FrameState : uint8_t { Out, Bad, Soft, Neutral, Good };
 
 struct FrameScan {
     std::vector<uint8_t> state;
     std::vector<float> m2, t2; // per-frame energies
+    std::vector<qint64> lag;   // the offset each frame was compared at
 };
 
-// Classifies every 100 ms frame of the video against the track at one lag.
-FrameScan scanFrames(const std::vector<float> &M, const std::vector<float> &T, qint64 lag)
+// Classifies every 100 ms frame of the video against the track. The offset
+// starts as `lag` at frame `anchor` and is followed from there in both
+// directions, a sample at a time: two copies of a recording can differ in
+// length by a few milliseconds. `sign` is -1 for an upload of inverted polarity.
+FrameScan scanFrames(const std::vector<float> &M, const std::vector<float> &T, qint64 lag, qint64 anchor, int sign)
 {
     const qint64 nM = qint64(M.size()), nT = qint64(T.size());
     const qint64 frames = nM / kFrame;
@@ -239,27 +279,130 @@ FrameScan scanFrames(const std::vector<float> &M, const std::vector<float> &T, q
     fs.state.assign(frames, Out);
     fs.m2.assign(frames, 0);
     fs.t2.assign(frames, 0);
+    fs.lag.assign(frames, lag);
+    if (frames <= 0)
+        return fs;
+
+    const auto follow = [&](qint64 blockStart, qint64 cur) {
+        const qint64 p = blockStart * kFrame;
+        const qint64 n = std::min<qint64>(kTrackBlock, frames - blockStart) * kFrame;
+        double best = -2;
+        qint64 bestLag = cur;
+        for (qint64 L = cur - 1; L <= cur + 1; ++L) {
+            const qint64 t = p - L;
+            if (t < 0 || t + n > nT)
+                continue;
+            const double m2 = dotLong(&M[p], &M[p], n), t2 = dotLong(&T[t], &T[t], n);
+            if (m2 <= 0 || t2 <= 0)
+                continue;
+            const double c = sign * dotLong(&M[p], &T[t], n) / std::sqrt(m2 * t2);
+            // Staying put wins a tie.
+            if (c > best + (L == cur ? -1e-6 : 1e-6)) {
+                best = c;
+                bestLag = L;
+            }
+        }
+        return best >= kTrackCorr ? bestLag : cur;
+    };
+    anchor = std::clamp<qint64>(anchor, 0, frames - 1) / kTrackBlock * kTrackBlock;
+    qint64 cur = lag;
+    for (qint64 b = anchor; b < frames; b += kTrackBlock) {
+        cur = follow(b, cur);
+        std::fill(fs.lag.begin() + b, fs.lag.begin() + std::min<qint64>(b + kTrackBlock, frames), cur);
+    }
+    cur = lag;
+    for (qint64 b = anchor - kTrackBlock; b >= 0; b -= kTrackBlock) {
+        cur = follow(b, cur);
+        std::fill(fs.lag.begin() + b, fs.lag.begin() + b + kTrackBlock, cur);
+    }
+
     const double quiet = kSilenceRms * kSilenceRms * kFrame;
+    std::vector<float> d(frames, 0);
     for (qint64 f = 0; f < frames; ++f) {
-        const qint64 p = f * kFrame, t = p - lag;
+        const qint64 p = f * kFrame, t = p - fs.lag[f];
         if (t < 0 || t + kFrame > nT)
             continue;
-        const float m2 = dot(&M[p], &M[p], kFrame);
-        const float t2 = dot(&T[t], &T[t], kFrame);
-        fs.m2[f] = m2;
-        fs.t2[f] = t2;
+        fs.m2[f] = dot(&M[p], &M[p], kFrame);
+        fs.t2[f] = dot(&T[t], &T[t], kFrame);
+        d[f] = sign * dot(&M[p], &T[t], kFrame);
+        fs.state[f] = Bad;
+    }
+    double goodM2 = 0, goodT2 = 0;
+    for (qint64 f = 0; f < frames; ++f) {
+        if (fs.state[f] == Out)
+            continue;
+        const float m2 = fs.m2[f], t2 = fs.t2[f];
         if (m2 < quiet && t2 < quiet) {
             fs.state[f] = Neutral;
             continue;
         }
-        if (m2 <= 0 || t2 <= 0) {
-            fs.state[f] = Bad;
+        if (m2 <= 0 || t2 <= 0)
             continue;
+        const double own = d[f] / std::sqrt(double(m2) * t2);
+        double nd = 0, nm = 0, nt = 0;
+        for (qint64 g = std::max<qint64>(0, f - kNear); g <= std::min(frames - 1, f + kNear); ++g) {
+            if (fs.state[g] == Out)
+                continue;
+            nd += d[g];
+            nm += fs.m2[g];
+            nt += fs.t2[g];
         }
-        const double c = dot(&M[p], &T[t], kFrame) / std::sqrt(double(m2) * t2);
-        fs.state[f] = c >= kFrameCorr ? Good : Bad;
+        const double near = nm > 0 && nt > 0 ? nd / std::sqrt(nm * nt) : 0;
+        if (own >= kFrameCorr || (near >= kNearCorr && own >= kOwnCorr)) {
+            fs.state[f] = Good;
+            goodM2 += m2;
+            goodT2 += t2;
+        }
+    }
+    // Where the video is louder than the track by more than 3 dB it has
+    // something of its own to say (an effect, a line of dialogue).
+    if (goodM2 > 0 && goodT2 > 0) {
+        const double g2 = goodT2 / goodM2;
+        for (qint64 f = 0; f < frames; ++f) {
+            if (fs.state[f] == Bad && fs.t2[f] > 0 && fs.m2[f] * g2 <= 2.0 * fs.t2[f])
+                fs.state[f] = Soft;
+        }
     }
     return fs;
+}
+
+constexpr int kContourHop = kRate / 100; // 10 ms
+constexpr int kContourReach = 30 * 100;  // offsets tried either way: 30 s
+
+// The offset at which the loudness of the two moves together.
+void contour(const std::vector<float> &M, const std::vector<float> &T, qint64 *lag, double *corr)
+{
+    const auto envelope = [](const std::vector<float> &x) {
+        std::vector<float> e(x.size() / kContourHop);
+        double mean = 0;
+        for (size_t i = 0; i < e.size(); ++i) {
+            e[i] = std::sqrt(dot(&x[i * kContourHop], &x[i * kContourHop], kContourHop) / kContourHop);
+            mean += e[i];
+        }
+        mean /= std::max<size_t>(e.size(), 1);
+        for (float &v : e)
+            v -= float(mean);
+        return e;
+    };
+    const std::vector<float> m = envelope(M), t = envelope(T);
+    const qint64 nm = qint64(m.size()), nt = qint64(t.size());
+    double best = 0;
+    qint64 bestLag = 0;
+    for (qint64 L = -kContourReach; L <= kContourReach; ++L) {
+        // m[i] against t[i - L]
+        const qint64 a = std::max<qint64>(0, L), b = std::min(nm, nt + L);
+        if (b - a < 20 * 100)
+            continue;
+        const double d = dotLong(&m[a], &t[a - L], b - a);
+        const double e = dotLong(&m[a], &m[a], b - a) * dotLong(&t[a - L], &t[a - L], b - a);
+        const double c = e > 0 ? d / std::sqrt(e) : 0;
+        if (c > best) {
+            best = c;
+            bestLag = L;
+        }
+    }
+    *lag = bestLag * kContourHop;
+    *corr = best;
 }
 
 } // namespace
@@ -279,6 +422,14 @@ QString Result::summary() const
     }
     if (!segments.isEmpty())
         parts << QStringLiteral("gain %1 dB").arg(20 * std::log10(gain), 0, 'f', 2);
+    if (!segments.isEmpty() && pcmMatchedSec > 0)
+        parts << QStringLiteral("%1% of it plainly the same").arg(qRound(100 * goodSec / pcmMatchedSec));
+    if (inverted)
+        parts << QStringLiteral("polarity inverted");
+    if (!segments.isEmpty())
+        parts << QStringLiteral("loudness agrees at %1s (%2)").arg(double(contourLag) / kRate, 0, 'f', 2).arg(contourCorr, 0, 'f', 2);
+    if (byOffset)
+        parts << QStringLiteral("same performance in another mix: placed whole by its offset");
     return parts.join(QStringLiteral(", "));
 }
 
@@ -338,6 +489,9 @@ Result align(const std::vector<int16_t> &track, const std::vector<int16_t> &vide
 
     std::vector<float> M(video.begin(), video.end());
     std::vector<float> T(track.begin(), track.end());
+    midBand(M);
+    midBand(T);
+    contour(M, T, &res.contourLag, &res.contourCorr);
     std::vector<double> cumT2(T.size() + 1, 0.0);
     for (size_t i = 0; i < T.size(); ++i)
         cumT2[i + 1] = cumT2[i] + double(T[i]) * T[i];
@@ -347,6 +501,7 @@ Result align(const std::vector<int16_t> &track, const std::vector<int16_t> &vide
     std::vector<uint8_t> claimed(frames, 0);
     double sumM2 = 0, sumT2 = 0;
     QVector<qint64> lagsDone;
+    int sign = 0; // polarity of the video's audio against the track's, set by the best run
 
     // `runs` is ordered best-first, so stronger matches claim their frames first.
     for (const FpRun &r : runs) {
@@ -359,8 +514,15 @@ Result align(const std::vector<int16_t> &track, const std::vector<int16_t> &vide
         if (std::any_of(lagsDone.begin(), lagsDone.end(), [&](qint64 l) { return std::llabs(l - lag) <= 2; }))
             continue;
         lagsDone.append(lag);
+        if (sign == 0) {
+            sign = corr < 0 ? -1 : 1;
+            res.inverted = sign < 0;
+        } else if ((corr < 0) != (sign < 0)) {
+            continue;
+        }
+        corr = std::abs(corr);
 
-        const FrameScan fs = scanFrames(M, T, lag);
+        const FrameScan fs = scanFrames(M, T, lag, (runStart + runEnd) / 2 / kFrame, sign);
         const qint64 coreA = runStart / kFrame, coreB = runEnd / kFrame;
 
         // Maximal stretches of agreeing frames, bridging short disagreements.
@@ -400,10 +562,14 @@ Result align(const std::vector<int16_t> &track, const std::vector<int16_t> &vide
                     sumM2 += fs.m2[f];
                     sumT2 += fs.t2[f];
                 }
+                if (fs.state[f] == Good || fs.state[f] == Neutral)
+                    res.goodSec += double(kFrame) / kRate;
             }
             Segment seg;
             seg.mvStart = a * kFrame;
             seg.mvEnd = b * kFrame;
+            // The offset as it stands in the middle of the segment.
+            const qint64 lag = fs.lag[(a + b) / 2];
             seg.lag = lag;
             seg.corr = corr;
             // Frames are a coarse grid: when a segment stops within a frame
@@ -426,6 +592,9 @@ Result align(const std::vector<int16_t> &track, const std::vector<int16_t> &vide
             } else if (st == Out) {
                 close();
                 bad = 0;
+            } else if (st == Soft) {
+                // The track carries on underneath: part of the segment if
+                // matching audio follows at this offset, whatever the gap.
             } else if (start >= 0 && ++bad > kMaxHole) {
                 close();
                 bad = 0;

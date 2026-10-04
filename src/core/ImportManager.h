@@ -1,5 +1,6 @@
 #pragma once
 
+#include "core/AudioAlign.h"
 #include "core/Database.h"
 #include "core/LibraryScanner.h"
 
@@ -23,6 +24,7 @@ struct ImportSettings {
     bool skipStillImages = true;   // reject videos whose picture never changes
     int concurrency = 2;
     QStringList ytdlpArgs;         // extra yt-dlp arguments (cookies, proxies, ...)
+    QString cookiesFile;           // cookies.txt of a YouTube Premium account; empty: none
     int retryNotFoundDays = 14;
     int pauseBaseSecs = 600;       // first wait after YouTube blocks requests; doubles on repeats
 };
@@ -36,6 +38,7 @@ struct JobStatus {
     bool finished = false;
     QString outcome;      // done | not_found | failed | skipped | postponed (when finished)
     QString detail;
+    bool upgrade = false; // part of a quality check of existing videos, not an import
 };
 Q_DECLARE_METATYPE(JobStatus)
 
@@ -57,6 +60,18 @@ public:
     void rescan();
     void retryUnmatched();
 
+    // The user's verdict on a video that waits for review: it joins the
+    // library, or its tracks have no video and it is deleted.
+    void approveVideo(qint64 videoId);
+    void rejectVideo(qint64 videoId);
+
+    // Looks at every video in the library again with the account's cookies
+    // and rebuilds those YouTube now offers in better quality.
+    void checkQuality();
+    bool checkingQuality() const { return m_upgrading; }
+    int qualityChecked() const { return m_upgradeDone; }
+    int qualityTotal() const { return m_upgradeTotal; }
+
     // Circuit breaker: when YouTube starts refusing requests the whole queue
     // waits instead of failing track after track.
     bool paused() const { return m_blocked; }
@@ -67,7 +82,7 @@ public:
     bool scanning() const { return m_scanning; }
     int queuedCount() const { return m_queue.size(); }
     int activeCount() const { return m_active; }
-    bool busy() const { return m_scanning || m_auditing || m_blocked || m_active > 0 || !m_queue.isEmpty(); }
+    bool busy() const { return m_scanning || m_upgrading || m_reviewJobs > 0 || m_blocked || m_active > 0 || !m_queue.isEmpty(); }
 
     static QString dataDir(const QString &mvDir);
 
@@ -85,7 +100,12 @@ private:
     void onScanFinished(const LibraryScanner::Result &r);
     void onJobFinished(qint64 trackId);
     void runJob(qint64 trackId, const ImportSettings &cfg);
-    void auditStills();
+    // Rebuilds a video's file with the track's audio as its main audio.
+    bool putLibraryAudioIn(const VideoInfo &video, const TrackInfo &track, const AudioAlign::Result &align,
+                           const ImportSettings &cfg, QString *error, bool review = false);
+    void upgradeVideos(const ImportSettings &cfg);
+    // "done" when the video was rebuilt, "skipped" when it is as good as it gets.
+    QString upgradeVideo(const VideoInfo &video, const ImportSettings &cfg, QString *detail);
     void requeueRetryable();
     void noteSuccess();                      // any thread
     bool noteFailure(const QString &error);  // any thread; true when the queue is (now) paused
@@ -107,7 +127,10 @@ private:
     QSet<qint64> m_pending; // queued or running
     int m_active = 0;
     bool m_scanning = false;
-    bool m_auditing = false;
+    std::atomic<int> m_reviewJobs{0};
+    std::atomic<bool> m_upgrading{false};
+    std::atomic<int> m_upgradeDone{0};
+    std::atomic<int> m_upgradeTotal{0};
     bool m_rescanWanted = false;
     bool m_started = false;
 

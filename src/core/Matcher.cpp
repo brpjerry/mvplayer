@@ -145,6 +145,17 @@ QStringList Matcher::searchQueries(const TrackInfo &track)
     };
 }
 
+bool Matcher::sameVersion(const TrackInfo &track, const QString &videoTitle)
+{
+    const QString video = tokens(videoTitle);
+    const QString title = tokens(track.title), album = tokens(track.album);
+    for (const QString &term : versionTerms()) {
+        if (hasTerm(video, term) != (hasTerm(title, term) || hasTerm(album, term)))
+            return false;
+    }
+    return true;
+}
+
 void Matcher::rank(const TrackInfo &track, QVector<YtCandidate> &candidates)
 {
     const QString titleTok = tokens(track.title);

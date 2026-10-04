@@ -4,6 +4,8 @@
 
 #include <QUrl>
 
+#include <algorithm>
+
 namespace {
 
 QString qualityLabel(const VideoInfo &v)
@@ -63,6 +65,12 @@ QVariant VideoModel::data(const QModelIndex &index, int role) const
     case AudioDetailRole: return v.audioDetail;
     case AddedAtRole: return v.addedAt;
     case YtIdRole: return v.ytId;
+    case YtTitleRole: return v.ytTitle;
+    case ReviewRole: return v.review;
+    case ReviewStartRole: return v.reviewStart;
+    case ReviewEndRole: return v.reviewEnd;
+    case ReviewOptionRole: return int(reviewOptions(v).indexOf(v.id)) + 1;
+    case ReviewOptionsRole: return int(reviewOptions(v).size());
     }
     return {};
 }
@@ -86,7 +94,27 @@ QHash<int, QByteArray> VideoModel::roleNames() const
         {AudioDetailRole, "audioDetail"},
         {AddedAtRole, "addedAt"},
         {YtIdRole, "ytId"},
+        {YtTitleRole, "ytTitle"},
+        {ReviewRole, "review"},
+        {ReviewStartRole, "reviewStart"},
+        {ReviewEndRole, "reviewEnd"},
+        {ReviewOptionRole, "reviewOption"},
+        {ReviewOptionsRole, "reviewOptions"},
     };
+}
+
+QVector<qint64> VideoModel::reviewOptions(const VideoInfo &v) const
+{
+    QVector<qint64> ids;
+    if (!v.review)
+        return ids;
+    const qint64 group = v.reviewGroup > 0 ? v.reviewGroup : v.id;
+    for (const VideoInfo &o : m_videos) {
+        if (o.review && (o.reviewGroup > 0 ? o.reviewGroup : o.id) == group)
+            ids << o.id;
+    }
+    std::sort(ids.begin(), ids.end());
+    return ids;
 }
 
 QVariantMap VideoModel::toMap(int row) const
@@ -126,9 +154,12 @@ void VideoModel::upsert(const VideoInfo &video)
 {
     for (int i = 0; i < m_videos.size(); ++i) {
         if (m_videos[i].id == video.id) {
+            const bool review = m_videos[i].review || video.review;
             m_videos[i] = video;
             m_search[i] = buildSearchText(video);
             emit dataChanged(index(i, 0), index(i, 0));
+            if (review)
+                reviewOptionsChanged();
             return;
         }
     }
@@ -136,6 +167,18 @@ void VideoModel::upsert(const VideoInfo &video)
     m_videos << video;
     m_search << buildSearchText(video);
     endInsertRows();
+    if (video.review)
+        reviewOptionsChanged();
+}
+
+// A group gained or lost an option: its other cards show a different count,
+// and possibly a different one of them is on show.
+void VideoModel::reviewOptionsChanged()
+{
+    for (int i = 0; i < m_videos.size(); ++i) {
+        if (m_videos[i].review)
+            emit dataChanged(index(i, 0), index(i, 0));
+    }
 }
 
 void VideoModel::remove(qint64 videoId)
@@ -143,10 +186,13 @@ void VideoModel::remove(qint64 videoId)
     for (int i = 0; i < m_videos.size(); ++i) {
         if (m_videos[i].id != videoId)
             continue;
+        const bool review = m_videos[i].review;
         beginRemoveRows(QModelIndex(), i, i);
         m_videos.removeAt(i);
         m_search.removeAt(i);
         endRemoveRows();
+        if (review)
+            reviewOptionsChanged();
         return;
     }
 }
@@ -224,6 +270,15 @@ void VideoFilterModel::setSortMode(const QString &mode)
 bool VideoFilterModel::filterAcceptsRow(int sourceRow, const QModelIndex &) const
 {
     const VideoInfo &v = m_source->at(sourceRow);
+    if (v.review != (m_facetType == QLatin1String("review")))
+        return false;
+    if (v.review) {
+        // One card per group of options: the one on show, the first by default.
+        const QVector<qint64> options = m_source->reviewOptions(v);
+        const qint64 shown = m_reviewShown.value(v.reviewGroup > 0 ? v.reviewGroup : v.id, 0);
+        if (v.id != (options.contains(shown) ? shown : options.value(0)))
+            return false;
+    }
     if (m_facetType == QLatin1String("albumArtist")) {
         if (!splitMulti(v.albumArtist).contains(m_facetValue))
             return false;
@@ -289,6 +344,24 @@ QVariantList VideoFilterModel::snapshot() const
     for (int i = 0; i < n; ++i)
         list << m_source->toMap(mapToSource(index(i, 0)).row());
     return list;
+}
+
+qint64 VideoFilterModel::stepReview(qint64 videoId, int delta)
+{
+    for (const VideoInfo &v : m_source->videos()) {
+        if (v.id != videoId)
+            continue;
+        const QVector<qint64> options = m_source->reviewOptions(v);
+        if (options.size() < 2)
+            return videoId;
+        const int n = int(options.size());
+        const int next = ((int(options.indexOf(videoId)) + delta) % n + n) % n;
+        beginFilterEdit();
+        m_reviewShown.insert(v.reviewGroup > 0 ? v.reviewGroup : v.id, options.at(next));
+        endFilterEdit();
+        return options.at(next);
+    }
+    return videoId;
 }
 
 int VideoFilterModel::rowOfVideo(qint64 videoId) const

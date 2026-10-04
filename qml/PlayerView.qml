@@ -26,6 +26,11 @@ Item {
     signal closeRequested()
     signal togglePauseRequested()
     signal toggleFullscreenRequested()
+    // The verdict on, or a step among the options of, the video under review
+    // that is playing in its thumbnail.
+    signal reviewApproved()
+    signal reviewRejected()
+    signal reviewStepped(int delta)
 
     // ---- Geometry ----------------------------------------------------------
     readonly property real videoAspect: {
@@ -76,6 +81,20 @@ Item {
         shown = true
         posterShown = true
         animateTo(1)
+    }
+    // Start playing where the thumbnail is, without growing: a video under
+    // review is judged from the list.
+    function openCollapsed(decodeWidth) {
+        motion.stop()
+        posterHint = decodeWidth || 0
+        expand = 0
+        if (anchorAvailable) {
+            presenceFade.enabled = false
+            shown = true
+            presenceFade.enabled = true
+        }
+        shown = true
+        posterShown = true
     }
     function showFull() {
         shown = true
@@ -267,6 +286,10 @@ Item {
         MouseArea {
             id: boxMouse
             anchors.fill: parent
+            // Out of the scene while there is nothing to click: at rest the
+            // box lies over the whole grid, and the hover Qt re-delivers on
+            // every frame would go to it instead of the card underneath.
+            visible: box.enabled
             hoverEnabled: true
             acceptedButtons: Qt.LeftButton
             cursorShape: root.collapsed ? Qt.PointingHandCursor
@@ -286,9 +309,26 @@ Item {
             }
         }
 
+        // The thumbnail's review controls are underneath the video now: the
+        // same ones, on top of it.
+        ReviewControls {
+            readonly property bool wanted: root.collapsed && root.current !== null && root.current.review === true
+            visible: wanted
+            // Counter-scaled like the other controls of the shrunken box.
+            width: parent.width * box.k
+            height: parent.height * box.k
+            transformOrigin: Item.TopLeft
+            scale: 1 / box.k
+            option: wanted ? root.current.reviewOption : 1
+            options: wanted ? root.current.reviewOptions : 1
+            onApproved: root.reviewApproved()
+            onRejected: root.reviewRejected()
+            onStepped: (delta) => root.reviewStepped(delta)
+        }
+
         IconButton {
             id: closeMini
-            visible: root.collapsed
+            visible: box.enabled && root.collapsed && !(root.current !== null && root.current.review === true)
             opacity: boxMouse.containsMouse || hovered ? 1 : 0
             anchors.right: parent.right
             anchors.top: parent.top

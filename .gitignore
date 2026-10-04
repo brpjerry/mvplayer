@@ -16,3 +16,6 @@ packaging/*.pkg.tar.*
 # Windows installer output
 packaging/windows/stage/
 packaging/windows/out/
+
+# Cookies
+cookies.txt

@@ -116,6 +116,7 @@ set(MV_QML_FILES
     qml/KineticWheel.qml
     qml/WindowControls.qml
     qml/WindowDrag.qml
+    qml/ReviewControls.qml
 )
 foreach(f ${MV_QML_FILES})
     get_filename_component(fname ${f} NAME)

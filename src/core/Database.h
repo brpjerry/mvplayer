@@ -70,19 +70,24 @@ public:
     std::optional<VideoInfo> videoByYtId(const QString &ytId);
     qint64 insertVideo(const VideoInfo &v);
     void updateVideoTags(const VideoInfo &v);
+    // After a video's file was rebuilt from better streams.
+    void updateVideoMedia(const VideoInfo &v);
+    // The videos that wait for review as options for the same tracks.
+    QVector<VideoInfo> reviewOptions(qint64 group);
+    // Points the tracks of one video at another.
+    void relinkTracks(qint64 fromVideoId, qint64 toVideoId);
+    // Makes a track look for (more) videos again; what it has stays with it.
+    void setTrackPending(qint64 trackId);
+    // A video the user turned down for a track is not offered for it again.
+    void rejectVideoFor(const TrackInfo &track, const QString &ytId);
+    bool videoRejectedFor(const TrackInfo &track, const QString &ytId);
     void removeVideo(qint64 id);
-    // Videos imported before their picture was reliably checked for stills.
-    QVector<VideoInfo> videosNotStillChecked();
-    void markStillChecked(qint64 videoId);
-    // Makes the tracks that point at a video pending again.
-    void requeueTracksOfVideo(qint64 videoId);
 
 private:
     QSqlDatabase conn();
     QString storedPath(const QString &path) const;
     QString resolvedPath(const QString &stored) const;
     VideoInfo resolved(VideoInfo v) const;
-    void makeVideoPathsRelative(QSqlDatabase &db);
 
     QString m_file;
     QString m_mvDir;

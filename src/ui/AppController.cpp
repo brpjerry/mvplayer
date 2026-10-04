@@ -1,10 +1,14 @@
 #include "ui/AppController.h"
 
 #include "core/Util.h"
+#include "core/YtDlp.h"
 
 #include <QCollator>
 #include <QDir>
 #include <QLocale>
+#include <QSet>
+#include <QSaveFile>
+#include <QFileInfo>
 #include <QMap>
 #include <QStandardPaths>
 
@@ -106,6 +110,8 @@ AppController::AppController(const AppOptions &options, QObject *parent)
     m_cfg.skipStillImages = m_settings->value(QStringLiteral("import/skipStillImages"), true).toBool();
     m_cfg.concurrency = m_settings->value(QStringLiteral("import/concurrency"), 2).toInt();
     m_cfg.ytdlpArgs = m_settings->value(QStringLiteral("import/ytdlpArgs")).toStringList();
+    if (YtDlp::looksLikeCookies(cookiesPath()))
+        m_cfg.cookiesFile = cookiesPath();
     m_cfg.pauseBaseSecs = m_settings->value(QStringLiteral("import/pauseSeconds"), m_cfg.pauseBaseSecs).toInt();
     if (qEnvironmentVariableIsSet("MVPLAYER_PAUSE_SECS"))
         m_cfg.pauseBaseSecs = qEnvironmentVariableIntValue("MVPLAYER_PAUSE_SECS");
@@ -193,7 +199,7 @@ void AppController::openLibrary()
     m_manager->setSettings(m_cfg);
     connect(m_manager.get(), &ImportManager::jobChanged, this, [this](const JobStatus &s) {
         m_jobs->update(s);
-        if (s.finished && s.outcome != QLatin1String("postponed")) {
+        if (s.finished && !s.upgrade && s.outcome != QLatin1String("postponed")) {
             ++m_sessionDone;
             refreshCounts();
         }
@@ -267,6 +273,8 @@ void AppController::rebuildFacets()
         const QString key = QLatin1String(def.key);
         QHash<QString, int> counts;
         for (const VideoInfo &v : m_model->videos()) {
+            if (v.review)
+                continue;
             QStringList values;
             if (key == QLatin1String("albumArtist"))
                 values = splitMulti(v.albumArtist);
@@ -295,6 +303,15 @@ void AppController::rebuildFacets()
         };
     }
     m_facets = out;
+    // Several options for the same track are one thing to review.
+    QSet<qint64> groups;
+    for (const VideoInfo &v : m_model->videos()) {
+        if (v.review)
+            groups.insert(v.reviewGroup > 0 ? v.reviewGroup : v.id);
+    }
+    m_reviewCount = int(groups.size());
+    m_reviewVideos = int(std::count_if(m_model->videos().begin(), m_model->videos().end(),
+                                       [](const VideoInfo &v) { return v.review; }));
     emit facetsChanged();
 }
 
@@ -379,6 +396,72 @@ void AppController::setAllowUnofficial(bool v)
     emit settingsChanged();
 }
 
+QString AppController::cookiesPath() const
+{
+    return QFileInfo(m_settings->fileName()).absoluteDir().filePath(QStringLiteral("cookies.txt"));
+}
+
+QString AppController::cookiesAdded() const
+{
+    if (!hasCookies())
+        return {};
+    return QLocale().toString(QFileInfo(m_cfg.cookiesFile).lastModified().date(), QLocale::LongFormat);
+}
+
+QString AppController::importCookies(const QString &file)
+{
+    if (!YtDlp::looksLikeCookies(file))
+        return tr("That is not a cookies.txt with YouTube cookies in it.");
+    const QString target = cookiesPath();
+    QFile source(file);
+    QSaveFile out(target);
+    if (!QDir().mkpath(QFileInfo(target).absolutePath()) || !source.open(QIODevice::ReadOnly)
+        || !out.open(QIODevice::WriteOnly))
+        return tr("Could not store the cookies.");
+    // They are as good as the account's password: for this user only.
+    out.setPermissions(QFileDevice::ReadOwner | QFileDevice::WriteOwner);
+    if (out.write(source.readAll()) < 0 || !out.commit())
+        return tr("Could not store the cookies.");
+    m_cfg.cookiesFile = target;
+    if (m_manager)
+        m_manager->setSettings(m_cfg);
+    emit settingsChanged();
+    return {};
+}
+
+void AppController::removeCookies()
+{
+    QFile::remove(cookiesPath());
+    m_cfg.cookiesFile.clear();
+    if (m_manager)
+        m_manager->setSettings(m_cfg);
+    emit settingsChanged();
+}
+
+void AppController::approveVideo(qint64 videoId)
+{
+    if (m_manager)
+        m_manager->approveVideo(videoId);
+}
+
+void AppController::rejectVideo(qint64 videoId)
+{
+    if (m_manager)
+        m_manager->rejectVideo(videoId);
+    refreshCounts();
+}
+
+bool AppController::checkingQuality() const
+{
+    return m_manager && m_manager->checkingQuality();
+}
+
+void AppController::checkQuality()
+{
+    if (m_manager && hasCookies())
+        m_manager->checkQuality();
+}
+
 void AppController::setSkipStillImages(bool v)
 {
     if (v == m_cfg.skipStillImages)
@@ -418,6 +501,10 @@ QString AppController::statusText() const
     }
     if (m_manager->scanning())
         return tr("Scanning library…");
+    if (m_manager->checkingQuality()) {
+        const int total = m_manager->qualityTotal();
+        return tr("Checking quality · %1 of %2").arg(qMin(total, m_manager->qualityChecked() + 1)).arg(total);
+    }
     return {};
 }
 

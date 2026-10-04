@@ -91,11 +91,45 @@ For every track without a video (`src/core/ImportManager.cpp`):
    fingerprints find where the track sits, cross-correlation makes that
    sample-accurate, and a frame-by-frame comparison marks the parts of the
    video that are not on the record (intros, inserted scenes, outros).
+   An upload is often not the album master — quieter, re-equalised, of
+   inverted polarity, a few milliseconds longer over the song — so the
+   comparison is made in the mid band, by the size of the correlation, at an
+   offset that is followed as it drifts. Where the two merely match poorly
+   and the video adds nothing of its own, the track still goes in.
+   The track's audio takes the video's place when about two thirds of it is
+   demonstrably the same waveform. The same performance in another mix
+   (reverb added, the voice at another level) shows less than that, as does
+   a cover over the same backing; there the fingerprints have to cover the
+   song, the loudness of the two has to move together at the offset found,
+   and neither may be marked as a version the other is not (live, remix,
+   cover, by title or album). The track is then placed whole at that offset.
 5. **Mux** (`src/core/Muxer.cpp`): if the track is higher quality than
    YouTube's audio, its samples are copied bit-for-bit into the matching
    regions and the video's own audio (level-matched) fills the gaps, with 20 ms
    crossfades. The result is the default FLAC audio track; YouTube's audio is
-   kept as a second track. Otherwise the YouTube audio is used as is.
+   kept as a second track.
+
+YouTube's audio is only ever a video's main audio when the track is the
+lesser of the two (a low-bitrate file). A video that is the song by its
+fingerprints, while the waveforms cannot show it to be the track's recording
+— a live take against the release of that concert on disc, a cover, another
+mix — is not for the importer to decide. It is taken only when no candidate
+fits outright, and then waits for you:
+
+- The review icon in the top bar (next to the import one, with a count) shows
+  these videos in place of the library. They are in no other view.
+- Playing one, the sound changes every ten seconds between YouTube's audio
+  and your track's, level-matched; the chip in the bottom bar says which.
+- When several uploads could be the track's video, they are options on one
+  card: the arrows on the thumbnail step through them. Accepting one drops the
+  others; turning one down leaves the rest to choose from.
+- ✓ on its thumbnail accepts it: it joins the library with your track's audio.
+  ✗ turns it down: the video is deleted, its track counts as having no video,
+  and that upload is not offered for it again.
+
+Headless: `--approve <youtube id>` and `--reject <youtube id>`.
+
+Turning off "Use my library's audio" in Settings lifts all of this.
 
 The music folders are watched; added tracks are picked up within a few
 seconds, edited tags on the next periodic rescan. Tracks with no video are
@@ -145,8 +179,33 @@ When a recording has no video and one of its files carries a title that has
 not been searched for — the original script in one place, romanised in
 another — it is searched once more under that title.
 
-The first scan after upgrading from 0.1.2 fingerprints the whole library once
-(about half a minute for 30 hours of FLAC on a laptop).
+Fingerprinting costs about half a minute for 30 hours of FLAC on a laptop.
+
+A library database is tied to the version that wrote it: there is no
+conversion between layouts. A database of another layout is refused with a
+message saying so; move it away or delete it (`.mvplayer/library.db` in the
+MV folder) to start a new library.
+
+### YouTube Premium
+
+With the cookies of a Premium account YouTube offers audio at about twice the
+usual bitrate (around 250 kbit/s Opus instead of 130). Export a `cookies.txt`
+from a browser signed in to the account and add it under Settings → YouTube
+Premium; the app keeps its own copy beside its settings file, readable by you
+only. From then on every imported video is built from that audio — as its
+"YouTube audio" track, and as its main audio where the library's own does not
+replace it.
+
+"Check videos for better quality" goes through the videos already in the
+library, one at a time, and rebuilds those the account is offered something
+better for: the audio is fetched again and put into the existing file, the
+picture is only downloaded again if a higher resolution has appeared.
+
+The account is used for nothing else. Searches and video downloads stay
+anonymous (the "1080p Premium" picture needs no account, and signed-in
+clients are not offered it); the cookies are only tried for a video that
+cannot be had without signing in, such as an age-restricted one. Headless:
+`--cookies cookies.txt` and `--check-quality`.
 
 ### Headless
 

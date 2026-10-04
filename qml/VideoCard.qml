@@ -13,12 +13,19 @@ Item {
     required property url thumb
     required property string quality
     required property string audioSource
+    required property bool review      // waits for the user's verdict
+    required property string ytTitle
+    required property int reviewOption   // which of the options for this track is shown, from 1
+    required property int reviewOptions
 
     property bool current: false   // this video is loaded in the player
     property bool playing: false   // ...and not paused
     readonly property Item thumbnail: thumbItem
 
     signal activated()
+    signal approved()
+    signal rejected()
+    signal stepped(int delta)          // show the next (+1) or previous (-1) option
 
     readonly property bool hovered: mouse.containsMouse
 
@@ -84,7 +91,7 @@ Item {
                 model: {
                     const list = []
                     if (root.quality === "4K" || root.quality === "8K") list.push(root.quality)
-                    if (root.audioSource === "library") list.push("LOSSLESS")
+                    if (root.audioSource === "library" && !root.review) list.push("LOSSLESS")
                     return list
                 }
                 Rectangle {
@@ -155,7 +162,8 @@ Item {
             anchors.right: parent.right
             anchors.top: titleLabel.bottom
             anchors.topMargin: 3
-            text: root.artist.replace(/; /g, ", ") + (root.year > 0 ? "  ·  " + root.year : "")
+            // Under review, what matters is which upload this is.
+            text: root.review ? root.ytTitle : root.artist.replace(/; /g, ", ") + (root.year > 0 ? "  ·  " + root.year : "")
             color: Theme.textDim
             font.pixelSize: 12
             elide: Text.ElideRight
@@ -168,5 +176,18 @@ Item {
         hoverEnabled: true
         cursorShape: Qt.PointingHandCursor
         onClicked: root.activated()
+    }
+
+    ReviewControls {
+        visible: root.review
+        x: body.x + thumbItem.x
+        y: body.y + thumbItem.y
+        width: thumbItem.width
+        height: thumbItem.height
+        option: root.reviewOption
+        options: root.reviewOptions
+        onApproved: root.approved()
+        onRejected: root.rejected()
+        onStepped: (delta) => root.stepped(delta)
     }
 }

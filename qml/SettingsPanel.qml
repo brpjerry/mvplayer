@@ -57,6 +57,14 @@ Popup {
         onAccepted: App.mvDir = App.urlToPath(selectedFolder)
     }
 
+    FileDialog {
+        id: cookiesDialog
+        title: "Choose the cookies.txt exported from your browser"
+        nameFilters: ["Cookie files (*.txt)", "All files (*)"]
+        onAccepted: root.cookiesError = App.importCookies(App.urlToPath(selectedFile))
+    }
+    property string cookiesError: ""
+
     component FolderRow: Item {
         id: folderRow
         property string label
@@ -482,7 +490,7 @@ Popup {
 
             SwitchRow {
                 label: "Use my library's audio"
-                hint: "When your track is higher quality than YouTube's, it is synced to the video and used as the main audio."
+                hint: "When your track is higher quality than YouTube's, it is synced to the video and used as the main audio. A video it cannot be synced to is not imported."
                 checked: App.replaceAudio
                 onToggled: (c) => App.replaceAudio = c
             }
@@ -513,6 +521,63 @@ Popup {
                     text: "Retry tracks without a video"
                     enabled: App.configured && !App.busy
                     onClicked: App.retryUnmatched()
+                }
+            }
+
+            // YouTube Premium: the account's cookies bring audio at a higher bitrate.
+            Item {
+                width: parent.width
+                height: premiumText.implicitHeight + 34
+
+                Column {
+                    id: premiumText
+                    anchors.left: parent.left
+                    anchors.right: premiumButtons.left
+                    anchors.rightMargin: 20
+                    anchors.bottom: parent.bottom
+                    anchors.bottomMargin: 6
+                    spacing: 3
+                    Text {
+                        text: "YouTube Premium"
+                        color: Theme.text
+                        font.pixelSize: 14
+                    }
+                    Text {
+                        width: parent.width
+                        text: root.cookiesError.length > 0 ? root.cookiesError
+                            : App.hasCookies ? "Cookies added " + App.cookiesAdded + ". New videos get the account's higher-bitrate audio."
+                            : "Add a cookies.txt exported from a browser signed in to a Premium account to get its higher-bitrate audio."
+                        color: root.cookiesError.length > 0 ? "#ff5d5d" : Theme.textDim
+                        font.pixelSize: 12
+                        wrapMode: Text.WordWrap
+                    }
+                }
+                Row {
+                    id: premiumButtons
+                    anchors.right: parent.right
+                    anchors.bottom: parent.bottom
+                    anchors.bottomMargin: 10
+                    spacing: 10
+                    FlatButton {
+                        visible: App.hasCookies
+                        text: "Remove"
+                        onClicked: { root.cookiesError = ""; App.removeCookies() }
+                    }
+                    FlatButton {
+                        text: App.hasCookies ? "Replace" : "Add cookies.txt"
+                        onClicked: cookiesDialog.open()
+                    }
+                }
+            }
+            Item {
+                visible: App.hasCookies
+                width: parent.width
+                height: 46
+                FlatButton {
+                    anchors.bottom: parent.bottom
+                    text: App.checkingQuality ? "Checking for better quality…" : "Check videos for better quality"
+                    enabled: App.configured && !App.checkingQuality
+                    onClicked: App.checkQuality()
                 }
             }
 

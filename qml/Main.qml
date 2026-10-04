@@ -62,6 +62,31 @@ ApplicationWindow {
         mpv.togglePause()
     }
 
+    // Another option for the same track comes on show; if the one it replaces
+    // was playing, the new one plays.
+    function stepReview(id, delta) {
+        const wasPlaying = player.current && player.current.videoId === id
+        const shown = App.videos.stepReview(id, delta)
+        if (wasPlaying && shown !== id)
+            player.playRow(App.videos.rowOfVideo(shown))
+        return shown
+    }
+
+    // An accepted video leaves the review list; it stops rather than play on
+    // out of sight, and its file is tidied up meanwhile.
+    function approveVideo(id) {
+        if (player.current && player.current.videoId === id)
+            player.stop()
+        App.approveVideo(id)
+    }
+
+    // A rejected video is deleted: it cannot go on playing.
+    function rejectVideo(id) {
+        if (player.current && player.current.videoId === id)
+            player.stop()
+        App.rejectVideo(id)
+    }
+
     // ---- Playback queue ----------------------------------------------------
     QtObject {
         id: player
@@ -93,6 +118,13 @@ ApplicationWindow {
             queue = list
             history = []
             load(row)
+            // A video under review plays in its thumbnail, next to the
+            // others and with its verdict buttons; a click on it enlarges it.
+            if (list[row].review) {
+                window.view = "grid"
+                playerView.openCollapsed(decodeWidth)
+                return
+            }
             window.releaseTextFocus()
             window.view = "player"
             playerView.openFrom(decodeWidth)
@@ -236,6 +268,9 @@ ApplicationWindow {
                     currentVideoId: player.current ? player.current.videoId : -1
                     currentPlaying: window.playingNow
                     onActivated: (row) => player.playRow(row)
+                    onApproved: (id) => window.approveVideo(id)
+                    onRejected: (id) => window.rejectVideo(id)
+                    onStepped: (id, delta) => window.stepReview(id, delta)
                 }
 
                 Welcome {
@@ -258,6 +293,9 @@ ApplicationWindow {
             anchorAvailable: grid.currentThumbAvailable && grid.visible
             onExpandRequested: window.showPlayer()
             onCloseRequested: player.stop()
+            onReviewApproved: window.approveVideo(player.current.videoId)
+            onReviewRejected: window.rejectVideo(player.current.videoId)
+            onReviewStepped: (delta) => window.stepReview(player.current.videoId, delta)
             onTogglePauseRequested: window.togglePause()
             onToggleFullscreenRequested: window.setFullscreen(!window.fullscreen)
         }
@@ -391,6 +429,17 @@ ApplicationWindow {
         case "settings": arg === "off" ? settings.close() : settings.open(); return "ok"
         case "retry": App.retryUnmatched(); return "ok"
         case "rescan": App.rescan(); return "ok"
+        case "cookies": return (arg === "" ? (App.removeCookies(), "") : App.importCookies(arg)) || "ok"
+        case "check-quality": App.checkQuality(); return "ok"
+        case "step": { // step <video id> <delta>
+            const sp = arg.split(" ")
+            return "" + window.stepReview(parseInt(sp[0]), parseInt(sp[1] || "1"))
+        }
+        case "approve": window.approveVideo(parseInt(arg)); return "ok"
+        case "reject": window.rejectVideo(parseInt(arg)); return "ok"
+        case "grab": // grab <file>: a picture of the settings panel when open, else of the window
+            (settings.opened ? settings.contentItem : frame).grabToImage(r => r.saveToFile(arg))
+            return "ok"
         case "ytdlp-update": YtDlpUpdater.update(); return "ok"
         case "ytdlp": return JSON.stringify({ version: YtDlpUpdater.version, busy: YtDlpUpdater.busy, status: YtDlpUpdater.status })
         case "fps": FrameStats.visible = arg !== "off"; return "ok"
@@ -423,6 +472,8 @@ ApplicationWindow {
                 hwdec: mpv.hwdec, videoSize: mpv.videoSize.width + "x" + mpv.videoSize.height,
                 audioTrack: mpv.audioTrack, audioTracks: mpv.audioTracks.length,
                 busy: App.busy, status: App.statusText, counts: App.trackCounts,
+                cookies: App.hasCookies, checkingQuality: App.checkingQuality, reviewCount: App.reviewCount,
+                facet: App.videos.facetType, reviewLabel: controlBar.reviewLabel,
                 accent: "" + Theme.accent, accentMode: App.accent, theme: App.themeMode, dark: Theme.dark,
                 systemDark: App.systemDark, bg: "" + Theme.bg, musicDirs: App.musicDirs, frameColor: "" + mpv.frameColor,
                 frameColorValid: mpv.frameColorValid, sidebar: App.sidebarFacet,
