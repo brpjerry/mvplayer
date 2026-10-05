@@ -90,6 +90,13 @@ echo "$SUMMARY" | grep -o "waveform[^,]*"
 [[ $("$BUILD/mvplayer-import" same-version "Twins feat. Someone" "Twins" "Twins / Producer feat. Someone Else" | tr -d '\r') == same ]]
 [[ $("$BUILD/mvplayer-import" same-version "Far" "Rain -3 nuits ver.-" "Artist - Far MUSIC VIDEO" | tr -d '\r') == same ]]
 [[ $("$BUILD/mvplayer-import" same-version "Rain -3 nuits ver.-" "Rain -3 nuits ver.-" "Artist - Rain MUSIC VIDEO" | tr -d '\r') == different ]]
+# Whose upload: the artist's own channel is trusted whatever the title says,
+# a channel that merely has the artist's name in it is not for a fan's title.
+rank() { "$BUILD/mvplayer-import" rank-check "$@" | tr -d '\r'; }
+[[ $(rank "Prism" "Clara" "Clara || Prism || Lyrics & Vietsub" "We love Val & Clara") == "not trusted, names the artist" ]]
+[[ $(rank "Prism" "Clara" "Prism (Lyric Video) lyrics" "Clara Official YouTube Channel") == "trusted, names the artist" ]]
+[[ $(rank "Prism" "Clara" "Prism MV" "We love Val & Clara") == "trusted, names the artist" ]]
+[[ $(rank "Prism" "Clara" "Prism / Somebody MV" "Somebody Official") == "trusted, does not name the artist" ]]
 
 echo "== mux"
 "$BUILD/mvplayer-import" mux "$WORK/track.flac" "$WORK/mv.mkv" "$WORK/out.mkv"
