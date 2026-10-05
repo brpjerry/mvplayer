@@ -2,6 +2,9 @@
 
 #include "core/Util.h"
 
+#include <QRegularExpression>
+#include <QSet>
+
 #include <algorithm>
 
 namespace {
@@ -54,7 +57,8 @@ const QStringList &versionTerms()
         QStringLiteral("cover"), QStringLiteral("covered"), QStringLiteral("piano"), QStringLiteral("guitar"),
         QStringLiteral("drum"), QStringLiteral("drums"), QStringLiteral("remix"), QStringLiteral("nightcore"),
         QStringLiteral("sped"), QStringLiteral("slowed"), QStringLiteral("reverb"), QStringLiteral("8d"),
-        QStringLiteral("reaction"), QStringLiteral("karaoke"), QStringLiteral("instrumental"),
+        QStringLiteral("reaction"), QStringLiteral("reacts"), QStringLiteral("react"), QStringLiteral("reacting"),
+        QStringLiteral("karaoke"), QStringLiteral("instrumental"),
         QStringLiteral("inst"), QStringLiteral("off vocal"), QStringLiteral("offvocal"),
         QStringLiteral("acoustic"), QStringLiteral("live"), QStringLiteral("teaser"), QStringLiteral("trailer"),
         QStringLiteral("preview"), QStringLiteral("1 hour"), QStringLiteral("1hour"), QStringLiteral("loop"),
@@ -79,7 +83,13 @@ const QStringList &fanTerms()
         QStringLiteral("subs"), QStringLiteral("subtitle"), QStringLiteral("subtitles"),
         QStringLiteral("vietsub"), QStringLiteral("engsub"), QStringLiteral("español"),
         QStringLiteral("歌詞"), QStringLiteral("翻译"), QStringLiteral("翻譯"), QStringLiteral("中日"),
-        QStringLiteral("中字"), QStringLiteral("和訳"), QStringLiteral("高音質"),
+        QStringLiteral("中字"), QStringLiteral("字幕"), QStringLiteral("和訳"), QStringLiteral("高音質"),
+        // Korean and Thai subtitle uploads: lyrics, subtitles, translation, pronunciation
+        QStringLiteral("가사"), QStringLiteral("자막"), QStringLiteral("해석"), QStringLiteral("발음"),
+        QStringLiteral("번역"), QStringLiteral("한글"), QStringLiteral("ซับไทย"),
+        // fan-made and compiled videos
+        QStringLiteral("創作"), QStringLiteral("自制"), QStringLiteral("自製"), QStringLiteral("compiled"),
+        QStringLiteral("fanmade"), QStringLiteral("fan made"), QStringLiteral("fan mv"),
     };
     return t;
 }
@@ -153,7 +163,17 @@ bool Matcher::sameVersion(const TrackInfo &track, const QString &videoTitle)
         if (hasTerm(video, term) != (hasTerm(title, term) || hasTerm(album, term)))
             return false;
     }
-    return true;
+    // "(English Ver.)", "(Prayer Ver.)", "Rap version": a named version on
+    // one side has to be named on the other.
+    const auto named = [](const QString &tok) {
+        QSet<QString> out;
+        static const QRegularExpression re(QStringLiteral("(\\S+) (?:ver|version)(?= )"));
+        auto it = re.globalMatch(tok);
+        while (it.hasNext())
+            out.insert(it.next().captured(1));
+        return out;
+    };
+    return named(video) == (named(title) | named(album));
 }
 
 void Matcher::rank(const TrackInfo &track, QVector<YtCandidate> &candidates)
@@ -248,7 +268,10 @@ void Matcher::rank(const TrackInfo &track, QVector<YtCandidate> &candidates)
         // YouTube's own relevance order is a useful tie-breaker.
         c.score += qMax(0, total - c.rank);
 
-        c.trusted = c.verified || artistIsChannel || (official && !fan);
+        // The artist's own channel is trusted whatever the title says. A
+        // verified channel is not on its own: fan channels with subtitled
+        // re-uploads are verified too.
+        c.trusted = artistIsChannel || ((c.verified || official) && !fan);
     }
 
     std::stable_sort(candidates.begin(), candidates.end(), [](const YtCandidate &a, const YtCandidate &b) {

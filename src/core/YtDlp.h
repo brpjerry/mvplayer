@@ -38,6 +38,10 @@ public:
 
     // What YouTube offers the account for a video, without downloading.
     bool premiumInfo(const QString &id, QJsonObject *info, QString *error);
+
+    // Whether the account's cookies still work, asked of one video.
+    enum class Account { Premium, Ordinary, Expired, Unknown };
+    Account checkAccount(const QString &id, double *kbps, QString *error);
     // From yt-dlp's metadata: the best audio bitrate on offer (kbit/s), the
     // tallest picture, and the bitrate of the format that was downloaded.
     static double bestAudioKbps(const QJsonObject &info);
@@ -57,6 +61,9 @@ public:
     // True when an error message means YouTube is refusing this client
     // altogether (rate limit, bot check) rather than one video failing.
     static bool looksBlocked(const QString &error);
+    // True when an error message says the account's cookies are no longer
+    // accepted: browsers rotate them, and an export goes stale within days.
+    static bool cookiesExpired(const QString &error);
 
 private:
     QStringList baseArgs() const;

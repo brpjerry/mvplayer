@@ -10,6 +10,7 @@ namespace Muxer {
 struct Plan {
     QString videoFile;   // downloaded video stream
     QString ytAudioFile; // downloaded YouTube audio
+    int ytAudioStream = 0; // which audio stream of that file it is (a file already in the library has several)
     QString workDir;     // scratch space; the caller removes it
     QString outFile;     // final .mkv
 

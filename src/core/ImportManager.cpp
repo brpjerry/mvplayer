@@ -51,18 +51,85 @@ constexpr int kFailStreakLimit = 8;         // consecutive network failures that
 constexpr int kMaxPauseSecs = 2 * 60 * 60;
 constexpr qint64 kLogRotateBytes = 8 * 1024 * 1024;
 
+// Why a video's soundtrack does not count as containing the track.
+QString mismatchReason(const AudioAlign::Result &r)
+{
+    const double m = r.fpMatchedSec;
+    if (m < 0.5 * r.videoSec && m < 0.5 * r.trackSec)
+        return QStringLiteral("not this song: fingerprints match %1 s of a %2 s track").arg(qRound(m)).arg(qRound(r.trackSec));
+    if (m < 0.5 * r.videoSec)
+        return QStringLiteral("the track is only part of this video: %1 s of %2 s").arg(qRound(m)).arg(qRound(r.videoSec));
+    return QStringLiteral("only part of the track is in this video: fingerprints match %1 s of %2 s").arg(qRound(m)).arg(qRound(r.trackSec));
+}
+
+// The measurements a decision about a candidate rests on, for the import log.
+QJsonObject measurements(const AudioAlign::Result &r)
+{
+    const double whole = std::min(r.trackSec, r.videoSec);
+    const auto round = [](double v, int digits) { const double k = std::pow(10.0, digits); return std::round(v * k) / k; };
+    return {
+        {QStringLiteral("trackSec"), round(r.trackSec, 1)},
+        {QStringLiteral("videoSec"), round(r.videoSec, 1)},
+        // fingerprints: how much of the two is recognisably the same song
+        {QStringLiteral("fingerprintSec"), round(r.fpMatchedSec, 1)},
+        {QStringLiteral("fingerprintCoverage"), whole > 0 ? round(r.fpMatchedSec / whole, 3) : 0},
+        // waveform: how much is demonstrably the same recording
+        {QStringLiteral("sameWaveformSec"), round(r.goodSec, 1)},
+        {QStringLiteral("sameWaveform"), whole > 0 ? round(r.goodSec / whole, 3) : 0},
+        {QStringLiteral("segments"), r.segments.size()},
+        {QStringLiteral("segmentSec"), round(r.pcmMatchedSec, 1)},
+        // loudness: where the two rise and fall together, and how well
+        {QStringLiteral("loudnessOffsetSec"), round(double(r.contourLag) / AudioAlign::kRate, 3)},
+        {QStringLiteral("loudnessCorrelation"), round(r.contourCorr, 3)},
+        {QStringLiteral("gainDb"), r.segments.isEmpty() ? 0 : round(20 * std::log10(r.gain), 2)},
+        {QStringLiteral("polarityInverted"), r.inverted},
+        {QStringLiteral("placedByOffset"), r.byOffset},
+    };
+}
+
 // Is this the track's own recording, so that its audio can take the video's
-// place? About two thirds of the track (or of a shorter video) have to be
-// demonstrably the same waveform. Measured on a real library: another master
-// of the recording (quieter, re-equalised, drifting, inverted) shows 67% and
-// more; a remix over the same vocal 59%, live takes and covers over the same
-// backing 25–51%.
+// place? Most of the track (or of a shorter video) has to be demonstrably
+// the same waveform. Measured on a real library: another master of the
+// recording (quieter, re-equalised, drifting, inverted) shows 77% and more;
+// another singer over the same backing 67%, a remix over the same vocal 59%,
+// live takes and covers 25–51%.
+constexpr double kOwnWaveform = 0.72;
+
 bool audioReplaceable(const AudioAlign::Result &r)
 {
     if (r.byOffset)
         return true;
     const double whole = std::min(r.trackSec, r.videoSec);
-    return !r.segments.isEmpty() && r.goodSec >= 0.65 * whole && r.goodSec >= 0.6 * r.fpMatchedSec;
+    return !r.segments.isEmpty() && r.goodSec >= kOwnWaveform * whole && r.goodSec >= 0.6 * r.fpMatchedSec;
+}
+
+// Where track and video name different versions ("prompt αU ver." against
+// none), the waveform has to overrule the names: a version made over the
+// original keeps its backing and some of its lines, and showed 90%; the
+// same recording under another label 99.8% and more.
+constexpr double kOwnWaveformOtherVersion = 0.97;
+
+bool ownRecording(const AudioAlign::Result &r, const TrackInfo &track, const QString &videoTitle)
+{
+    if (!audioReplaceable(r))
+        return false;
+    return r.byOffset || Matcher::sameVersion(track, videoTitle)
+        || r.goodSec >= kOwnWaveformOtherVersion * std::min(r.trackSec, r.videoSec);
+}
+
+// What a candidate that is not taken as the track's recording lacks.
+QString unconfirmedReason(const AudioAlign::Result &r, const TrackInfo &track, const QString &videoTitle)
+{
+    const int share = qRound(100 * r.goodSec / qMax(1.0, std::min(r.trackSec, r.videoSec)));
+    if (audioReplaceable(r)) {
+        return QStringLiteral("%1% of it is demonstrably the track's waveform, but track and video are marked as different versions (%2% needed then)")
+            .arg(share)
+            .arg(qRound(100 * kOwnWaveformOtherVersion));
+    }
+    return QStringLiteral("only %1% of it is demonstrably the track's waveform (%2% needed)%3")
+        .arg(share)
+        .arg(qRound(100 * kOwnWaveform))
+        .arg(Matcher::sameVersion(track, videoTitle) ? QString() : QStringLiteral("; track and video are marked as different versions"));
 }
 
 // The whole track at the one offset at which the loudness of the two rises
@@ -318,7 +385,7 @@ void ImportManager::appendLog(const QJsonObject &entry)
 }
 
 bool ImportManager::putLibraryAudioIn(const VideoInfo &video, const TrackInfo &track, const AudioAlign::Result &align,
-                                      const ImportSettings &cfg, QString *error, bool review)
+                                      const ImportSettings &cfg, QString *error, bool review, int ytAudioStream)
 {
     const QString workDir = QDir(dataDir(cfg.mvDir)).filePath(QStringLiteral("tmp/audio-%1").arg(video.id));
     QDir(workDir).removeRecursively();
@@ -329,6 +396,7 @@ bool ImportManager::putLibraryAudioIn(const VideoInfo &video, const TrackInfo &t
     Muxer::Plan plan;
     plan.videoFile = video.path;
     plan.ytAudioFile = video.path;
+    plan.ytAudioStream = ytAudioStream;
     plan.workDir = workDir;
     plan.outFile = video.path;
     plan.track = track;
@@ -382,6 +450,14 @@ void ImportManager::approveVideo(qint64 videoId)
             m_db->setTrackResult(t.id, QStringLiteral("done"), videoId, QStringLiteral("you accepted “%1”").arg(v->ytTitle));
     }
     qInfo().noquote() << QStringLiteral("[review] accepted “%1” (%2)").arg(v->title, v->ytTitle);
+    {
+        QJsonArray tracks;
+        for (const TrackInfo &t : m_db->tracksForVideo(videoId))
+            tracks.append(QJsonObject{{QStringLiteral("trackId"), t.id}, {QStringLiteral("track"), t.title}, {QStringLiteral("album"), t.album}});
+        appendLog({{QStringLiteral("event"), QStringLiteral("verdict")}, {QStringLiteral("verdict"), QStringLiteral("accept")},
+                   {QStringLiteral("videoId"), videoId}, {QStringLiteral("id"), v->ytId}, {QStringLiteral("title"), v->ytTitle},
+                   {QStringLiteral("tracks"), tracks}});
+    }
     emit videoChanged(videoId);
     // The review stream has done its job; the track's audio becomes the default.
     ++m_reviewJobs;
@@ -430,6 +506,14 @@ void ImportManager::rejectVideo(qint64 videoId)
     if (!v->thumb.isEmpty())
         QFile::remove(v->thumb);
     qInfo().noquote() << QStringLiteral("[review] rejected “%1” (%2)").arg(v->title, v->ytTitle);
+    {
+        QJsonArray names;
+        for (const TrackInfo &t : std::as_const(tracks))
+            names.append(QJsonObject{{QStringLiteral("trackId"), t.id}, {QStringLiteral("track"), t.title}, {QStringLiteral("album"), t.album}});
+        appendLog({{QStringLiteral("event"), QStringLiteral("verdict")}, {QStringLiteral("verdict"), QStringLiteral("reject")},
+                   {QStringLiteral("videoId"), videoId}, {QStringLiteral("id"), v->ytId}, {QStringLiteral("title"), v->ytTitle},
+                   {QStringLiteral("optionsLeft"), others.size()}, {QStringLiteral("tracks"), names}});
+    }
     emit videoRemoved(videoId);
     emit activityChanged();
 }
@@ -458,8 +542,9 @@ void ImportManager::upgradeVideos(const ImportSettings &cfg)
     const QVector<VideoInfo> videos = m_db->allVideos();
     m_upgradeTotal = int(videos.size());
     int rebuilt = 0, failed = 0;
+    bool expired = false;
     for (const VideoInfo &v : videos) {
-        if (m_cancel || m_blocked)
+        if (m_cancel || m_blocked || expired)
             break;
         JobStatus st;
         st.upgrade = true;
@@ -475,6 +560,10 @@ void ImportManager::upgradeVideos(const ImportSettings &cfg)
             break;
         rebuilt += outcome == QLatin1String("done");
         failed += outcome == QLatin1String("failed");
+        // Without the account there is nothing to find for any video.
+        expired = outcome == QLatin1String("failed") && YtDlp::cookiesExpired(detail);
+        appendLog({{QStringLiteral("event"), QStringLiteral("quality")}, {QStringLiteral("ytId"), v.ytId},
+                   {QStringLiteral("title"), v.title}, {QStringLiteral("outcome"), outcome}, {QStringLiteral("detail"), detail}});
         st.finished = true;
         st.outcome = outcome;
         st.detail = detail;
@@ -490,8 +579,13 @@ void ImportManager::upgradeVideos(const ImportSettings &cfg)
         emit activityChanged();
     }
     if (!m_cancel) {
+        const char *stopped = expired ? "; stopped because the account's cookies have expired"
+            : m_blocked ? "; stopped because YouTube is limiting requests" : "";
         qInfo("[quality] checked %d of %d videos: %d upgraded, %d failed%s", m_upgradeDone.load(), int(videos.size()),
-              rebuilt, failed, m_blocked ? "; stopped because YouTube is limiting requests" : "");
+              rebuilt, failed, stopped);
+        appendLog({{QStringLiteral("event"), QStringLiteral("quality-check")}, {QStringLiteral("checked"), m_upgradeDone.load()},
+                   {QStringLiteral("videos"), int(videos.size())}, {QStringLiteral("upgraded"), rebuilt}, {QStringLiteral("failed"), failed},
+                   {QStringLiteral("stopped"), QString::fromLatin1(stopped).mid(2)}});
     }
 }
 
@@ -523,13 +617,15 @@ QString ImportManager::upgradeVideo(const VideoInfo &video, const ImportSettings
     QString error;
     QJsonObject offer;
     if (!yt.premiumInfo(video.ytId, &offer, &error)) {
-        if (!m_cancel)
+        if (!m_cancel && !YtDlp::cookiesExpired(error))
             noteFailure(error);
         return fail(error);
     }
     noteSuccess();
     const double offered = YtDlp::bestAudioKbps(offer);
-    const bool betterAudio = offered >= have * 1.3;
+    // Only the account's audio counts: what anyone is offered is listed at
+    // its nominal bitrate, above what a quiet song was measured at.
+    const bool betterAudio = offered >= have * 1.3 && offered >= 200;
     const bool betterVideo = YtDlp::bestHeight(offer) > video.height;
     if (!betterAudio && !betterVideo) {
         *detail = QStringLiteral("%1p, audio %2 kbit/s").arg(video.height).arg(qRound(have));
@@ -643,6 +739,9 @@ void ImportManager::onScanFinished(const LibraryScanner::Result &r)
     if (r.ok) {
         if (r.added || r.changed || r.removed)
             qInfo("[scan] %d tracks: %d new, %d changed, %d removed", r.total, r.added, r.changed, r.removed);
+        // What became of each file that was not simply unchanged.
+        for (const QJsonObject &e : r.events)
+            appendLog(e);
         const QStringList watched = m_watcher.directories();
         const QSet<QString> want(r.directories.begin(), r.directories.end());
         const QSet<QString> have(watched.begin(), watched.end());
@@ -746,14 +845,34 @@ void ImportManager::runJob(qint64 trackId, const ImportSettings &cfg)
     clock.start();
     int nSearch = 0, nAudio = 0, nPreview = 0, nVideo = 0;
     QJsonArray logQueries, logCandidates, logChecked;
+    qint64 heldVideoForLog = 0;
+    QJsonArray logVideos; // what was brought into the library
     auto writeLog = [&](const QString &outcome, const QString &message) {
+        // accept: the track has its video. review: it has videos waiting for
+        // the user. reject: none of what was found is its video.
+        const bool reviewing = std::any_of(logVideos.begin(), logVideos.end(), [](const QJsonValue &v) {
+            return v.toObject().value(QLatin1String("review")).toBool();
+        });
+        const QString decision = outcome == QLatin1String("done") ? (reviewing || heldVideoForLog > 0 ? QStringLiteral("review") : QStringLiteral("accept"))
+            : outcome == QLatin1String("not_found") ? QStringLiteral("reject")
+            : outcome == QLatin1String("skipped") ? QStringLiteral("skipped")
+            : QStringLiteral("undecided");
         appendLog({
+            {QStringLiteral("event"), QStringLiteral("lookup")},
+            {QStringLiteral("trackId"), track.id},
+            {QStringLiteral("recording"), track.recording},
             {QStringLiteral("track"), track.title},
             {QStringLiteral("artist"), track.artist},
+            {QStringLiteral("albumArtist"), track.albumArtist},
             {QStringLiteral("album"), track.album},
+            {QStringLiteral("path"), track.path},
+            {QStringLiteral("audio"), QStringLiteral("%1%2").arg(track.codec, track.lossless ? QStringLiteral(" %1/%2").arg(track.bitsPerSample).arg(track.sampleRate / 1000.0)
+                                                                                           : QStringLiteral(" %1k").arg(track.bitrate))},
             {QStringLiteral("duration"), qRound(track.duration)},
             {QStringLiteral("outcome"), outcome},
+            {QStringLiteral("decision"), decision},
             {QStringLiteral("message"), message},
+            {QStringLiteral("videos"), logVideos},
             {QStringLiteral("seconds"), qRound(clock.elapsed() / 100.0) / 10.0},
             {QStringLiteral("requests"), QJsonObject{{QStringLiteral("search"), nSearch}, {QStringLiteral("audio"), nAudio},
                                                       {QStringLiteral("preview"), nPreview}, {QStringLiteral("video"), nVideo}}},
@@ -762,10 +881,29 @@ void ImportManager::runJob(qint64 trackId, const ImportSettings &cfg)
             {QStringLiteral("checked"), logChecked},
         });
     };
-    auto checked = [&](const YtCandidate &c, const QString &result, const QString &detail = QString()) {
-        QJsonObject o{{QStringLiteral("id"), c.id}, {QStringLiteral("result"), result}};
-        if (!detail.isEmpty())
-            o.insert(QStringLiteral("detail"), detail);
+    // One examined candidate: what was decided about it, why, and the numbers.
+    // decision: accept | review | reject | undecided (could not be examined).
+    auto checked = [&](const YtCandidate &c, const QString &result, const QString &reason,
+                       const AudioAlign::Result *ar = nullptr, const QJsonObject &more = {}) {
+        static const QHash<QString, QString> decisions = {
+            {QStringLiteral("match"), QStringLiteral("accept")}, {QStringLiteral("shared"), QStringLiteral("accept")},
+            {QStringLiteral("unconfirmed"), QStringLiteral("review")}, {QStringLiteral("option"), QStringLiteral("review")},
+            {QStringLiteral("shared-review"), QStringLiteral("review")},
+            {QStringLiteral("error"), QStringLiteral("undecided")},
+        };
+        QJsonObject o{
+            {QStringLiteral("id"), c.id},
+            {QStringLiteral("title"), c.title},
+            {QStringLiteral("channel"), c.channel},
+            {QStringLiteral("duration"), qRound(c.duration)},
+            {QStringLiteral("result"), result},
+            {QStringLiteral("decision"), decisions.value(result, QStringLiteral("reject"))},
+            {QStringLiteral("reason"), reason},
+        };
+        if (ar)
+            o.insert(QStringLiteral("measured"), measurements(*ar));
+        for (auto it = more.begin(); it != more.end(); ++it)
+            o.insert(it.key(), it.value());
         logChecked.append(o);
     };
 
@@ -790,6 +928,7 @@ void ImportManager::runJob(qint64 trackId, const ImportSettings &cfg)
     if (track.videoId > 0) {
         if (const auto held = m_db->video(track.videoId); held && held->review) {
             heldVideo = held->id;
+            heldVideoForLog = held->id;
             heldGroup = held->reviewGroup > 0 ? held->reviewGroup : held->id;
         }
     }
@@ -879,18 +1018,23 @@ void ImportManager::runJob(qint64 trackId, const ImportSettings &cfg)
         finish(QStringLiteral("failed"), 0, QStringLiteral("search failed: %1").arg(error));
         return;
     }
-    QVector<YtCandidate> shortlist;
+    QVector<YtCandidate> shortlisted;
+    QSet<QString> shortlist;
     for (const YtCandidate &c : std::as_const(candidates)) {
-        if (usable(c) && shortlist.size() < 4)
-            shortlist.append(c);
+        if (usable(c) && shortlisted.size() < 4) {
+            shortlisted.append(c);
+            shortlist.insert(c.id);
+        }
         QJsonObject o{{QStringLiteral("id"), c.id}, {QStringLiteral("title"), c.title}, {QStringLiteral("channel"), c.channel},
                       {QStringLiteral("duration"), qRound(c.duration)}, {QStringLiteral("score"), qRound(c.score)},
-                      {QStringLiteral("trusted"), c.trusted}};
+                      {QStringLiteral("trusted"), c.trusted},
+                      // examined by listening: the best four that look official
+                      {QStringLiteral("shortlisted"), usable(c) && shortlist.contains(c.id)}};
         if (!c.rejectReason.isEmpty())
             o.insert(QStringLiteral("rejected"), c.rejectReason);
         logCandidates.append(o);
     }
-    if (shortlist.isEmpty()) {
+    if (shortlisted.isEmpty()) {
         finish(QStringLiteral("not_found"), 0,
                QStringLiteral("none of %1 search results looked like an official video").arg(candidates.size()));
         return;
@@ -945,7 +1089,7 @@ void ImportManager::runJob(qint64 trackId, const ImportSettings &cfg)
         return false;
     };
 
-    for (const YtCandidate &c : std::as_const(shortlist)) {
+    for (const YtCandidate &c : std::as_const(shortlisted)) {
         if (m_cancel)
             return cleanup();
         if (!claimVideo(c.id))
@@ -958,7 +1102,7 @@ void ImportManager::runJob(qint64 trackId, const ImportSettings &cfg)
 
         if (m_db->videoRejectedFor(track, c.id)) {
             anyChecked = true; // examined, by the user
-            checked(c, QStringLiteral("rejected"));
+            checked(c, QStringLiteral("rejected"), QStringLiteral("you turned this upload down for the track"));
             reasons << QStringLiteral("“%1” was turned down for this track").arg(c.title);
             continue;
         }
@@ -966,33 +1110,92 @@ void ImportManager::runJob(qint64 trackId, const ImportSettings &cfg)
         if (const auto existing = m_db->videoByYtId(c.id)) {
             if (heldGroup > 0 && existing->review
                 && (existing->reviewGroup > 0 ? existing->reviewGroup : existing->id) == heldGroup) {
-                checked(c, QStringLiteral("option"));
+                checked(c, QStringLiteral("option"), QStringLiteral("already waiting for review as one of the track's options"));
                 continue; // already one of this track's options
             }
             // Already in the MV library through another track (a single and
             // its album cut, say). It still has to be this recording.
+            // What the video sounds like: a video under review carries the
+            // track it waits for, YouTube's audio, and the review stream; an
+            // accepted one plays its track's audio where that was put in.
+            const int heard = existing->review ? 1 : 0;
             std::vector<int16_t> pcm;
-            if (QFile::exists(existing->path) && AudioAlign::decodeMono(existing->path, &pcm, &m_cancel, &error)) {
+            if (QFile::exists(existing->path) && AudioAlign::decodeMono(existing->path, &pcm, &m_cancel, &error, heard)) {
                 anyChecked = true;
                 const AudioAlign::Result ar = fitted(AudioAlign::align(trackPcm, pcm), track, existing->ytTitle);
                 if (audioMatches(ar)) {
-                    // A video that plays YouTube's audio is only for a track
-                    // of lesser quality; this one's audio has to go in.
-                    const bool wanted = cfg.replaceAudio && !existing->review
-                        && existing->audioSource != QLatin1String("library")
-                        && libraryIsBetter(track, storedYoutubeQuality(*existing));
-                    if (!wanted || (audioReplaceable(ar) && putLibraryAudioIn(*existing, track, ar, cfg, &error))) {
-                        checked(c, QStringLiteral("shared"));
+                    // The video belongs to another track already. This one
+                    // joins it when it is demonstrably the same recording (a
+                    // single and its album cut) — measured against the audio
+                    // the video plays, which is that other track's where the
+                    // library's was put in. Being the same song is not
+                    // enough: a live take does not get the studio video.
+                    // A track of lesser quality than YouTube's audio has no
+                    // audio of its own at stake and shares on the song alone.
+                    const bool own = cfg.replaceAudio && libraryIsBetter(track, storedYoutubeQuality(*existing));
+                    const bool recording = ownRecording(ar, track, existing->ytTitle);
+                    if (existing->review && own && recording) {
+                        // It waits for a verdict on behalf of a track that is
+                        // only the song (a live take, looked up first). This
+                        // track is demonstrably its recording: the video is
+                        // this track's, and no longer a question.
+                        const qint64 group = existing->reviewGroup > 0 ? existing->reviewGroup : existing->id;
+                        const QVector<TrackInfo> waiting = m_db->tracksForVideo(existing->id);
+                        if (putLibraryAudioIn(*existing, track, ar, cfg, &error, false, heard)) {
+                            // Those tracks keep whatever other options they
+                            // had; with none left, this was not their video.
+                            QVector<VideoInfo> left = m_db->reviewOptions(group);
+                            if (!left.isEmpty()) {
+                                m_db->relinkTracks(existing->id, left.first().id);
+                            } else {
+                                for (const TrackInfo &w : waiting) {
+                                    m_db->setTrackResult(w.id, QStringLiteral("not_found"), 0,
+                                                         QStringLiteral("“%1” is the video of “%2” [%3]").arg(c.title, track.title, track.album));
+                                }
+                            }
+                            checked(c, QStringLiteral("shared"),
+                                    QStringLiteral("was waiting for review for another track; this one is its recording (%1% the same waveform) and takes it")
+                                        .arg(qRound(100 * ar.goodSec / qMax(1.0, std::min(ar.trackSec, ar.videoSec)))),
+                                    &ar);
+                            finish(QStringLiteral("done"), existing->id, QStringLiteral("takes “%1” out of review").arg(c.title));
+                            return;
+                        }
+                        if (m_cancel)
+                            return cleanup();
+                    }
+                    if (existing->review || !own) {
+                        checked(c, existing->review ? QStringLiteral("shared-review") : QStringLiteral("shared"),
+                                existing->review ? QStringLiteral("already waiting for review through “%1”: one more track for the same verdict").arg(existing->title)
+                                                 : QStringLiteral("already in the library through “%1”, and the song by its fingerprints").arg(existing->title),
+                                &ar);
+                        finish(QStringLiteral("done"), existing->id,
+                               QStringLiteral("shares the video of “%1”").arg(existing->title));
+                        return;
+                    }
+                    if (recording
+                        && (existing->audioSource == QLatin1String("library") || putLibraryAudioIn(*existing, track, ar, cfg, &error))) {
+                        checked(c, QStringLiteral("shared"),
+                                QStringLiteral("already in the library through “%1”, and the same recording: %2% of it is demonstrably the same waveform")
+                                    .arg(existing->title)
+                                    .arg(qRound(100 * ar.goodSec / qMax(1.0, std::min(ar.trackSec, ar.videoSec)))),
+                                &ar);
                         finish(QStringLiteral("done"), existing->id,
                                QStringLiteral("shares the video of “%1”").arg(existing->title));
                         return;
                     }
                     if (m_cancel)
                         return cleanup();
-                    checked(c, QStringLiteral("different-mix"));
-                    reasons << QStringLiteral("“%1” has a different mix: the library's audio cannot be put in").arg(c.title);
+                    checked(c, QStringLiteral("different-recording"),
+                            QStringLiteral("already in the library as the video of “%1”; this track is the song but not that recording: %2")
+                                .arg(existing->title, unconfirmedReason(ar, track, existing->ytTitle)),
+                            &ar);
+                    reasons << QStringLiteral("“%1” is the video of another recording of the song").arg(c.title);
                     continue;
                 }
+                checked(c, QStringLiteral("different"),
+                        QStringLiteral("already in the library through “%1”; %2").arg(existing->title, mismatchReason(ar)), &ar);
+            } else if (!m_cancel) {
+                checked(c, QStringLiteral("error"), QStringLiteral("already in the library, but its file cannot be read: %1").arg(error));
             }
             if (m_cancel)
                 return cleanup();
@@ -1010,7 +1213,7 @@ void ImportManager::runJob(qint64 trackId, const ImportSettings &cfg)
         if (!withRetry([&] { return yt.downloadAudio(c.id, dir, &audioFile, &info, &error); })) {
             if (m_cancel)
                 return cleanup();
-            checked(c, QStringLiteral("error"), error);
+            checked(c, QStringLiteral("error"), QStringLiteral("its audio could not be downloaded: %1").arg(error));
             if (m_blocked)
                 return postpone();
             // Could not listen to it: that says nothing about the video.
@@ -1022,6 +1225,7 @@ void ImportManager::runJob(qint64 trackId, const ImportSettings &cfg)
         if (!AudioAlign::decodeMono(audioFile, &mvPcm, &m_cancel, &error)) {
             if (m_cancel)
                 return cleanup();
+            checked(c, QStringLiteral("error"), QStringLiteral("its audio could not be decoded: %1").arg(error));
             reasons << QStringLiteral("%1: %2").arg(c.id, error);
             continue;
         }
@@ -1029,8 +1233,7 @@ void ImportManager::runJob(qint64 trackId, const ImportSettings &cfg)
         const AudioAlign::Result ar = fitted(AudioAlign::align(trackPcm, mvPcm), track, c.title);
         qInfo().noquote() << QStringLiteral("[align] %1 ~ “%2” [%3]: %4").arg(track.title, c.title, c.id, ar.summary());
         if (!audioMatches(ar)) {
-            checked(c, QStringLiteral("different"),
-                    QStringLiteral("%1s of %2s matched").arg(ar.fpMatchedSec, 0, 'f', 0).arg(ar.trackSec, 0, 'f', 0));
+            checked(c, QStringLiteral("different"), mismatchReason(ar), &ar);
             reasons << QStringLiteral("“%1” is a different recording").arg(c.title);
             QDir(dir).removeRecursively();
             continue;
@@ -1043,7 +1246,7 @@ void ImportManager::runJob(qint64 trackId, const ImportSettings &cfg)
         // taken, for review, when no candidate fits outright. (A lossy file
         // may still be the lesser one next to the account's audio.)
         bool forReview = false;
-        if (cfg.replaceAudio && libraryIsBetter(track, youtubeQuality(info)) && !audioReplaceable(ar)) {
+        if (cfg.replaceAudio && libraryIsBetter(track, youtubeQuality(info)) && !ownRecording(ar, track, c.title)) {
             bool premiumWins = false;
             if (!track.lossless && yt.hasCookies()) {
                 QString premiumFile;
@@ -1069,7 +1272,7 @@ void ImportManager::runJob(qint64 trackId, const ImportSettings &cfg)
             if (!withRetry([&] { return yt.downloadPreview(c.id, dir, &preview, &error); })) {
                 if (m_cancel)
                     return cleanup();
-                checked(c, QStringLiteral("error"), error);
+                checked(c, QStringLiteral("error"), QStringLiteral("its picture could not be downloaded: %1").arg(error), &ar);
                 if (m_blocked)
                     return postpone();
                 // Never accept a video whose picture could not be looked at.
@@ -1082,14 +1285,19 @@ void ImportManager::runJob(qint64 trackId, const ImportSettings &cfg)
             QFile::remove(preview);
             if (m_cancel)
                 return cleanup();
+            const QJsonObject picture{{QStringLiteral("movingShare"), std::round(check.movingShare * 1000) / 1000},
+                                      {QStringLiteral("framePairs"), qMax(0, check.samples - 1)}};
             if (!check.valid) {
+                checked(c, QStringLiteral("error"), QStringLiteral("its picture could not be analysed"), &ar);
                 undecided = true;
                 reasons << QStringLiteral("“%1”: could not analyse the picture").arg(c.title);
                 QDir(dir).removeRecursively();
                 continue;
             }
             if (check.still) {
-                checked(c, QStringLiteral("still"));
+                checked(c, QStringLiteral("still"),
+                        QStringLiteral("a still image: %1% of %2 sampled frame pairs change").arg(qRound(check.movingShare * 100)).arg(qMax(0, check.samples - 1)),
+                        &ar, {{QStringLiteral("picture"), picture}});
                 reasons << QStringLiteral("“%1” is a still image").arg(c.title);
                 QDir(dir).removeRecursively();
                 continue;
@@ -1098,13 +1306,20 @@ void ImportManager::runJob(qint64 trackId, const ImportSettings &cfg)
 
         if (forReview) {
             checked(c, QStringLiteral("unconfirmed"),
-                    QStringLiteral("same waveform %1s of %2s").arg(ar.goodSec, 0, 'f', 0).arg(ar.fpMatchedSec, 0, 'f', 0));
+                    QStringLiteral("the song by its fingerprints, but %1").arg(unconfirmedReason(ar, track, c.title)),
+                    &ar, {{QStringLiteral("youtubeKbps"), qRound(YtDlp::audioKbps(info))}});
             reasons << QStringLiteral("“%1” could not be confirmed as this recording").arg(c.title);
             unconfirmed.append({c, dir, audioFile, info, ar});
             continue;
         }
 
-        checked(c, QStringLiteral("match"));
+        checked(c, QStringLiteral("match"),
+                ar.byOffset ? QStringLiteral("the same performance in another mix: fingerprints cover the song, loudness agrees, neither is marked as another version")
+                : libraryIsBetter(track, youtubeQuality(info)) && cfg.replaceAudio
+                    ? QStringLiteral("the track's recording: %1% of it is demonstrably the same waveform")
+                          .arg(qRound(100 * ar.goodSec / qMax(1.0, std::min(ar.trackSec, ar.videoSec))))
+                    : QStringLiteral("the song by its fingerprints; YouTube's audio is kept (the track is the lesser one, or library audio is switched off)"),
+                &ar, {{QStringLiteral("youtubeKbps"), qRound(YtDlp::audioKbps(info))}});
         chosen = c;
         chosenDir = dir;
         ytAudio = audioFile;
@@ -1330,10 +1545,15 @@ void ImportManager::runJob(qint64 trackId, const ImportSettings &cfg)
         }
         if (got == Got::Failed) {
             lastError = error;
+            logVideos.append(QJsonObject{{QStringLiteral("id"), pick.c.id}, {QStringLiteral("title"), pick.c.title},
+                                         {QStringLiteral("failed"), error}});
             continue;
         }
         if (added.isEmpty())
             firstSummary = summary;
+        logVideos.append(QJsonObject{{QStringLiteral("videoId"), videoId}, {QStringLiteral("id"), pick.c.id},
+                                     {QStringLiteral("title"), pick.c.title}, {QStringLiteral("review"), forReview},
+                                     {QStringLiteral("summary"), summary}});
         if (forReview && group <= 0)
             group = videoId;
         added << videoId;

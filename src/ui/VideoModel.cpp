@@ -71,6 +71,10 @@ QVariant VideoModel::data(const QModelIndex &index, int role) const
     case ReviewEndRole: return v.reviewEnd;
     case ReviewOptionRole: return int(reviewOptions(v).indexOf(v.id)) + 1;
     case ReviewOptionsRole: return int(reviewOptions(v).size());
+    case SameTitleRole: {
+        const VideoInfo *o = sameTitle(v);
+        return o ? QVariantMap{{QStringLiteral("album"), o->album}, {QStringLiteral("ytTitle"), o->ytTitle}} : QVariantMap();
+    }
     }
     return {};
 }
@@ -100,6 +104,7 @@ QHash<int, QByteArray> VideoModel::roleNames() const
         {ReviewEndRole, "reviewEnd"},
         {ReviewOptionRole, "reviewOption"},
         {ReviewOptionsRole, "reviewOptions"},
+        {SameTitleRole, "sameTitle"},
     };
 }
 
@@ -115,6 +120,21 @@ QVector<qint64> VideoModel::reviewOptions(const VideoInfo &v) const
     }
     std::sort(ids.begin(), ids.end());
     return ids;
+}
+
+const VideoInfo *VideoModel::sameTitle(const VideoInfo &v) const
+{
+    if (!v.review)
+        return nullptr;
+    const auto folded = [](const QString &t) { return t.normalized(QString::NormalizationForm_KC).toCaseFolded().simplified(); };
+    const QString title = folded(v.title);
+    if (title.isEmpty())
+        return nullptr;
+    for (const VideoInfo &o : m_videos) {
+        if (!o.review && folded(o.title) == title)
+            return &o;
+    }
+    return nullptr;
 }
 
 QVariantMap VideoModel::toMap(int row) const
@@ -154,12 +174,10 @@ void VideoModel::upsert(const VideoInfo &video)
 {
     for (int i = 0; i < m_videos.size(); ++i) {
         if (m_videos[i].id == video.id) {
-            const bool review = m_videos[i].review || video.review;
             m_videos[i] = video;
             m_search[i] = buildSearchText(video);
             emit dataChanged(index(i, 0), index(i, 0));
-            if (review)
-                reviewOptionsChanged();
+            reviewOptionsChanged();
             return;
         }
     }
@@ -167,12 +185,12 @@ void VideoModel::upsert(const VideoInfo &video)
     m_videos << video;
     m_search << buildSearchText(video);
     endInsertRows();
-    if (video.review)
-        reviewOptionsChanged();
+    reviewOptionsChanged();
 }
 
 // A group gained or lost an option: its other cards show a different count,
-// and possibly a different one of them is on show.
+// and possibly a different one of them is on show. And any video that came
+// or went may be the one a review card says has its title.
 void VideoModel::reviewOptionsChanged()
 {
     for (int i = 0; i < m_videos.size(); ++i) {
@@ -186,13 +204,11 @@ void VideoModel::remove(qint64 videoId)
     for (int i = 0; i < m_videos.size(); ++i) {
         if (m_videos[i].id != videoId)
             continue;
-        const bool review = m_videos[i].review;
         beginRemoveRows(QModelIndex(), i, i);
         m_videos.removeAt(i);
         m_search.removeAt(i);
         endRemoveRows();
-        if (review)
-            reviewOptionsChanged();
+        reviewOptionsChanged();
         return;
     }
 }

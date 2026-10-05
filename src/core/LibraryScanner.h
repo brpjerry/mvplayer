@@ -2,6 +2,8 @@
 
 #include "core/Database.h"
 
+#include <QJsonObject>
+
 #include <atomic>
 
 namespace LibraryScanner {
@@ -15,6 +17,10 @@ struct Result {
     int removed = 0;
     bool unsettled = false;        // some files were still being written; scan again soon
     bool ok = false;
+    // For the import log: one entry per file that is new to the library,
+    // with what was made of it (queued, skipped by its title, another file of
+    // a known recording, a known track at a new place).
+    QVector<QJsonObject> events;
 };
 
 // Brings the tracks table in line with the audio library folders `roots`.

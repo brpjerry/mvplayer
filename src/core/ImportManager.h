@@ -102,7 +102,8 @@ private:
     void runJob(qint64 trackId, const ImportSettings &cfg);
     // Rebuilds a video's file with the track's audio as its main audio.
     bool putLibraryAudioIn(const VideoInfo &video, const TrackInfo &track, const AudioAlign::Result &align,
-                           const ImportSettings &cfg, QString *error, bool review = false);
+                           const ImportSettings &cfg, QString *error, bool review = false,
+                           int ytAudioStream = 0);
     void upgradeVideos(const ImportSettings &cfg);
     // "done" when the video was rebuilt, "skipped" when it is as good as it gets.
     QString upgradeVideo(const VideoInfo &video, const ImportSettings &cfg, QString *detail);

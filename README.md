@@ -96,8 +96,9 @@ For every track without a video (`src/core/ImportManager.cpp`):
    comparison is made in the mid band, by the size of the correlation, at an
    offset that is followed as it drifts. Where the two merely match poorly
    and the video adds nothing of its own, the track still goes in.
-   The track's audio takes the video's place when about two thirds of it is
-   demonstrably the same waveform. The same performance in another mix
+   The track's audio takes the video's place when 72% of it is demonstrably
+   the same waveform — nearly all of it where track and video name different
+   versions, since a version made over the original keeps most of it. The same performance in another mix
    (reverb added, the voice at another level) shows less than that, as does
    a cover over the same backing; there the fingerprints have to cover the
    song, the loudness of the two has to move together at the offset found,
@@ -144,10 +145,24 @@ block lasts, then one job tests the water before the rest follow. The import
 panel shows the pause and has a "Resume now" button; `pauseSeconds` under
 `[import]` in the config file changes the first wait.
 
-Every lookup is recorded in `<MV folder>/.mvplayer/import-log.jsonl`, one
-JSON object per track: the queries run, every candidate with its score and
-why it was dropped, what each examined candidate turned out to be, and how
-many requests it took. It is there for tuning the matching rules.
+Everything the importer decides is recorded in
+`<MV folder>/.mvplayer/import-log.jsonl`, one JSON object per line:
+
+- `lookup`: one per track looked up — the queries, every search result with
+  its score and why it was dropped or shortlisted, and for each video that
+  was examined the decision (`accept`, `review`, `reject`, `undecided`), the
+  reason in words, and the measurements behind it: fingerprint coverage, the
+  share of the track that is demonstrably the same waveform, the loudness
+  correlation and offset, segments, gain, polarity. Also what was brought into
+  the library and how many requests it took.
+- `track`: what the scan made of a file new to the library — queued, skipped
+  by its title, another file of a known recording, a known track at a new place.
+- `verdict`: a video under review accepted or turned down.
+- `paused` / `resumed`: the request circuit breaker.
+
+`tools/import-report.py <MV folder>` turns the log and the database into a
+table of tracks, the videos examined for each, the decisions, reasons and
+numbers (`--tsv` for a spreadsheet).
 
 Importing can be interrupted at any point — closing the window, logging out,
 Ctrl+C. Unfinished tracks stay queued and are picked up on the next start;
@@ -196,6 +211,10 @@ only. From then on every imported video is built from that audio — as its
 "YouTube audio" track, and as its main audio where the library's own does not
 replace it.
 
+"Check cookies" asks YouTube whether the cookies still work. Browsers replace
+them every so often, and an export goes stale with that; exporting from a
+private window that is then closed keeps them alive longer.
+
 "Check videos for better quality" goes through the videos already in the
 library, one at a time, and rebuilds those the account is offered something
 better for: the audio is fetched again and put into the existing file, the
@@ -205,7 +224,8 @@ The account is used for nothing else. Searches and video downloads stay
 anonymous (the "1080p Premium" picture needs no account, and signed-in
 clients are not offered it); the cookies are only tried for a video that
 cannot be had without signing in, such as an age-restricted one. Headless:
-`--cookies cookies.txt` and `--check-quality`.
+`--cookies cookies.txt` with `--check-quality`, or with the `check-cookies`
+command.
 
 ### Headless
 

@@ -221,10 +221,19 @@ bool YtDlp::premiumInfo(const QString &id, QJsonObject *info, QString *error)
     ProcOptions opts;
     opts.cancel = m_cancel;
     opts.timeoutMs = 120000;
-    const ProcResult r = runProcess(m_program, baseArgs() + account + QStringList{QStringLiteral("-J"), url(id)}, opts);
+    // With its warnings: that the cookies are no longer accepted is one.
+    QStringList base = baseArgs();
+    base.removeAll(QStringLiteral("--no-warnings"));
+    const ProcResult r = runProcess(m_program, base + account + QStringList{QStringLiteral("-J"), url(id)}, opts);
     if (!r.ok()) {
         if (error)
             *error = r.errorText();
+        return false;
+    }
+    // yt-dlp carries on without the account, and lists what anyone is offered.
+    if (r.err.contains("cookies are no longer valid")) {
+        if (error)
+            *error = QStringLiteral("the account's cookies have expired: export cookies.txt from the browser again");
         return false;
     }
     *info = QJsonDocument::fromJson(r.out).object();
@@ -234,6 +243,27 @@ bool YtDlp::premiumInfo(const QString &id, QJsonObject *info, QString *error)
         return false;
     }
     return true;
+}
+
+YtDlp::Account YtDlp::checkAccount(const QString &id, double *kbps, QString *error)
+{
+    QJsonObject info;
+    QString why;
+    if (!premiumInfo(id, &info, &why)) {
+        if (error)
+            *error = why;
+        return cookiesExpired(why) ? Account::Expired : Account::Unknown;
+    }
+    const double best = bestAudioKbps(info);
+    if (kbps)
+        *kbps = best;
+    // Anyone is offered about 130 kbit/s, a Premium account 256.
+    return best >= 200 ? Account::Premium : Account::Ordinary;
+}
+
+bool YtDlp::cookiesExpired(const QString &error)
+{
+    return error.contains(QLatin1String("cookies have expired"));
 }
 
 double YtDlp::bestAudioKbps(const QJsonObject &info)

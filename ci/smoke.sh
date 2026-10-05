@@ -258,6 +258,22 @@ assert [y for _, y in db.execute("SELECT key, yt_id FROM rejected_videos")] == [
 assert "turned down" in db.execute("SELECT message FROM tracks").fetchone()[0]
 print("review ok")
 PY
+# The log says what was decided about the upload, why, and on what numbers;
+# the report puts it in a table.
+python3 - "$WORK/mvlib5/.mvplayer/import-log.jsonl" <<'PY'
+import json, sys
+events = [json.loads(l) for l in open(sys.argv[1], encoding="utf-8")]
+look = [e for e in events if e.get("event") == "lookup"][0]
+c = look["checked"][0]
+assert look["decision"] == "review" and c["decision"] == "review" and c["reason"], look
+m = c["measured"]
+assert m["fingerprintCoverage"] > 0.8 and 0.2 < m["sameWaveform"] < 0.72 and "loudnessCorrelation" in m, m
+assert [e["verdict"] for e in events if e.get("event") == "verdict"] == ["accept", "reject"]
+assert any(e.get("event") == "track" and e["what"] == "new" for e in events)
+PY
+REPORT=$(python3 "$(dirname "$0")/../tools/import-report.py" "$WORK/mvlib5")
+echo "$REPORT" | tail -1 | cut -c1-200
+[[ "$REPORT" == *"review → you: reject"* && "$REPORT" == *"46%"* ]]
 
 echo "== premium account"
 # A yt-dlp that knows an account by its cookies: it lists audio at 250 kbit/s
@@ -269,7 +285,12 @@ cat > "$WORK/fake-premium" <<FAKE
 echo "\$*" >> "$WORK/premium-args"
 case " \$* " in *" --cookies "*) ;; *) echo "ERROR: no cookies given" >&2; exit 1 ;; esac
 case " \$* " in
-*" -J "*) echo '{"formats": [{"format_id": "774", "vcodec": "none", "acodec": "opus", "abr": 250}]}' ;;
+*" -J "*) if [ -f "$WORK/expired" ]; then
+        echo "WARNING: [youtube] The provided YouTube account cookies are no longer valid." >&2
+        echo '{"formats": [{"format_id": "251", "vcodec": "none", "acodec": "opus", "abr": 130}]}'
+    else
+        echo '{"formats": [{"format_id": "774", "vcodec": "none", "acodec": "opus", "abr": 250}]}'
+    fi ;;
 *)  out=; prev=
     for a in "\$@"; do [ "\$prev" = "-o" ] && out=\$a; prev=\$a; done
     dir=\$(dirname "\$out")
@@ -301,6 +322,19 @@ db.execute("INSERT INTO videos (yt_id, path, title, audio_source, added_at) "
 db.execute("UPDATE tracks SET state = 'done', video_id = (SELECT id FROM videos)")
 db.commit()
 PY
+# Cookies the browser has rotated since: yt-dlp only warns and lists what
+# anyone is offered. That must be said, not pass for "nothing better".
+touch "$WORK/expired"
+C=$(MVPLAYER_YTDLP="$PREMIUM" "$BUILD/mvplayer-import" --cookies "$WORK/cookies.txt" check-cookies || true); echo "$C"
+[[ "$C" == expired:* ]]
+OUT=$(MVPLAYER_YTDLP="$PREMIUM" timeout 120 "$BUILD/mvplayer-import" --music-dir "$WORK/lib4" --mv-dir "$WORK/mvlib4" \
+    --cookies "$WORK/cookies.txt" --check-quality 2>&1)
+echo "$OUT" | grep -E "^\[quality\]"
+[[ "$OUT" == *"0 upgraded, 1 failed; stopped because the account's cookies have expired"* ]]
+rm "$WORK/expired" "$WORK/premium-args"
+C=$(MVPLAYER_YTDLP="$PREMIUM" "$BUILD/mvplayer-import" --cookies "$WORK/cookies.txt" check-cookies); echo "$C"
+[[ "$C" == valid:*"250 kbit/s" ]]
+rm "$WORK/premium-args"
 OUT=$(MVPLAYER_YTDLP="$PREMIUM" timeout 120 "$BUILD/mvplayer-import" --music-dir "$WORK/lib4" --mv-dir "$WORK/mvlib4" \
     --cookies "$WORK/cookies.txt" --check-quality 2>&1)
 echo "$OUT" | grep -E "^\[quality\]|^\[audio\]|warning"

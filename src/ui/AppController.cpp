@@ -11,6 +11,7 @@
 #include <QFileInfo>
 #include <QMap>
 #include <QStandardPaths>
+#include <QThreadPool>
 
 // ---------------------------------------------------------------------------
 // JobModel
@@ -425,8 +426,61 @@ QString AppController::importCookies(const QString &file)
     m_cfg.cookiesFile = target;
     if (m_manager)
         m_manager->setSettings(m_cfg);
+    setCookiesCheck({}, {});
     emit settingsChanged();
     return {};
+}
+
+void AppController::setCookiesCheck(const QString &state, const QString &status)
+{
+    ++m_cookiesCheck;
+    m_checkingCookies = false;
+    m_cookiesState = state;
+    m_cookiesStatus = status;
+    emit cookiesCheckChanged();
+}
+
+void AppController::checkCookies()
+{
+    if (!hasCookies() || m_checkingCookies)
+        return;
+    setCookiesCheck({}, {});
+    m_checkingCookies = true;
+    emit cookiesCheckChanged();
+    // Asked of a video of the library, where there is one: music is what
+    // the account's better audio is offered for.
+    QString id = QStringLiteral("dQw4w9WgXcQ");
+    if (m_model->rowCount() > 0)
+        id = m_model->at(0).ytId;
+    const int check = m_cookiesCheck;
+    const ImportSettings cfg = m_cfg;
+    QThreadPool::globalInstance()->start([this, id, check, cfg] {
+        YtDlp yt(qEnvironmentVariable("MVPLAYER_YTDLP", toolPath(QStringLiteral("yt-dlp"))), cfg.ytdlpArgs, cfg.cookiesFile, nullptr);
+        double kbps = 0;
+        QString error, state, status;
+        switch (yt.checkAccount(id, &kbps, &error)) {
+        case YtDlp::Account::Premium:
+            state = QStringLiteral("premium");
+            status = tr("The cookies work: YouTube offers this account audio at %1 kbit/s.").arg(qRound(kbps));
+            break;
+        case YtDlp::Account::Ordinary:
+            state = QStringLiteral("ordinary");
+            status = tr("YouTube takes the cookies, but offers no Premium audio with them (%1 kbit/s at best). Is the account a Premium one?").arg(qRound(kbps));
+            break;
+        case YtDlp::Account::Expired:
+            state = QStringLiteral("expired");
+            status = tr("The cookies have expired. Export cookies.txt from the browser again — from a private window that is closed afterwards, or the browser replaces them once more.");
+            break;
+        case YtDlp::Account::Unknown:
+            state = QStringLiteral("unknown");
+            status = tr("Could not ask YouTube: %1").arg(error);
+            break;
+        }
+        QMetaObject::invokeMethod(this, [this, check, state, status] {
+            if (check == m_cookiesCheck)
+                setCookiesCheck(state, status);
+        }, Qt::QueuedConnection);
+    });
 }
 
 void AppController::removeCookies()
@@ -435,6 +489,7 @@ void AppController::removeCookies()
     m_cfg.cookiesFile.clear();
     if (m_manager)
         m_manager->setSettings(m_cfg);
+    setCookiesCheck({}, {});
     emit settingsChanged();
 }
 

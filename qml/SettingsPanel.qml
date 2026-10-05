@@ -545,9 +545,12 @@ Popup {
                     Text {
                         width: parent.width
                         text: root.cookiesError.length > 0 ? root.cookiesError
+                            : App.checkingCookies ? "Asking YouTube about the cookies…"
+                            : App.cookiesStatus.length > 0 ? App.cookiesStatus
                             : App.hasCookies ? "Cookies added " + App.cookiesAdded + ". New videos get the account's higher-bitrate audio."
                             : "Add a cookies.txt exported from a browser signed in to a Premium account to get its higher-bitrate audio."
-                        color: root.cookiesError.length > 0 ? "#ff5d5d" : Theme.textDim
+                        color: root.cookiesError.length > 0 || (!App.checkingCookies && (App.cookiesState === "expired" || App.cookiesState === "unknown")) ? "#ff5d5d"
+                            : !App.checkingCookies && App.cookiesState === "premium" ? Theme.accentHi : Theme.textDim
                         font.pixelSize: 12
                         wrapMode: Text.WordWrap
                     }
@@ -573,11 +576,19 @@ Popup {
                 visible: App.hasCookies
                 width: parent.width
                 height: 46
-                FlatButton {
+                Row {
                     anchors.bottom: parent.bottom
-                    text: App.checkingQuality ? "Checking for better quality…" : "Check videos for better quality"
-                    enabled: App.configured && !App.checkingQuality
-                    onClicked: App.checkQuality()
+                    spacing: 10
+                    FlatButton {
+                        text: App.checkingCookies ? "Checking cookies…" : "Check cookies"
+                        enabled: !App.checkingCookies
+                        onClicked: { root.cookiesError = ""; App.checkCookies() }
+                    }
+                    FlatButton {
+                        text: App.checkingQuality ? "Checking for better quality…" : "Check videos for better quality"
+                        enabled: App.configured && !App.checkingQuality
+                        onClicked: App.checkQuality()
+                    }
                 }
             }
 

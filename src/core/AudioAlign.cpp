@@ -439,12 +439,12 @@ QVector<quint32> fingerprintItems(const std::vector<int16_t> &pcm)
     return QVector<quint32>(fp.items.begin(), fp.items.end());
 }
 
-bool decodeMono(const QString &file, std::vector<int16_t> *pcm, const std::atomic<bool> *cancel, QString *error)
+bool decodeMono(const QString &file, std::vector<int16_t> *pcm, const std::atomic<bool> *cancel, QString *error, int stream)
 {
     const QStringList args = {
         QStringLiteral("-v"), QStringLiteral("error"), QStringLiteral("-nostdin"),
         QStringLiteral("-i"), file,
-        QStringLiteral("-map"), QStringLiteral("0:a:0"), QStringLiteral("-vn"),
+        QStringLiteral("-map"), QStringLiteral("0:a:%1").arg(stream), QStringLiteral("-vn"),
         QStringLiteral("-af"), QStringLiteral("aresample=%1:first_pts=0").arg(kRate),
         QStringLiteral("-ac"), QStringLiteral("1"),
         QStringLiteral("-f"), QStringLiteral("s16le"), QStringLiteral("-"),

@@ -309,23 +309,6 @@ Item {
             }
         }
 
-        // The thumbnail's review controls are underneath the video now: the
-        // same ones, on top of it.
-        ReviewControls {
-            readonly property bool wanted: root.collapsed && root.current !== null && root.current.review === true
-            visible: wanted
-            // Counter-scaled like the other controls of the shrunken box.
-            width: parent.width * box.k
-            height: parent.height * box.k
-            transformOrigin: Item.TopLeft
-            scale: 1 / box.k
-            option: wanted ? root.current.reviewOption : 1
-            options: wanted ? root.current.reviewOptions : 1
-            onApproved: root.reviewApproved()
-            onRejected: root.reviewRejected()
-            onStepped: (delta) => root.reviewStepped(delta)
-        }
-
         IconButton {
             id: closeMini
             visible: box.enabled && root.collapsed && !(root.current !== null && root.current.review === true)
@@ -343,6 +326,24 @@ Item {
             onClicked: root.closeRequested()
             Behavior on opacity { NumberAnimation { duration: Theme.fast } }
         }
+    }
+
+    // The thumbnail's review controls are underneath the video now: the same
+    // ones, on top of it. Over the thumbnail's rectangle, not the video's: a
+    // video that is not 16:9 covers only part of it.
+    ReviewControls {
+        readonly property bool wanted: root.collapsed && root.current !== null && root.current.review === true
+        visible: wanted && box.enabled
+        x: root.restRect.x
+        y: root.restRect.y
+        width: root.restRect.width
+        height: root.restRect.height
+        option: wanted ? root.current.reviewOption : 1
+        options: wanted ? root.current.reviewOptions : 1
+        sameTitle: wanted ? root.current.sameTitle : ({})
+        onApproved: root.reviewApproved()
+        onRejected: root.reviewRejected()
+        onStepped: (delta) => root.reviewStepped(delta)
     }
 
     // Pause / play flash in the middle of the video
