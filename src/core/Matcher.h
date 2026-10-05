@@ -16,6 +16,11 @@ struct YtCandidate {
 
     double score = 0;
     bool trusted = false;  // looks like an official upload
+    // The upload is vouched for: the artist's own channel or a verified one.
+    // One that looks official by its title alone ("… (Music Video)") is
+    // examined like the others, but not taken as the track's own video
+    // short of a near-complete match.
+    bool vouched = false;
     QString rejectReason;  // non-empty: never consider this result
 };
 

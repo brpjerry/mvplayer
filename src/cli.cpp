@@ -156,7 +156,7 @@ int main(int argc, char **argv)
         c.verified = pos.value(5) == QLatin1String("verified");
         QVector<YtCandidate> list{c};
         Matcher::rank(t, list);
-        out << (list[0].rejectReason.isEmpty() ? (list[0].trusted ? "trusted" : "not trusted") : "dropped")
+        out << (list[0].rejectReason.isEmpty() ? (list[0].vouched ? "vouched" : list[0].trusted ? "trusted" : "not trusted") : "dropped")
             << (list[0].rejectReason.isEmpty() ? QString() : QStringLiteral(": ") + list[0].rejectReason)
             << (Matcher::namesArtist(t, c.title, c.channel) ? ", names the artist" : ", does not name the artist") << Qt::endl;
         return 0;
