@@ -108,7 +108,8 @@ bool isArtistChannel(Database &db, const QStringList &artistNames, const QString
         const QString name = artist.trimmed();
         if (name.size() < 2)
             continue;
-        if (!db.artistChannelsKnown(name)) {
+        // (Tests run without the network.)
+        if (!db.artistChannelsKnown(name) && !qEnvironmentVariableIsSet("MVPLAYER_NO_MUSICBRAINZ")) {
             QString error;
             const QStringList ids = fromMusicBrainz(name, &error);
             if (error.isEmpty()) {

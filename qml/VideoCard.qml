@@ -15,6 +15,7 @@ Item {
     required property string audioSource
     required property bool review      // waits for the user's verdict
     required property string ytTitle
+    required property string ytChannel
     required property int reviewOption   // which of the options for this track is shown, from 1
     required property int reviewOptions
     required property var sameTitle     // a library video with this title, for a video under review
@@ -164,7 +165,9 @@ Item {
             anchors.top: titleLabel.bottom
             anchors.topMargin: 3
             // Under review, what matters is which upload this is.
-            text: root.review ? root.ytTitle : root.artist.replace(/; /g, ", ") + (root.year > 0 ? "  ·  " + root.year : "")
+            // Under review, the upload and whose it is: that is what is judged.
+            text: root.review ? root.ytTitle + (root.ytChannel ? "  —  " + root.ytChannel : "")
+                              : root.artist.replace(/; /g, ", ") + (root.year > 0 ? "  ·  " + root.year : "")
             color: Theme.textDim
             font.pixelSize: 12
             elide: Text.ElideRight
