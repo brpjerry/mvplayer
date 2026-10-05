@@ -31,6 +31,11 @@ bool isNonMvTrack(const TrackInfo &track, QString *why = nullptr);
 // and "MC Hammer Medley" are songs.
 bool isTalkTitle(const QString &title);
 
+// Whether an upload names one of the track's artists, in its title or as its
+// channel. Where the sound alone does not settle whose performance a video
+// is, an upload that names none of them is not taken for the track's.
+bool namesArtist(const TrackInfo &track, const QString &videoTitle, const QString &channel);
+
 QStringList searchQueries(const TrackInfo &track);
 
 // False when one of the two is marked as a version the other is not: a live
