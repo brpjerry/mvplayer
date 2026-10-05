@@ -28,6 +28,8 @@ class MpvItem : public QQuickFramebufferObject
     Q_PROPERTY(bool hasSubtitles READ hasSubtitles NOTIFY hasSubtitlesChanged)
     Q_PROPERTY(bool subtitlesVisible READ subtitlesVisible WRITE setSubtitlesVisible NOTIFY subtitlesVisibleChanged)
     Q_PROPERTY(QString subtitleLangs READ subtitleLangs WRITE setSubtitleLangs NOTIFY subtitleLangsChanged)
+    Q_PROPERTY(double subtitleOutline READ subtitleOutline WRITE setSubtitleOutline NOTIFY subtitleStyleChanged)
+    Q_PROPERTY(double subtitleShadow READ subtitleShadow WRITE setSubtitleShadow NOTIFY subtitleStyleChanged)
     Q_PROPERTY(QSize videoSize READ videoSize NOTIFY videoSizeChanged)
     Q_PROPERTY(QString hwdec READ hwdec NOTIFY hwdecChanged)
     // While enabled, `frameColor` follows the picture: an accent colour taken
@@ -59,6 +61,10 @@ public:
     void setSubtitlesVisible(bool v);
     QString subtitleLangs() const { return m_subtitleLangs; }
     void setSubtitleLangs(const QString &langs);
+    double subtitleOutline() const { return m_subtitleOutline; }
+    void setSubtitleOutline(double v);
+    double subtitleShadow() const { return m_subtitleShadow; }
+    void setSubtitleShadow(double v);
     QSize videoSize() const { return m_videoSize; }
     QString hwdec() const { return m_hwdec; }
     bool colorSampling() const { return m_colorSampling; }
@@ -87,6 +93,7 @@ signals:
     void hasSubtitlesChanged();
     void subtitlesVisibleChanged();
     void subtitleLangsChanged();
+    void subtitleStyleChanged();
     void videoSizeChanged();
     void hwdecChanged();
     void colorSamplingChanged();
@@ -116,6 +123,9 @@ private:
     bool m_hasSubtitles = false;
     bool m_subtitlesVisible = true;
     QString m_subtitleLangs;
+    void redrawPaused();
+    double m_subtitleOutline = 2.2;
+    double m_subtitleShadow = 0;
     QSize m_videoSize;
     QString m_hwdec;
 

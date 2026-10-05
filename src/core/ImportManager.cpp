@@ -584,6 +584,39 @@ void ImportManager::checkQuality()
     });
 }
 
+int ImportManager::untrackedCount() const
+{
+    return int(m_db->untrackedVideos().size());
+}
+
+int ImportManager::deleteUntracked()
+{
+    // Not while tracks are being looked up or the folders are being read:
+    // what is untracked is settled only once those are done.
+    if (!m_started || busy())
+        return 0;
+    const QString root = QDir(settings().mvDir).absolutePath();
+    QJsonArray names;
+    int deleted = 0;
+    for (const VideoInfo &v : m_db->untrackedVideos()) {
+        m_db->removeAbsentTracksOf(v.id);
+        m_db->removeVideo(v.id);
+        removeVideoFiles(v);
+        // An artist folder left empty goes too; never the MV folder itself.
+        const QString dir = QFileInfo(v.path).absolutePath();
+        if (dir != root && dir.startsWith(root + QLatin1Char('/')))
+            QDir().rmdir(dir);
+        names.append(QJsonObject{{QStringLiteral("ytId"), v.ytId}, {QStringLiteral("title"), v.title}, {QStringLiteral("artist"), v.artist}});
+        ++deleted;
+        emit videoRemoved(v.id);
+    }
+    if (deleted > 0) {
+        qInfo("[library] deleted %d videos that no track in the music folders has", deleted);
+        appendLog({{QStringLiteral("event"), QStringLiteral("untracked-deleted")}, {QStringLiteral("videos"), names}});
+    }
+    return deleted;
+}
+
 void ImportManager::fetchSubtitles()
 {
     if (!m_started || settings().subtitleLangs.isEmpty() || m_upgrading.exchange(true))
@@ -862,8 +895,8 @@ void ImportManager::onScanFinished(const LibraryScanner::Result &r)
     if (!m_started)
         return;
     if (r.ok) {
-        if (r.added || r.changed || r.removed)
-            qInfo("[scan] %d tracks: %d new, %d changed, %d removed", r.total, r.added, r.changed, r.removed);
+        if (r.added || r.changed || r.removed || r.returned)
+            qInfo("[scan] %d tracks: %d new, %d changed, %d back, %d gone", r.total, r.added, r.changed, r.returned, r.removed);
         // What became of each file that was not simply unchanged.
         for (const QJsonObject &e : r.events)
             appendLog(e);
@@ -960,7 +993,7 @@ void ImportManager::releaseVideo(const QString &ytId)
 void ImportManager::runJob(qint64 trackId, const ImportSettings &cfg)
 {
     const std::optional<TrackInfo> maybe = m_db->track(trackId);
-    if (!maybe || maybe->state != QLatin1String("pending"))
+    if (!maybe || maybe->state != QLatin1String("pending") || maybe->absent)
         return;
     const TrackInfo track = *maybe;
     if (m_blocked)

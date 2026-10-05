@@ -114,6 +114,95 @@ Popup {
         }
     }
 
+    component SliderRow: Item {
+        id: sliderRow
+        property string label
+        property string hint
+        property real from: 0
+        property real to: 1
+        property real value: 0
+        property string valueText: value.toFixed(1)
+        signal moved(real value)
+        width: parent.width
+        height: sliderText.implicitHeight + 28
+
+        Column {
+            id: sliderText
+            anchors.left: parent.left
+            anchors.right: track.left
+            anchors.rightMargin: 20
+            anchors.verticalCenter: parent.verticalCenter
+            spacing: 3
+            Text {
+                text: sliderRow.label
+                color: Theme.text
+                font.pixelSize: 14
+            }
+            Text {
+                width: parent.width
+                text: sliderRow.hint
+                color: Theme.textDim
+                font.pixelSize: 12
+                wrapMode: Text.WordWrap
+            }
+        }
+        Item {
+            id: track
+            anchors.right: valueLabel.left
+            anchors.rightMargin: 10
+            anchors.verticalCenter: parent.verticalCenter
+            width: 150
+            height: 28
+            readonly property real fraction: Math.max(0, Math.min(1, (sliderRow.value - sliderRow.from) / (sliderRow.to - sliderRow.from)))
+            Rectangle {
+                anchors.verticalCenter: parent.verticalCenter
+                width: parent.width
+                height: 4
+                radius: 2
+                color: Theme.hover
+                Rectangle {
+                    width: parent.width * track.fraction
+                    height: parent.height
+                    radius: 2
+                    color: Theme.accent
+                }
+            }
+            Rectangle {
+                x: (track.width - width) * track.fraction
+                anchors.verticalCenter: parent.verticalCenter
+                width: 14
+                height: 14
+                radius: 7
+                color: trackMouse.pressed || trackMouse.containsMouse ? Theme.accentHi : Theme.text
+            }
+            MouseArea {
+                id: trackMouse
+                anchors.fill: parent
+                anchors.margins: -4
+                hoverEnabled: true
+                // Dragging here must not scroll the panel.
+                preventStealing: true
+                function pick(mx) {
+                    const f = Math.max(0, Math.min(1, (mx - 4 - 7) / (track.width - 14)))
+                    sliderRow.moved(Math.round((sliderRow.from + f * (sliderRow.to - sliderRow.from)) * 10) / 10)
+                }
+                onPressed: (m) => pick(m.x)
+                onPositionChanged: (m) => { if (pressed) pick(m.x) }
+            }
+        }
+        Text {
+            id: valueLabel
+            anchors.right: parent.right
+            anchors.verticalCenter: parent.verticalCenter
+            width: 30
+            horizontalAlignment: Text.AlignRight
+            text: sliderRow.valueText
+            color: Theme.textDim
+            font.pixelSize: 12
+            font.features: { "tnum": 1 }
+        }
+    }
+
     component SwitchRow: Item {
         id: switchRow
         property string label
@@ -525,6 +614,12 @@ Popup {
                     Item { width: 1; height: 8 }
 
                     SwitchRow {
+                        label: "Enlarge a video when it starts"
+                        hint: "Off: a video starts in its thumbnail, and a click on it enlarges it."
+                        checked: App.autoExpand
+                        onToggled: (c) => App.autoExpand = c
+                    }
+                    SwitchRow {
                         label: "Use my library's audio"
                         hint: "When your track is higher quality than YouTube's, it is synced to the video and used as the main audio. A video it cannot be synced to is not imported."
                         checked: App.replaceAudio
@@ -557,6 +652,65 @@ Popup {
                             text: "Retry tracks without a video"
                             enabled: App.configured && !App.busy
                             onClicked: App.retryUnmatched()
+                        }
+                    }
+
+                    // Videos whose tracks are in none of the music folders any more.
+                    Item {
+                        id: untracked
+                        property bool confirming: false
+                        visible: App.untrackedCount > 0
+                        width: parent.width
+                        height: untrackedText.implicitHeight + 34
+                        Connections {
+                            target: root
+                            function onClosed() { untracked.confirming = false }
+                        }
+
+                        Column {
+                            id: untrackedText
+                            anchors.left: parent.left
+                            anchors.right: untrackedButtons.left
+                            anchors.rightMargin: 20
+                            anchors.bottom: parent.bottom
+                            anchors.bottomMargin: 6
+                            spacing: 3
+                            Text {
+                                text: App.untrackedCount + (App.untrackedCount === 1 ? " untracked video" : " untracked videos")
+                                color: Theme.text
+                                font.pixelSize: 14
+                            }
+                            Text {
+                                width: parent.width
+                                text: untracked.confirming
+                                    ? "This deletes the files of " + App.untrackedCount + (App.untrackedCount === 1 ? " video" : " videos") + " for good."
+                                    : "Their tracks are in none of your music folders any more. They stay in the library until deleted, and are taken up again if the tracks come back."
+                                color: untracked.confirming ? "#ff5d5d" : Theme.textDim
+                                font.pixelSize: 12
+                                wrapMode: Text.WordWrap
+                            }
+                        }
+                        Row {
+                            id: untrackedButtons
+                            anchors.right: parent.right
+                            anchors.bottom: parent.bottom
+                            anchors.bottomMargin: 10
+                            spacing: 10
+                            FlatButton {
+                                visible: untracked.confirming
+                                text: "Keep"
+                                onClicked: untracked.confirming = false
+                            }
+                            FlatButton {
+                                text: untracked.confirming ? "Delete " + App.untrackedCount : "Delete untracked videos"
+                                // Not while folders are read or tracks looked up: the count is still moving.
+                                enabled: !App.busy
+                                onClicked: {
+                                    if (!untracked.confirming) { untracked.confirming = true; return }
+                                    untracked.confirming = false
+                                    App.deleteUntracked()
+                                }
+                            }
                         }
                     }
 
@@ -626,6 +780,25 @@ Popup {
                         }
                     }
                 }
+
+                    SliderRow {
+                        label: "Subtitle outline"
+                        hint: "Thickness of the dark edge around plain subtitles. Subtitles with their own styling keep it."
+                        from: 0
+                        to: 5
+                        value: App.subtitleOutline
+                        valueText: App.subtitleOutline === 0 ? "Off" : App.subtitleOutline.toFixed(1)
+                        onMoved: (v) => App.subtitleOutline = v
+                    }
+                    SliderRow {
+                        label: "Subtitle drop shadow"
+                        hint: "How far the shadow falls behind plain subtitles."
+                        from: 0
+                        to: 5
+                        value: App.subtitleShadow
+                        valueText: App.subtitleShadow === 0 ? "Off" : App.subtitleShadow.toFixed(1)
+                        onMoved: (v) => App.subtitleShadow = v
+                    }
 
                 // YouTube Premium: the account's cookies bring audio at a higher bitrate.
                     Item {

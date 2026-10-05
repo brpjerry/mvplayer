@@ -74,6 +74,11 @@ public:
     int qualityTotal() const { return m_upgradeTotal; }
     // Fetches the subtitles that the videos already imported lack. Shares the
     // quality check's progress: one pass over the library at a time.
+    // Videos that no track in the music folders has (see
+    // Database::untrackedVideos), and their deletion: files, subtitles and
+    // what was remembered of their tracks. Returns how many were deleted.
+    int untrackedCount() const;
+    int deleteUntracked();
     void fetchSubtitles();
     bool fetchingSubtitles() const { return m_upgrading && m_subtitling; }
 

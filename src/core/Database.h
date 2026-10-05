@@ -32,6 +32,8 @@ public:
     // another device); its import state and video stay with it.
     bool moveTrack(qint64 id, const QString &path);
     void removeTrack(qint64 id);
+    // Marks a track as gone from the music folders, or as back in them.
+    void setTrackAbsent(qint64 id, bool absent);
     // Records the outcome of a lookup, for every file of the track's recording.
     void setTrackResult(qint64 id, const QString &state, qint64 videoId, const QString &message);
     // Starts a recording of its own for the track.
@@ -61,7 +63,14 @@ public:
     // Makes failed / not-found tracks pending again once their last attempt
     // is old enough. The wait for failed tracks doubles with every attempt.
     void requeueStale(qint64 failedAfterSecs, qint64 notFoundAfterSecs);
+    // The tracks in the music folders that have this video.
     QVector<TrackInfo> tracksForVideo(qint64 videoId);
+    // Videos that no track in the music folders has: their tracks left, with
+    // a folder that was removed or files that were deleted.
+    QVector<VideoInfo> untrackedVideos();
+    // Forgets the absent tracks of a video, for when the video is deleted:
+    // if their files come back, they are looked up afresh.
+    void removeAbsentTracksOf(qint64 videoId);
     QHash<QString, int> trackStateCounts();
 
     // Videos

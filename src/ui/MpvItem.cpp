@@ -263,8 +263,9 @@ MpvItem::MpvItem(QQuickItem *parent)
     setOption(mpv, "sub-font-size", "42");
     setOption(mpv, "sub-color", "#FFFFFFFF");
     setOption(mpv, "sub-outline-color", "#E6000000");
-    setOption(mpv, "sub-outline-size", "2.2");
-    setOption(mpv, "sub-shadow-offset", "0");
+    setOption(mpv, "sub-outline-size", QByteArray::number(m_subtitleOutline, 'f', 1).constData());
+    setOption(mpv, "sub-shadow-offset", QByteArray::number(m_subtitleShadow, 'f', 1).constData());
+    setOption(mpv, "sub-shadow-color", "#C0000000");
     setOption(mpv, "sub-blur", "0.3");
     setOption(mpv, "sub-margin-y", "40");
     setOption(mpv, "sub-visibility", m_subtitlesVisible ? "yes" : "no");
@@ -426,6 +427,40 @@ void MpvItem::setSubtitlesVisible(bool v)
         mpv_set_property_async(m_core->mpv, 0, "sub-visibility", MPV_FORMAT_FLAG, &flag);
     }
     emit subtitlesVisibleChanged();
+}
+
+// A paused picture is not drawn again for a change of subtitle style: a
+// seek to where it stands makes mpv do so.
+void MpvItem::redrawPaused()
+{
+    if (!m_core || !m_core->mpv || !m_active || !m_paused)
+        return;
+    const char *cmd[] = {"seek", "0", "relative+exact", nullptr};
+    mpv_command_async(m_core->mpv, 0, cmd);
+}
+
+// These are mpv's style for subtitles that bring none of their own; ASS
+// subtitles are not touched by them.
+void MpvItem::setSubtitleOutline(double v)
+{
+    if (v == m_subtitleOutline)
+        return;
+    m_subtitleOutline = v;
+    if (m_core && m_core->mpv)
+        mpv_set_property_async(m_core->mpv, 0, "sub-outline-size", MPV_FORMAT_DOUBLE, &v);
+    redrawPaused();
+    emit subtitleStyleChanged();
+}
+
+void MpvItem::setSubtitleShadow(double v)
+{
+    if (v == m_subtitleShadow)
+        return;
+    m_subtitleShadow = v;
+    if (m_core && m_core->mpv)
+        mpv_set_property_async(m_core->mpv, 0, "sub-shadow-offset", MPV_FORMAT_DOUBLE, &v);
+    redrawPaused();
+    emit subtitleStyleChanged();
 }
 
 void MpvItem::setSubtitleLangs(const QString &langs)
