@@ -352,7 +352,9 @@ assert db.execute("SELECT COUNT(*) FROM videos").fetchone()[0] == 1
 print("takeover ok")
 PY
 # The video now plays "Six": all of it the same waveform.
-TAKEN=$("$BUILD/mvplayer-import" align "$WORK/lib9/Gil/six.flac" "$WORK/mvlib9/Gil/Six [own].mkv" 2>/dev/null || "$BUILD/mvplayer-import" align "$WORK/lib9/Gil/six.flac" "$WORK/mvlib9/Gil/Sixth [own].mkv")
+# (From inside the folder: a bracketed path is not translated for ffmpeg on Windows.)
+BIN=$(cd "$BUILD" && pwd)
+TAKEN=$(cd "$WORK/mvlib9/Gil" && "$BIN/mvplayer-import" align "$WORK/lib9/Gil/six.flac" "$(ls *.mkv)")
 [[ "$TAKEN" == *"100% of it plainly the same"* && "$TAKEN" == *"in 1 segment(s)"* ]]
 
 echo "== premium account"
