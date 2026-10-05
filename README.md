@@ -89,7 +89,11 @@ For every track without a video (`src/core/ImportManager.cpp`):
 1. **Search** YouTube through `yt-dlp` and rank the results by title, artist,
    channel and duration. Covers, live cuts, instrumentals, auto-generated
    "Topic" uploads and (unless enabled in Settings) unofficial uploads are
-   dropped. Tracks that are themselves instrumentals are skipped.
+   dropped. Tracks that are themselves instrumentals are skipped. So is
+   talk between songs — a stage announcement, an interview — when the title
+   says so ("MC", "MC06", "Talk 2", "… (Interview)"; the word has to be the
+   whole title or a tag) and the track also sounds like it: full of pauses
+   and without a pulse. Either alone is not enough.
 2. **Verify** the best candidates by downloading only their audio and
    comparing Chromaprint fingerprints with the track. A video is accepted only
    if its soundtrack contains the recording, and its picture is not a still
