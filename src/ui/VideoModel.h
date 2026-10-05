@@ -29,6 +29,7 @@ public:
         AddedAtRole,
         YtIdRole,
         YtTitleRole,
+        YtChannelRole,
         ReviewRole,
         ReviewStartRole,
         ReviewEndRole,

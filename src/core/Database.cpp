@@ -86,7 +86,7 @@ TrackInfo readTrack(const QSqlQuery &q)
 const char *kVideoCols =
     "id, yt_id, path, thumb, title, artist, album_artist, album, genre, year, track_no, duration, "
     "width, height, fps, vcodec, audio_source, audio_detail, yt_title, yt_channel, tags_json, added_at, yt_abr, "
-    "review, review_start, review_end, review_group";
+    "review, review_start, review_end, review_group, yt_channel_id";
 
 VideoInfo readVideo(const QSqlQuery &q)
 {
@@ -119,6 +119,7 @@ VideoInfo readVideo(const QSqlQuery &q)
     v.reviewStart = q.value(i++).toDouble();
     v.reviewEnd = q.value(i++).toDouble();
     v.reviewGroup = q.value(i++).toLongLong();
+    v.ytChannelId = q.value(i++).toString();
     return v;
 }
 
@@ -226,7 +227,8 @@ bool Database::init(QString *error)
             " tags_json TEXT,"
             " added_at INTEGER,"
             " yt_abr REAL,"
-            " review INTEGER NOT NULL DEFAULT 0, review_start REAL, review_end REAL, review_group INTEGER)"),
+            " review INTEGER NOT NULL DEFAULT 0, review_start REAL, review_end REAL, review_group INTEGER,"
+            " yt_channel_id TEXT)"),
         QStringLiteral(
             "CREATE TABLE IF NOT EXISTS tracks ("
             " id INTEGER PRIMARY KEY,"
@@ -249,6 +251,13 @@ bool Database::init(QString *error)
         // the recording is not known.
         QStringLiteral("CREATE TABLE IF NOT EXISTS rejected_videos ("
                        " key TEXT NOT NULL, yt_id TEXT NOT NULL, PRIMARY KEY (key, yt_id))"),
+        // An artist's own channels: id (empty for a name alone), name, where
+        // known from. A row with an empty id and name holds when the artist
+        // was last asked about.
+        QStringLiteral("CREATE TABLE IF NOT EXISTS artist_channels ("
+                       " artist TEXT NOT NULL, channel_id TEXT NOT NULL DEFAULT '', channel TEXT NOT NULL DEFAULT '',"
+                       " source TEXT, checked_until INTEGER NOT NULL DEFAULT 0,"
+                       " PRIMARY KEY (artist, channel_id, channel))"),
         QStringLiteral("CREATE INDEX IF NOT EXISTS tracks_state ON tracks(state)"),
         QStringLiteral("CREATE INDEX IF NOT EXISTS tracks_video ON tracks(video_id)"),
         QStringLiteral("CREATE INDEX IF NOT EXISTS tracks_recording ON tracks(recording)"),
@@ -272,6 +281,19 @@ bool Database::init(QString *error)
                 has |= q.value(1).toString() == QLatin1String("absent");
         }
         if (!has && !q.exec(QStringLiteral("ALTER TABLE tracks ADD COLUMN absent INTEGER NOT NULL DEFAULT 0"))) {
+            if (error)
+                *error = q.lastError().text();
+            return false;
+        }
+    }
+    {
+        QSqlQuery q(db);
+        bool has = false;
+        if (q.exec(QStringLiteral("PRAGMA table_info(videos)"))) {
+            while (q.next())
+                has |= q.value(1).toString() == QLatin1String("yt_channel_id");
+        }
+        if (!has && !q.exec(QStringLiteral("ALTER TABLE videos ADD COLUMN yt_channel_id TEXT"))) {
             if (error)
                 *error = q.lastError().text();
             return false;
@@ -667,8 +689,8 @@ qint64 Database::insertVideo(const VideoInfo &v)
     q.prepare(QStringLiteral(
         "INSERT INTO videos (yt_id, path, thumb, title, artist, album_artist, album, genre, year,"
         " track_no, duration, width, height, fps, vcodec, audio_source, audio_detail, yt_title,"
-        " yt_channel, tags_json, added_at, yt_abr, review, review_start, review_end, review_group)"
-        " VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)"));
+        " yt_channel, tags_json, added_at, yt_abr, review, review_start, review_end, review_group, yt_channel_id)"
+        " VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)"));
     q.addBindValue(v.ytId);
     q.addBindValue(storedPath(v.path));
     q.addBindValue(storedPath(v.thumb));
@@ -695,6 +717,7 @@ qint64 Database::insertVideo(const VideoInfo &v)
     q.addBindValue(v.reviewStart);
     q.addBindValue(v.reviewEnd);
     q.addBindValue(v.reviewGroup > 0 ? QVariant(v.reviewGroup) : QVariant());
+    q.addBindValue(v.ytChannelId);
     if (!run(q))
         return 0;
     return q.lastInsertId().toLongLong();
@@ -761,6 +784,61 @@ void Database::relinkTracks(qint64 fromVideoId, qint64 toVideoId)
     q.prepare(QStringLiteral("UPDATE tracks SET video_id = ? WHERE video_id = ?"));
     q.addBindValue(toVideoId);
     q.addBindValue(fromVideoId);
+    run(q);
+}
+
+bool Database::isArtistChannel(const QString &artist, const QString &channelId, const QString &channelName)
+{
+    QSqlQuery q(conn());
+    q.prepare(QStringLiteral("SELECT 1 FROM artist_channels WHERE artist = ? AND"
+                             " ((channel_id != '' AND channel_id = ?) OR (channel != '' AND channel = ?))"));
+    q.addBindValue(artist);
+    q.addBindValue(channelId);
+    q.addBindValue(channelName);
+    return run(q) && q.next();
+}
+
+void Database::addArtistChannel(const QString &artist, const QString &channelId, const QString &channelName, const QString &source)
+{
+    if (channelId.isEmpty() && channelName.isEmpty())
+        return;
+    QSqlQuery q(conn());
+    q.prepare(QStringLiteral("INSERT OR IGNORE INTO artist_channels (artist, channel_id, channel, source) VALUES (?, ?, ?, ?)"));
+    q.addBindValue(artist);
+    q.addBindValue(channelId);
+    q.addBindValue(channelName);
+    q.addBindValue(source);
+    run(q);
+}
+
+QVector<QStringList> Database::artistChannels(const QString &artist)
+{
+    QVector<QStringList> out;
+    QSqlQuery q(conn());
+    q.prepare(QStringLiteral("SELECT channel_id, channel, source FROM artist_channels WHERE artist = ? AND (channel_id != '' OR channel != '')"));
+    q.addBindValue(artist);
+    if (run(q)) {
+        while (q.next())
+            out << QStringList{q.value(0).toString(), q.value(1).toString(), q.value(2).toString()};
+    }
+    return out;
+}
+
+bool Database::artistChannelsKnown(const QString &artist)
+{
+    QSqlQuery q(conn());
+    q.prepare(QStringLiteral("SELECT 1 FROM artist_channels WHERE artist = ? AND channel_id = '' AND channel = '' AND checked_until > ?"));
+    q.addBindValue(artist);
+    q.addBindValue(QDateTime::currentSecsSinceEpoch());
+    return run(q) && q.next();
+}
+
+void Database::setArtistChannelsKnown(const QString &artist, int days)
+{
+    QSqlQuery q(conn());
+    q.prepare(QStringLiteral("INSERT OR REPLACE INTO artist_channels (artist, channel_id, channel, source, checked_until) VALUES (?, '', '', 'musicbrainz', ?)"));
+    q.addBindValue(artist);
+    q.addBindValue(QDateTime::currentSecsSinceEpoch() + qint64(days) * 86400);
     run(q);
 }
 

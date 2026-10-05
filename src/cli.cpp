@@ -9,6 +9,7 @@
 //   mvplayer-import check-video <video> [keyframes]
 //       Reports whether the picture is a still image.
 
+#include "core/ArtistChannels.h"
 #include "core/AudioAlign.h"
 #include "core/AudioPrint.h"
 #include "core/ImportManager.h"
@@ -67,7 +68,7 @@ int main(int argc, char **argv)
         {QStringLiteral("delete-untracked"), QStringLiteral("After reading the music folders, delete the videos that none of their tracks has.")},
         {QStringLiteral("check-quality"), QStringLiteral("Look at the videos already imported again and rebuild those the account is offered in better quality.")},
     });
-    parser.addPositionalArgument(QStringLiteral("command"), QStringLiteral("Optional: align <track> <video> | mux <track> <video> <out.mkv> | check-video <video> [keyframes] | same-recording <file> <file> | same-version <track title> <album> <video title> | check-cookies [video id] | convert-subs <file.srv3> <out without extension> | talk-check <file>... | rank-check <track title> <artist> <video title> <channel> [verified]"));
+    parser.addPositionalArgument(QStringLiteral("command"), QStringLiteral("Optional: align <track> <video> | mux <track> <video> <out.mkv> | check-video <video> [keyframes] | same-recording <file> <file> | same-version <track title> <album> <video title> | check-cookies [video id] | convert-subs <file.srv3> <out without extension> | talk-check <file>... | rank-check <track title> <artist> <video title> <channel> [verified] | artist-channels <artist>"));
     parser.process(app);
 
     const QStringList pos = parser.positionalArguments();
@@ -156,9 +157,22 @@ int main(int argc, char **argv)
         c.verified = pos.value(5) == QLatin1String("verified");
         QVector<YtCandidate> list{c};
         Matcher::rank(t, list);
-        out << (list[0].rejectReason.isEmpty() ? (list[0].vouched ? "vouched" : list[0].trusted ? "trusted" : "not trusted") : "dropped")
+        out << (list[0].rejectReason.isEmpty() ? (list[0].ownChannel ? "the artist's channel" : list[0].trusted ? "trusted" : "not trusted") : "dropped")
             << (list[0].rejectReason.isEmpty() ? QString() : QStringLiteral(": ") + list[0].rejectReason)
             << (Matcher::namesArtist(t, c.title, c.channel) ? ", names the artist" : ", does not name the artist") << Qt::endl;
+        return 0;
+    }
+
+    if (pos.value(0) == QLatin1String("artist-channels")) {
+        if (pos.size() != 2)
+            parser.showHelp(2);
+        QString err;
+        const QStringList ids = ArtistChannels::fromMusicBrainz(pos[1], &err);
+        if (!err.isEmpty()) {
+            out << "error: " << err << Qt::endl;
+            return 1;
+        }
+        out << (ids.isEmpty() ? QStringLiteral("MusicBrainz lists no YouTube channel") : QStringLiteral("MusicBrainz: ") + ids.join(QStringLiteral(", "))) << Qt::endl;
         return 0;
     }
 

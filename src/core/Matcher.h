@@ -9,6 +9,7 @@ struct YtCandidate {
     QString id;
     QString title;
     QString channel;
+    QString channelId;     // UC…
     double duration = 0;
     qint64 views = 0;
     bool verified = false;
@@ -16,11 +17,8 @@ struct YtCandidate {
 
     double score = 0;
     bool trusted = false;  // looks like an official upload
-    // The upload is vouched for: the artist's own channel or a verified one.
-    // One that looks official by its title alone ("… (Music Video)") is
-    // examined like the others, but not taken as the track's own video
-    // short of a near-complete match.
-    bool vouched = false;
+    // The channel is the artist's own by its name (Matcher::isOwnChannel).
+    bool ownChannel = false;
     QString rejectReason;  // non-empty: never consider this result
 };
 
@@ -45,6 +43,9 @@ bool namesArtist(const TrackInfo &track, const QString &videoTitle, const QStrin
 // but "official", "channel" and the like. "Artist Latino" and "We love
 // Artist" are somebody else's.
 bool isOwnChannel(const TrackInfo &track, const QString &channel);
+
+// The names a track is credited to: album artist and artists.
+QStringList artistNames(const TrackInfo &track);
 
 QStringList searchQueries(const TrackInfo &track);
 

@@ -1,5 +1,7 @@
 #include "core/ImportManager.h"
 
+#include "core/ArtistChannels.h"
+
 #include "core/TalkCheck.h"
 
 #include "core/Subtitles.h"
@@ -193,32 +195,33 @@ QString interruptedReason(const AudioAlign::Result &r)
 // measured 79-93% and was taken: another unit's video, a voice-synth
 // version, a cover that does not call itself one. An artist's own upload
 // under a name in another script is as good as always above the bar.
-// And where nothing vouches for the upload but its own title ("… (Music
-// Video)" on a channel that is neither the artist's nor verified): a
-// third party's copy of the song's video fits as well as the real one.
+// And only on the artist's own channel. A third party's copy of the song's
+// video fits as well as the real one, and a label's upload may be a cut:
+// those are for the user to judge, in review.
 bool ownRecording(const AudioAlign::Result &r, const TrackInfo &track, const QString &videoTitle, const QString &channel,
-                  bool vouched)
+                  bool artistChannel)
 {
-    if (!audioReplaceable(r) || interrupted(r))
+    if (!audioReplaceable(r) || interrupted(r) || !artistChannel)
         return false;
-    return r.byOffset
-        || (vouched && Matcher::sameVersion(track, videoTitle) && Matcher::namesArtist(track, videoTitle, channel))
+    return r.byOffset || (Matcher::sameVersion(track, videoTitle) && Matcher::namesArtist(track, videoTitle, channel))
         || r.goodSec >= kOwnWaveformOtherVersion * std::min(r.trackSec, r.videoSec);
 }
 
 // What a candidate that is not taken as the track's recording lacks.
 QString unconfirmedReason(const AudioAlign::Result &r, const TrackInfo &track, const QString &videoTitle, const QString &channel,
-                          bool vouched)
+                          bool artistChannel)
 {
     const int share = qRound(100 * r.goodSec / qMax(1.0, std::min(r.trackSec, r.videoSec)));
     if (audioReplaceable(r) && interrupted(r))
         return QStringLiteral("%1% of it is demonstrably the track's waveform, but %2").arg(share).arg(interruptedReason(r));
+    if (audioReplaceable(r) && !artistChannel)
+        return QStringLiteral("%1% of it is demonstrably the track's waveform, but “%2” is not known as the artist's channel")
+            .arg(share).arg(channel);
     if (audioReplaceable(r)) {
         return QStringLiteral("%1% of it is demonstrably the track's waveform, but %2 (%3% needed then)")
             .arg(share)
             .arg(!Matcher::sameVersion(track, videoTitle) ? QStringLiteral("track and video are marked as different versions")
-                 : !Matcher::namesArtist(track, videoTitle, channel) ? QStringLiteral("the upload names none of the track's artists")
-                 : QStringLiteral("nothing vouches for the upload but its title: the channel is neither the artist's nor verified"))
+                                                           : QStringLiteral("the upload names none of the track's artists"))
             .arg(qRound(100 * kOwnWaveformOtherVersion));
     }
     return QStringLiteral("only %1% of it is demonstrably the track's waveform (%2% needed)%3")
@@ -550,6 +553,12 @@ void ImportManager::approveVideo(qint64 videoId)
     std::optional<VideoInfo> v = m_db->video(videoId);
     if (!v || !v->review)
         return;
+    // The user says this is the track's video: its channel is the artist's,
+    // for every artist of the tracks that waited for it.
+    for (const TrackInfo &t : m_db->tracksForVideo(videoId)) {
+        for (const QString &artist : Matcher::artistNames(t))
+            m_db->addArtistChannel(artist.trimmed(), v->ytChannelId, v->ytChannelId.isEmpty() ? v->ytChannel : QString(), QStringLiteral("approved"));
+    }
     // The other options have served their purpose.
     const qint64 group = v->reviewGroup > 0 ? v->reviewGroup : v->id;
     for (const VideoInfo &other : m_db->reviewOptions(group)) {
@@ -1387,8 +1396,9 @@ void ImportManager::runJob(qint64 trackId, const ImportSettings &cfg)
             // What the video sounds like: a video under review carries the
             // track it waits for, YouTube's audio, and the review stream; an
             // accepted one plays its track's audio where that was put in.
-            // Of a video already in, the search result says what vouches for it.
-            const bool vouchedExisting = c.vouched;
+            // Whose channel: by its name, by MusicBrainz, or by the user's verdicts.
+            const bool vouchedExisting = c.ownChannel
+                || ArtistChannels::isArtistChannel(*m_db, Matcher::artistNames(track), c.channelId, c.channel);
             const int heard = existing->review ? 1 : 0;
             std::vector<int16_t> pcm;
             if (QFile::exists(existing->path) && AudioAlign::decodeMono(existing->path, &pcm, &m_cancel, &error, heard)) {
@@ -1590,7 +1600,9 @@ void ImportManager::runJob(qint64 trackId, const ImportSettings &cfg)
         // taken, for review, when no candidate fits outright. (A lossy file
         // may still be the lesser one next to the account's audio.)
         bool forReview = false;
-        if (cfg.replaceAudio && libraryIsBetter(track, youtubeQuality(info)) && !ownRecording(ar, track, c.title, c.channel, c.vouched)) {
+        const bool artistChannel = c.ownChannel
+            || ArtistChannels::isArtistChannel(*m_db, Matcher::artistNames(track), c.channelId, c.channel);
+        if (cfg.replaceAudio && libraryIsBetter(track, youtubeQuality(info)) && !ownRecording(ar, track, c.title, c.channel, artistChannel)) {
             bool premiumWins = false;
             if (!track.lossless && yt.hasCookies()) {
                 QString premiumFile;
@@ -1674,7 +1686,7 @@ void ImportManager::runJob(qint64 trackId, const ImportSettings &cfg)
 
         if (forReview) {
             checked(c, QStringLiteral("unconfirmed"),
-                    QStringLiteral("the song by its fingerprints, but %1").arg(unconfirmedReason(ar, track, c.title, c.channel, c.vouched)),
+                    QStringLiteral("the song by its fingerprints, but %1").arg(unconfirmedReason(ar, track, c.title, c.channel, artistChannel)),
                     &ar, {{QStringLiteral("youtubeKbps"), qRound(YtDlp::audioKbps(info))}});
             reasons << QStringLiteral("“%1” could not be confirmed as this recording").arg(c.title);
             unconfirmed.append({c, dir, audioFile, info, ar});
@@ -1868,6 +1880,7 @@ void ImportManager::runJob(qint64 trackId, const ImportSettings &cfg)
     v.reviewGroup = needsReview ? group : 0;
     v.ytTitle = chosen.title;
     v.ytChannel = chosen.channel;
+    v.ytChannelId = chosen.channelId;
     v.tags = track.tags;
     v.addedAt = QDateTime::currentSecsSinceEpoch();
 

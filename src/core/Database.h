@@ -87,6 +87,15 @@ public:
     void relinkTracks(qint64 fromVideoId, qint64 toVideoId);
     // Makes a track look for (more) videos again; what it has stays with it.
     void setTrackPending(qint64 trackId);
+
+    // An artist's YouTube channels, by id (or by name, for videos from
+    // before ids were kept): from MusicBrainz, or vouched for by the user.
+    bool isArtistChannel(const QString &artist, const QString &channelId, const QString &channelName);
+    void addArtistChannel(const QString &artist, const QString &channelId, const QString &channelName, const QString &source);
+    QVector<QStringList> artistChannels(const QString &artist); // {id, name, source} each
+    // Whether MusicBrainz has been asked about the artist lately.
+    bool artistChannelsKnown(const QString &artist);
+    void setArtistChannelsKnown(const QString &artist, int days);
     // A video the user turned down for a track is not offered for it again.
     void rejectVideoFor(const TrackInfo &track, const QString &ytId);
     bool videoRejectedFor(const TrackInfo &track, const QString &ytId);

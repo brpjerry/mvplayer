@@ -66,6 +66,7 @@ QVariant VideoModel::data(const QModelIndex &index, int role) const
     case AddedAtRole: return v.addedAt;
     case YtIdRole: return v.ytId;
     case YtTitleRole: return v.ytTitle;
+    case YtChannelRole: return v.ytChannel;
     case ReviewRole: return v.review;
     case ReviewStartRole: return v.reviewStart;
     case ReviewEndRole: return v.reviewEnd;
@@ -99,6 +100,7 @@ QHash<int, QByteArray> VideoModel::roleNames() const
         {AddedAtRole, "addedAt"},
         {YtIdRole, "ytId"},
         {YtTitleRole, "ytTitle"},
+        {YtChannelRole, "ytChannel"},
         {ReviewRole, "review"},
         {ReviewStartRole, "reviewStart"},
         {ReviewEndRole, "reviewEnd"},
