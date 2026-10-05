@@ -5,6 +5,7 @@
 # right offsets and the muxer must produce a playable file with both audio
 # tracks.
 set -euo pipefail
+export MVPLAYER_NO_MUSICBRAINZ=1
 
 BUILD=${1:-build}
 # On Windows "mvplayer" alone would name the QML module's build folder.
@@ -300,6 +301,8 @@ db = sqlite3.connect(sys.argv[1])
 assert db.execute("SELECT COUNT(*) FROM videos").fetchone()[0] == 0
 assert [y for _, y in db.execute("SELECT key, yt_id FROM rejected_videos")] == ["liv"]
 assert "turned down" in db.execute("SELECT message FROM tracks").fetchone()[0]
+# The approval before vouched for the upload's channel, for the track's artist.
+assert db.execute("SELECT artist, channel, source FROM artist_channels WHERE channel != ''").fetchall() == [("Dee", "Dee", "approved")]
 print("review ok")
 PY
 # The log says what was decided about the upload, why, and on what numbers;

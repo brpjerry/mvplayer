@@ -805,8 +805,9 @@ void Database::addArtistChannel(const QString &artist, const QString &channelId,
     QSqlQuery q(conn());
     q.prepare(QStringLiteral("INSERT OR IGNORE INTO artist_channels (artist, channel_id, channel, source) VALUES (?, ?, ?, ?)"));
     q.addBindValue(artist);
-    q.addBindValue(channelId);
-    q.addBindValue(channelName);
+    // A null QString would be bound as NULL, which the columns refuse.
+    q.addBindValue(QString(channelId.isNull() ? QStringLiteral("") : channelId));
+    q.addBindValue(QString(channelName.isNull() ? QStringLiteral("") : channelName));
     q.addBindValue(source);
     run(q);
 }
