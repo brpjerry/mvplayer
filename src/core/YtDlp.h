@@ -43,6 +43,9 @@ public:
     void setNote(const QString &id, const QString &name, const QJsonObject &value) const;
     // How many requests the cache has answered for this wrapper.
     int cacheHits() const { return m_cacheHits; }
+    // How many requests were made again with the account after the
+    // anonymous one was refused for wanting a sign-in.
+    int accountRequests() const { return m_accountRequests; }
     // Drops what is older than `maxAgeDays`, then the oldest until the
     // folder is under `maxBytes`. For when nothing is being imported.
     static void pruneCache(const QString &dir, qint64 maxBytes, int maxAgeDays);
@@ -116,4 +119,5 @@ private:
     const std::atomic<bool> *m_cancel;
     QString m_cacheDir;
     int m_cacheHits = 0;
+    int m_accountRequests = 0;
 };

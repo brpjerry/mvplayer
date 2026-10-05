@@ -131,7 +131,10 @@ ProcResult YtDlp::run(const QStringList &args, const ProcOptions &opts)
     if (std::none_of(signs.begin(), signs.end(), [&e](const QString &s) { return e.contains(s); }))
         return r;
     const QStringList account = accountArgs();
-    return account.isEmpty() ? r : runProcess(m_program, baseArgs() + account + args, opts);
+    if (account.isEmpty())
+        return r;
+    ++m_accountRequests;
+    return runProcess(m_program, baseArgs() + account + args, opts);
 }
 
 QString YtDlp::cacheEntry(const QString &id) const

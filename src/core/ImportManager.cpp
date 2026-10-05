@@ -405,6 +405,10 @@ void ImportManager::requeueRetryable()
 
 void ImportManager::noteSuccess()
 {
+    // While paused, a job that was under way when the pause began may still
+    // get a request through. Only what runs after the pause can end it.
+    if (m_blocked)
+        return;
     m_failStreak = 0;
     m_tripCount = 0;
     m_probing = false;
@@ -1307,9 +1311,11 @@ void ImportManager::runJob(qint64 trackId, const ImportSettings &cfg)
     auto withRetry = [&](const std::function<bool()> &attempt) {
         // What the cache answered, or what was downloaded from a remembered
         // description, did not open the video's page: no proof either.
-        const int fromCache = yt.cacheHits();
+        // Nor did a request that only got through signed in show that
+        // anonymous ones are let through again.
+        const int fromCache = yt.cacheHits(), signedIn = yt.accountRequests();
         const auto proven = [&] {
-            if (yt.cacheHits() == fromCache)
+            if (yt.cacheHits() == fromCache && yt.accountRequests() == signedIn)
                 noteSuccess();
         };
         if (attempt()) {
