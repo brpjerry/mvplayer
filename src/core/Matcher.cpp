@@ -318,6 +318,7 @@ void Matcher::rank(const TrackInfo &track, QVector<YtCandidate> &candidates)
         const QString ch = tokens(c.channel);
         c.score = 0;
         c.trusted = false;
+        c.vouched = false;
         c.rejectReason.clear();
 
         // Auto-generated "Artist - Topic" uploads are a still image over the audio.
@@ -414,6 +415,7 @@ void Matcher::rank(const TrackInfo &track, QVector<YtCandidate> &candidates)
         // A channel that merely has the artist's name among other words
         // gets that trust only for titles that do not look like a fan's.
         c.trusted = (artistIsChannel && (!fan || channelIsOnlyArtist)) || ((c.verified || official) && !fan);
+        c.vouched = c.trusted && (channelIsOnlyArtist || c.verified);
     }
 
     std::stable_sort(candidates.begin(), candidates.end(), [](const YtCandidate &a, const YtCandidate &b) {
