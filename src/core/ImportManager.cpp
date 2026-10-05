@@ -155,6 +155,19 @@ bool audioReplaceable(const AudioAlign::Result &r)
 // same recording under another label 99.8% and more.
 constexpr double kOwnWaveformOtherVersion = 0.97;
 
+// A video already in the library plays its first track's audio, and later
+// tracks were measured against that. So the English version of a song, looked
+// up first, kept the Japanese video, and the Japanese track then "shared" it
+// at 80%. A track that is all but identical to the video's own audio, where
+// the track holding the video is clearly less so, takes the video over.
+constexpr double kTakeoverShare = 0.90;  // of the newcomer, against YouTube's audio
+constexpr double kTakeoverMargin = 0.08; // by which the holder has to fall short of it
+
+double waveformShare(const AudioAlign::Result &r)
+{
+    return r.goodSec / qMax(1.0, std::min(r.trackSec, r.videoSec));
+}
+
 // A video that stops the song to carry on with it later is not the song's
 // video as it stands, however much of the waveform is the track's: a
 // reaction video had all of a track, in 19 pieces with talk in between.
@@ -1371,6 +1384,82 @@ void ImportManager::runJob(qint64 trackId, const ImportSettings &cfg)
             if (QFile::exists(existing->path) && AudioAlign::decodeMono(existing->path, &pcm, &m_cancel, &error, heard)) {
                 anyChecked = true;
                 const AudioAlign::Result ar = fitted(AudioAlign::align(trackPcm, pcm), track, existing->ytTitle, existing->ytChannel);
+
+                // Whose video is it? Asked where the video plays another
+                // track's audio and this one is not plainly that recording.
+                if (!existing->review && existing->audioSource == QLatin1String("library") && cfg.replaceAudio
+                    && libraryIsBetter(track, storedYoutubeQuality(*existing)) && waveformShare(ar) < kOwnWaveformOtherVersion) {
+                    std::vector<int16_t> ytPcm;
+                    QString ytError;
+                    // The second stream of such a file is YouTube's audio.
+                    if (AudioAlign::decodeMono(existing->path, &ytPcm, &m_cancel, &ytError, 1)) {
+                        const AudioAlign::Result own = AudioAlign::align(trackPcm, ytPcm);
+                        if (audioMatches(own) && ownRecording(own, track, existing->ytTitle, existing->ytChannel)
+                            && waveformShare(own) >= kTakeoverShare && waveformShare(own) >= waveformShare(ar) + kTakeoverMargin) {
+                            // The tracks that hold it, one measurement per recording.
+                            QVector<TrackInfo> losing;
+                            QHash<qint64, double> shareOf;
+                            double holderShare = 0;
+                            QString holderTitle;
+                            for (const TrackInfo &o : m_db->tracksForVideo(existing->id)) {
+                                const qint64 key = o.recording > 0 ? o.recording : -o.id;
+                                if (!shareOf.contains(key)) {
+                                    std::vector<int16_t> oPcm;
+                                    QString oError;
+                                    // A holder that cannot be read keeps what it has.
+                                    shareOf.insert(key, AudioAlign::decodeMono(o.path, &oPcm, &m_cancel, &oError)
+                                                            ? waveformShare(AudioAlign::align(oPcm, ytPcm)) : 1.0);
+                                }
+                                if (m_cancel)
+                                    return cleanup();
+                                if (shareOf.value(key) + kTakeoverMargin <= waveformShare(own)) {
+                                    if (losing.isEmpty()) {
+                                        holderShare = shareOf.value(key);
+                                        holderTitle = o.title;
+                                    }
+                                    losing << o;
+                                }
+                            }
+                            if (!losing.isEmpty() && putLibraryAudioIn(*existing, track, own, cfg, &error, false, 1)) {
+                                const QString why = QStringLiteral("“%1” [%2] fits the audio of “%3” better (%4% against %5%) and took the video")
+                                                        .arg(track.title, track.album, c.title)
+                                                        .arg(qRound(100 * waveformShare(own))).arg(qRound(100 * holderShare));
+                                QSet<qint64> again;
+                                QVector<qint64> requeue;
+                                for (const TrackInfo &o : std::as_const(losing)) {
+                                    // Not theirs: they look again, and not at this upload.
+                                    m_db->rejectVideoFor(o, c.id);
+                                    m_db->releaseTrack(o.id, why);
+                                    const qint64 key = o.recording > 0 ? o.recording : -o.id;
+                                    if (!again.contains(key)) {
+                                        again.insert(key);
+                                        requeue << o.id;
+                                    }
+                                }
+                                checked(c, QStringLiteral("takeover"),
+                                        QStringLiteral("already in the library through “%1”, but this track is the video's own audio: %2% of it the same waveform, against %3% for “%1”")
+                                            .arg(holderTitle).arg(qRound(100 * waveformShare(own))).arg(qRound(100 * holderShare)),
+                                        &own);
+                                qInfo().noquote() << QStringLiteral("[import] “%1” [%2] takes “%3” over from “%4”: %5% against %6% of the video's own audio")
+                                                         .arg(track.title, track.album, c.title, holderTitle)
+                                                         .arg(qRound(100 * waveformShare(own))).arg(qRound(100 * holderShare));
+                                finish(QStringLiteral("done"), existing->id, QStringLiteral("takes “%1” over from “%2”").arg(c.title, holderTitle));
+                                QMetaObject::invokeMethod(this, [this, requeue] {
+                                    for (qint64 id : requeue)
+                                        enqueue(id);
+                                    emit activityChanged();
+                                    pump();
+                                }, Qt::QueuedConnection);
+                                return;
+                            }
+                            if (m_cancel)
+                                return cleanup();
+                        }
+                    }
+                    if (m_cancel)
+                        return cleanup();
+                }
+
                 if (audioMatches(ar)) {
                     // The video belongs to another track already. This one
                     // joins it when it is demonstrably the same recording (a

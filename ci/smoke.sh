@@ -322,6 +322,39 @@ REPORT=$(python3 "$(dirname "$0")/../tools/import-report.py" "$WORK/mvlib5")
 echo "$REPORT" | tail -1 | cut -c1-200
 [[ "$REPORT" == *"review → you: reject"* && "$REPORT" == *"46%"* ]]
 
+echo "== a video changes hands"
+# "Sixth" is the song "Six" with something else over it for one second in
+# four, and longer (another language's version, as it were). Looked up
+# first, it is given the video: three quarters of it are the video's audio. When "Six" itself turns up, it is the video's
+# own audio through and through: it takes the video over with its audio, and
+# "Sixth" is looked up again without that upload.
+mkdir -p "$WORK/lib8/Gil" "$WORK/lib9/Gil" "$WORK/mvlib9"
+ffmpeg -v error -y -f lavfi -i "$(song 350 47 | sed 's/d=20/d=40/')" -metadata title="Six" -metadata artist=Gil "$WORK/lib9/Gil/six.flac"
+ffmpeg -v error -y -i "$WORK/lib9/Gil/six.flac" -f lavfi -i "$(song 520 31 | sed 's/d=20/d=48/')" -filter_complex \
+    "[1]volume='if(lt(mod(t\,4)\,1)\,6\,0)':eval=frame[g];[0]apad=whole_dur=48[p];[p][g]amix=inputs=2:normalize=0:duration=longest,volume=0.25" \
+    -metadata title="Sixth" -metadata artist=Gil "$WORK/lib8/Gil/sixth.flac"
+touch -d "10 seconds ago" "$WORK/lib8/Gil/sixth.flac" "$WORK/lib9/Gil/six.flac"
+ffmpeg -v error -y -i "$WORK/lib9/Gil/six.flac" -c:a libopus -b:a 96k "$WORK/site-audio.opus"
+echo '{"entries": [{"id": "own", "ie_key": "Youtube", "title": "Gil - Six (Official Video)", "channel": "Gil", "duration": 40, "view_count": 1000, "channel_is_verified": true}]}' > "$WORK/site-search.json"
+OUT=$(MVPLAYER_YTDLP="$SITE" timeout 120 "$BUILD/mvplayer-import" --allow-still-images --music-dir "$WORK/lib8" --mv-dir "$WORK/mvlib9" --jobs 1 2>&1)
+echo "$OUT" | grep -E "^\[import\]|^done:" | cut -c1-150
+[[ "$OUT" == *"done: 1 videos; tracks: done=1"* ]]
+OUT=$(MVPLAYER_YTDLP="$SITE" timeout 120 "$BUILD/mvplayer-import" --allow-still-images --music-dir "$WORK/lib8" --music-dir "$WORK/lib9" --mv-dir "$WORK/mvlib9" --jobs 1 2>&1)
+echo "$OUT" | grep -E "^\[import\]|^done:" | cut -c1-170
+[[ "$OUT" == *"takes “Gil - Six (Official Video)” over from “Sixth”"* && "$OUT" == *"done: 1 videos;"* ]]
+python3 - "$WORK/mvlib9/.mvplayer/library.db" <<'PY'
+import sqlite3, sys
+db = sqlite3.connect(sys.argv[1])
+rows = {t: (s, v, m) for t, s, v, m in db.execute("SELECT title, state, video_id IS NOT NULL, message FROM tracks")}
+assert rows["Six"][:2] == ("done", 1), rows
+assert rows["Sixth"][:2] == ("not_found", 0) and "turned down" in rows["Sixth"][2], rows
+assert db.execute("SELECT COUNT(*) FROM videos").fetchone()[0] == 1
+print("takeover ok")
+PY
+# The video now plays "Six": all of it the same waveform.
+TAKEN=$("$BUILD/mvplayer-import" align "$WORK/lib9/Gil/six.flac" "$WORK/mvlib9/Gil/Six [own].mkv" 2>/dev/null || "$BUILD/mvplayer-import" align "$WORK/lib9/Gil/six.flac" "$WORK/mvlib9/Gil/Sixth [own].mkv")
+[[ "$TAKEN" == *"100% of it plainly the same"* && "$TAKEN" == *"in 1 segment(s)"* ]]
+
 echo "== premium account"
 # A yt-dlp that knows an account by its cookies: it lists audio at 250 kbit/s
 # and hands it out. The check of existing videos must rebuild the one video
