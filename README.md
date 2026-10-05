@@ -133,6 +133,12 @@ For every track without a video (`src/core/ImportManager.cpp`):
    later — a reaction video pausing to talk — however much of it is the
    track: more than 15 seconds of other audio inside the song sends it to
    review. If nothing passes, nothing is imported for that track.
+   A video already in the library plays the audio of the track that got
+   it first. When a later track turns out to be the video's own audio — at
+   least 90% of the waveform, and clearly more than the track that holds it
+   (the English version of a song against the Japanese video, say) — the
+   video changes hands: it gets the later track's audio, and the earlier
+   one is looked up again without that upload.
 3. **Download** the best video stream and the YouTube thumbnail.
 4. **Align** the track to the video's soundtrack (`src/core/AudioAlign.cpp`):
    fingerprints find where the track sits, cross-correlation makes that

@@ -87,6 +87,8 @@ public:
     void relinkTracks(qint64 fromVideoId, qint64 toVideoId);
     // Makes a track look for (more) videos again; what it has stays with it.
     void setTrackPending(qint64 trackId);
+    // Takes a track's video from it: the track is to be looked up again.
+    void releaseTrack(qint64 trackId, const QString &message);
     // A video the user turned down for a track is not offered for it again.
     void rejectVideoFor(const TrackInfo &track, const QString &ytId);
     bool videoRejectedFor(const TrackInfo &track, const QString &ytId);
