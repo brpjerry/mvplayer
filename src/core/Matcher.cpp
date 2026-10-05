@@ -69,6 +69,10 @@ const QStringList &versionTerms()
         QStringLiteral("歌ってみた"), QStringLiteral("弾いてみた"), QStringLiteral("叩いてみた"),
         QStringLiteral("踊ってみた"), QStringLiteral("カラオケ"), QStringLiteral("ライブ"),
         QStringLiteral("カバー"), QStringLiteral("ピアノ"), QStringLiteral("リアクション"), QStringLiteral("反応"), QStringLiteral("歌いました"),
+        // a game being played to the song
+        QStringLiteral("beat saber"), QStringLiteral("project diva"), QStringLiteral("full combo"),
+        QStringLiteral("perfect combo"), QStringLiteral("expertplus"), QStringLiteral("osu"), QStringLiteral("gameplay"),
+        QStringLiteral("ハニプレ"), QStringLiteral("プレイ動画"), QStringLiteral("譜面"), QStringLiteral("フルコンボ"),
         QStringLiteral("耐久"), QStringLiteral("メイキング"), QStringLiteral("予告"),
         QStringLiteral("ティザー"), QStringLiteral("クロスフェード"), QStringLiteral("試聴"),
     };
@@ -149,9 +153,10 @@ bool Matcher::isTalkTitle(const QString &title)
     static const QString terms = QStringLiteral(
         "mc|talk|トーク|banter|stage banter|speech|interview|インタビュー|commentary|audio commentary|"
         "コメンタリー|voice drama|ボイスドラマ|メンバー紹介|band introductions?|encore call|applause|挨拶|ごあいさつ");
-    // The term alone, numbered ("mc06", "mc 2", "talk #3"), and with where it was ("mc5 at ...").
+    // The term alone, numbered ("mc06", "mc 2", "talk #3"), with where it
+    // was ("mc5 at ...") and with a tag after it ("mc7(live)").
     static const QRegularExpression whole(
-        QStringLiteral("^(?:%1)\\s*[-#.:]?\\s*\\d{0,3}(?:\\s*(?:at|in|@|~|-)\\s*\\S.*)?$").arg(terms));
+        QStringLiteral("^(?:%1)\\s*[-#.:]?\\s*\\d{0,3}(?:\\s*(?:at|in|@|~|-)\\s*\\S.*)?(?:\\s*[(\\[【][^)\\]】]*[)\\]】])?$").arg(terms));
     // ... or as a tag after a title: "(mc)", "[interview]", "-talk-".
     static const QRegularExpression tag(
         QStringLiteral("\\S\\s*[(\\[【~-]\\s*(?:%1)\\s*\\d{0,3}\\s*[)\\]】~-]$").arg(terms));
@@ -191,6 +196,9 @@ bool Matcher::sameVersion(const TrackInfo &track, const QString &videoTitle)
         auto it = re.globalMatch(tok);
         while (it.hasNext())
             out.insert(it.next().captured(1));
+        // "Music Video Full ver." is the whole of it, not another one;
+        // lengths are compared elsewhere.
+        out.remove(QStringLiteral("full"));
         return out;
     };
     const QSet<QString> inVideo = named(video), inTitle = named(title);

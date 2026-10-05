@@ -6,6 +6,8 @@
 
 #include <QCoreApplication>
 #include <QDir>
+#include <QElapsedTimer>
+#include <QDirIterator>
 #include <QSaveFile>
 #include <QFileInfo>
 #include <QDateTime>
@@ -16,6 +18,7 @@
 #include <QTemporaryFile>
 
 #include <algorithm>
+#include <memory>
 
 namespace {
 
@@ -31,6 +34,38 @@ QString findFile(const QString &dir, const QString &base, const QStringList &ski
             return fi.absoluteFilePath();
     }
     return {};
+}
+
+// YouTube now and then serves a download at a trickle: a video then takes
+// half an hour and holds up everything behind it. Watches what arrives in
+// `dir` and says when to give up: less than 3 MB in each of two minutes
+// running. Asked again, with a fresh look at the page, it usually comes fast.
+std::function<bool()> stallWatch(const QString &dir)
+{
+    struct State {
+        QElapsedTimer clock;
+        qint64 lastBytes = 0;
+        qint64 lastAt = 0;
+        int slow = 0;
+    };
+    auto st = std::make_shared<State>();
+    st->clock.start();
+    return [st, dir] {
+        const qint64 now = st->clock.elapsed();
+        // (The interval can be shortened for tests.)
+        static const qint64 interval = qEnvironmentVariableIsSet("MVPLAYER_STALL_SECS")
+            ? qMax(1, qEnvironmentVariableIntValue("MVPLAYER_STALL_SECS")) * 1000 : 60000;
+        if (now - st->lastAt < interval)
+            return false;
+        qint64 bytes = 0;
+        QDirIterator it(dir, QDir::Files, QDirIterator::Subdirectories);
+        while (it.hasNext())
+            bytes += it.nextFileInfo().size();
+        st->slow = bytes - st->lastBytes < 3 * 1024 * 1024 ? st->slow + 1 : 0;
+        st->lastBytes = bytes;
+        st->lastAt = now;
+        return st->slow >= 2;
+    };
 }
 
 } // namespace
@@ -119,6 +154,8 @@ ProcResult YtDlp::runFor(const QString &id, const QStringList &args, const ProcO
     const QString info = freshInfo(id);
     if (!info.isEmpty()) {
         const ProcResult r = runProcess(m_program, baseArgs() + args + QStringList{QStringLiteral("--load-info-json"), info}, opts);
+        if (r.stalled)
+            qInfo().noquote() << "[yt-dlp]" << id << "came at a trickle; asking the page again";
         if (r.ok() || (m_cancel && m_cancel->load())) {
             ++m_cacheHits;
             return r;
@@ -192,6 +229,8 @@ QStringList YtDlp::baseArgs() const
     QStringList a = {
         QStringLiteral("--ignore-config"), QStringLiteral("--no-playlist"), QStringLiteral("--no-warnings"),
         QStringLiteral("--socket-timeout"), QStringLiteral("30"), QStringLiteral("--retries"), QStringLiteral("5"),
+        // Below this yt-dlp asks YouTube for the stream again.
+        QStringLiteral("--throttled-rate"), QStringLiteral("100K"),
     };
 #ifdef Q_OS_WIN
     // yt-dlp looks for its helpers beside itself and on PATH; here ffmpeg is
@@ -322,6 +361,7 @@ bool YtDlp::downloadAudio(const QString &id, const QString &workDir, QString *fi
     ProcOptions opts;
     opts.cancel = m_cancel;
     opts.timeoutMs = 15 * 60 * 1000;
+    opts.abortIf = stallWatch(dir);
     ProcResult r;
     if (premium) {
         const QStringList account = accountArgs();
@@ -483,6 +523,7 @@ bool YtDlp::downloadPreview(const QString &id, const QString &dir, QString *file
     ProcOptions opts;
     opts.cancel = m_cancel;
     opts.timeoutMs = 15 * 60 * 1000;
+    opts.abortIf = stallWatch(dir);
     const ProcResult r = runFor(id, args, opts);
     if (!r.ok()) {
         if (error)
@@ -505,6 +546,7 @@ bool YtDlp::downloadVideo(const QString &id, const QString &dir, const std::func
     ProcOptions opts;
     opts.cancel = m_cancel;
     opts.timeoutMs = 4 * 60 * 60 * 1000;
+    opts.abortIf = stallWatch(dir);
     opts.onLine = [&](const QByteArray &line) {
         if (!progress || !line.startsWith("MVP "))
             return;

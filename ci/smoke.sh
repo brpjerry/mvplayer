@@ -495,6 +495,30 @@ echo "$OUT" | grep -E "^deleted|^\[library\]"
 [[ "$OUT" == *"deleted 1 untracked videos"* && "$(tracks_low)" == "[]" ]]
 [[ ! -e "$WORK/mvlib4/C/Low [xyz].mkv" && ! -e "$WORK/mvlib4/C/Low [xyz].en.srt" && ! -d "$WORK/mvlib4/C" ]]
 
+echo "== a download that trickles"
+# YouTube sometimes serves a download at a crawl. It is given up after two
+# intervals without progress instead of holding a job for half an hour.
+mkdir -p "$WORK/lib7/F" "$WORK/mvlib7"
+ffmpeg -v error -y -f lavfi -i "$(song 330 43)" -metadata title="Slow" -metadata artist=Fay "$WORK/lib7/F/slow.flac"
+touch -d "10 seconds ago" "$WORK/lib7/F/slow.flac"
+cat > "$WORK/fake-slow" <<FAKE
+#!/bin/sh
+case " \$* " in
+*" -J "*) echo '{"entries": [{"id": "slw", "ie_key": "Youtube", "title": "Fay - Slow (Official Video)", "channel": "Fay", "duration": 20, "channel_is_verified": true}]}' ;;
+*) sleep 60 ;;
+esac
+FAKE
+chmod +x "$WORK/fake-slow"
+SLOW="$WORK/fake-slow"
+if [[ -n "$EXE" ]]; then
+    printf '@"%s" "%%~dp0fake-slow" %%*\r\n' "$(cygpath -w "$(command -v sh)")" > "$WORK/fake-slow.cmd"
+    SLOW="$WORK/fake-slow.cmd"
+fi
+START=$SECONDS
+OUT=$(MVPLAYER_STALL_SECS=1 MVPLAYER_YTDLP="$SLOW" timeout 100 "$BUILD/mvplayer-import" --music-dir "$WORK/lib7" --mv-dir "$WORK/mvlib7" --jobs 1 2>&1)
+echo "$OUT" | grep -E "^\[import\]|^done:" | cut -c1-160
+[[ "$OUT" == *"too slow"* && $((SECONDS - START)) -lt 40 ]]
+
 echo "== binaries start"
 "$BUILD/mvplayer-import" --help >/dev/null
 QT_QPA_PLATFORM=offscreen "$BUILD/mvplayer$EXE" --help >/dev/null

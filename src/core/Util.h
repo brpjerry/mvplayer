@@ -11,11 +11,12 @@ struct ProcResult {
     bool started = false;
     bool cancelled = false;
     bool timedOut = false;
+    bool stalled = false; // ended by ProcOptions::abortIf
     int exitCode = -1;
     QByteArray out;
     QByteArray err;
 
-    bool ok() const { return started && !cancelled && !timedOut && exitCode == 0; }
+    bool ok() const { return started && !cancelled && !timedOut && !stalled && exitCode == 0; }
     QString errorText() const;
 };
 
@@ -25,6 +26,8 @@ struct ProcOptions {
     std::function<void(const QByteArray &)> onLine;
     int timeoutMs = -1;
     QString workingDir;
+    // Asked several times a second: true ends the process as stalled.
+    std::function<bool()> abortIf;
 };
 
 // Folder comparisons follow the file system: Windows ignores case.

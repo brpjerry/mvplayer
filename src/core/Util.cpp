@@ -115,6 +115,8 @@ QString ProcResult::errorText() const
         return QStringLiteral("cancelled");
     if (timedOut)
         return QStringLiteral("timed out");
+    if (stalled)
+        return QStringLiteral("the download was too slow and was given up");
     QString e = QString::fromUtf8(err).trimmed();
     // Keep the last line, which is where yt-dlp/ffmpeg put the actual error.
     const int nl = e.lastIndexOf(QLatin1Char('\n'));
@@ -193,8 +195,12 @@ ProcResult runProcess(const QString &program, const QStringList &args, const Pro
             res.timedOut = true;
             break;
         }
+        if (opts.abortIf && opts.abortIf()) {
+            res.stalled = true;
+            break;
+        }
     }
-    if (res.cancelled || res.timedOut) {
+    if (res.cancelled || res.timedOut || res.stalled) {
 #ifdef Q_OS_UNIX
         const pid_t group = pid_t(p.processId());
         if (group > 0)
