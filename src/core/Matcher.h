@@ -36,6 +36,11 @@ bool isTalkTitle(const QString &title);
 // is, an upload that names none of them is not taken for the track's.
 bool namesArtist(const TrackInfo &track, const QString &videoTitle, const QString &channel);
 
+// Whether a channel is the artist's own: the artist's name and nothing else
+// but "official", "channel" and the like. "Artist Latino" and "We love
+// Artist" are somebody else's.
+bool isOwnChannel(const TrackInfo &track, const QString &channel);
+
 QStringList searchQueries(const TrackInfo &track);
 
 // False when one of the two is marked as a version the other is not: a live

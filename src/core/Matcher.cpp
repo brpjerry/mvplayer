@@ -68,8 +68,7 @@ const QStringList &versionTerms()
         QStringLiteral("fancam"), QStringLiteral("concert"), QStringLiteral("shorts"),
         QStringLiteral("歌ってみた"), QStringLiteral("弾いてみた"), QStringLiteral("叩いてみた"),
         QStringLiteral("踊ってみた"), QStringLiteral("カラオケ"), QStringLiteral("ライブ"),
-        QStringLiteral("カバー"), QStringLiteral("ピアノ"), QStringLiteral("リアクション"), QStringLiteral("反応"), QStringLiteral("歌いました"), QStringLiteral("演奏してみた"), QStringLiteral("ギター"),
-        QStringLiteral("ベース"), QStringLiteral("ドラム"),
+        QStringLiteral("カバー"), QStringLiteral("ピアノ"), QStringLiteral("リアクション"), QStringLiteral("反応"), QStringLiteral("歌いました"), QStringLiteral("演奏してみた"), QStringLiteral("歌わせて"),
         // a game being played to the song
         QStringLiteral("beat saber"), QStringLiteral("project diva"), QStringLiteral("full combo"),
         QStringLiteral("perfect combo"), QStringLiteral("expertplus"), QStringLiteral("osu"), QStringLiteral("gameplay"),
@@ -94,7 +93,7 @@ const QStringList &fanTerms()
         QStringLiteral("가사"), QStringLiteral("자막"), QStringLiteral("해석"), QStringLiteral("발음"),
         QStringLiteral("번역"), QStringLiteral("한글"), QStringLiteral("ซับไทย"),
         // a picture put to someone's song: "PV made for it", "drew it"
-        QStringLiteral("つけてみた"), QStringLiteral("付けてみた"), QStringLiteral("描いてみた"),
+        QStringLiteral("つけてみた"), QStringLiteral("付けてみた"), QStringLiteral("描いてみた"), QStringLiteral("pv 風"), QStringLiteral("手描き"),
         // fan-made and compiled videos
         QStringLiteral("創作"), QStringLiteral("自制"), QStringLiteral("自製"), QStringLiteral("compiled"),
         QStringLiteral("fanmade"), QStringLiteral("fan made"), QStringLiteral("fan mv"),
@@ -215,13 +214,68 @@ bool Matcher::sameVersion(const TrackInfo &track, const QString &videoTitle)
     // Likewise "… ／mona（CV：夏川椎菜）", "（Vo：…）": the voice is named.
     static const QRegularExpression feat(QStringLiteral(" (?:feat|ft|featuring|cv|vo|vocal) (\\S+)"));
     const QString whose = title + album + tokens(track.artist) + tokens(track.albumArtist);
+    // The synthesised voices go by two names, and a tag has one of them.
+    static const QVector<QStringList> voices = {
+        {QStringLiteral("初音ミク"), QStringLiteral("hatsune miku"), QStringLiteral("miku")},
+        {QStringLiteral("鏡音リン"), QStringLiteral("kagamine rin")},
+        {QStringLiteral("鏡音レン"), QStringLiteral("kagamine len")},
+        {QStringLiteral("巡音ルカ"), QStringLiteral("megurine luka"), QStringLiteral("luka")},
+        {QStringLiteral("gumi"), QStringLiteral("グミ"), QStringLiteral("megpoid")},
+        {QStringLiteral("可不"), QStringLiteral("kafu")},
+        {QStringLiteral("重音テト"), QStringLiteral("kasane teto"), QStringLiteral("teto")},
+        {QStringLiteral("裏命"), QStringLiteral("rime")},
+        {QStringLiteral("星界"), QStringLiteral("sekai")},
+        {QStringLiteral("狐子"), QStringLiteral("coko")},
+        {QStringLiteral("羽累"), QStringLiteral("haru")},
+        {QStringLiteral("結月ゆかり"), QStringLiteral("yuzuki yukari"), QStringLiteral("yukari")},
+        {QStringLiteral("歌愛ユキ"), QStringLiteral("kaai yuki")},
+        {QStringLiteral("ずんだもん"), QStringLiteral("zundamon")},
+        {QStringLiteral("flower"), QStringLiteral("v flower"), QStringLiteral("フラワ")},
+    };
+    const auto knownAs = [&whose](const QString &singer) {
+        for (const QStringList &names : voices) {
+            const bool is = std::any_of(names.begin(), names.end(), [&singer](const QString &n) {
+                return n == singer || n.startsWith(singer + QLatin1Char(' '));
+            });
+            if (is && std::any_of(names.begin(), names.end(), [&whose](const QString &n) { return whose.contains(n); }))
+                return true;
+        }
+        return false;
+    };
     auto it = feat.globalMatch(video);
     while (it.hasNext()) {
         const QString singer = it.next().captured(1);
-        if (singer.size() >= 2 && !whose.contains(singer))
+        if (singer.size() >= 2 && !whose.contains(singer) && !knownAs(singer))
             return false;
     }
     return true;
+}
+
+bool Matcher::isOwnChannel(const TrackInfo &track, const QString &channel)
+{
+    QString rest = tokens(channel);
+    bool named = false;
+    static const QRegularExpression parts(QStringLiteral("[()（）\\[\\]【】/／&＆、,;]+"));
+    for (const QString &n : artistNames(track)) {
+        QStringList forms = n.split(parts, Qt::SkipEmptyParts);
+        forms.prepend(n);
+        for (const QString &form : std::as_const(forms)) {
+            const QString nt = tokens(form).trimmed();
+            if (nt.size() >= 2 && rest.contains(nt)) {
+                named = true;
+                rest.replace(nt, QStringLiteral(" "));
+            }
+        }
+    }
+    if (!named)
+        return false;
+    // Nothing beside the name but what any artist's channel is called.
+    static const QRegularExpression generic(QStringLiteral(
+        " (?:official|channel|music|youtube|vevo|tv|records|公式|チャンネル|オフィシャル|[a-z]|\\d+)(?= )"));
+    rest = rest.simplified().prepend(QLatin1Char(' ')).append(QLatin1Char(' '));
+    while (rest.contains(generic))
+        rest.replace(generic, QString());
+    return rest.trimmed().isEmpty();
 }
 
 bool Matcher::namesArtist(const TrackInfo &track, const QString &videoTitle, const QString &channel)

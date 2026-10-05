@@ -99,6 +99,9 @@ rank() { "$BUILD/mvplayer-import" rank-check "$@" | tr -d '\r'; }
 [[ $(rank "Prism" "Clara" "Prism / Somebody MV" "Somebody Official") == "trusted, does not name the artist" ]]
 # A tag that holds the name in two scripts: either will do.
 [[ $(rank "Again" "Kizu Ai (キズアイ)" "キズアイ - Again (Official)" "Somebody Records") == "trusted, names the artist" ]]
+# A synthesised voice under its other name is the same singer.
+[[ $("$BUILD/mvplayer-import" same-version "Comet" "Comet" "Comet (ft.初音ミク) OFFICIAL MUSIC VIDEO" | tr -d '\r') == different ]]
+[[ $("$BUILD/mvplayer-import" same-version "Comet feat. Hatsune Miku" "Comet" "Comet (ft.初音ミク) OFFICIAL MUSIC VIDEO" | tr -d '\r') == same ]]
 # A producer's upload names the producer whoever sings: the singer counts.
 [[ $(rank "Whip" "Works feat.Rio" "【MV】Whip／mona（CV：Shiina）【Works】" "Works OFFICIAL" verified) == "trusted, does not name the artist" ]]
 [[ $(rank "Whip" "Works feat.Rio" "【MV】Whip／Works feat. Rio" "Works OFFICIAL" verified) == "trusted, names the artist" ]]
