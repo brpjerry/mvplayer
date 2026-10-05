@@ -23,7 +23,7 @@ Rectangle {
     signal fullscreenToggled()
     signal nowPlayingClicked()
 
-    implicitHeight: 88
+    implicitHeight: 96
     color: overlay ? Qt.rgba(Theme.surface.r, Theme.surface.g, Theme.surface.b, 0.92) : Theme.surface
 
     readonly property bool hasMedia: current !== null
@@ -100,6 +100,8 @@ Rectangle {
         id: center
         anchors.horizontalCenter: parent.horizontalCenter
         anchors.verticalCenter: parent.verticalCenter
+        // As far below the top of the bar as the seek bar is below the buttons.
+        anchors.verticalCenterOffset: 4
         width: Math.max(320, Math.min(720, root.width - 2 * 300))
         height: 68
 
@@ -256,6 +258,16 @@ Rectangle {
                     : audioSwitch.library ? "Your library's audio · click for YouTube's" : "YouTube's audio · click for your library's"
                 shown: chipMouse.containsMouse
             }
+        }
+
+        IconButton {
+            anchors.verticalCenter: parent.verticalCenter
+            visible: root.hasMedia && root.mpv.hasSubtitles
+            icon: Icons.subtitles
+            iconSize: 20
+            checked: App.subtitlesOn
+            tooltip: App.subtitlesOn ? "Subtitles on" : "Subtitles off"
+            onClicked: App.subtitlesOn = !App.subtitlesOn
         }
 
         Item { width: 4; height: 1 }

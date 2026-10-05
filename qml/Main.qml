@@ -193,6 +193,9 @@ ApplicationWindow {
 
     Binding { target: window.mpv; property: "volume"; value: App.volume }
     Binding { target: window.mpv; property: "muted"; value: App.muted }
+    // Subtitles belong to the full view: over a thumbnail they are specks.
+    Binding { target: window.mpv; property: "subtitlesVisible"; value: App.subtitlesOn && (window.view === "player" || window.fullscreen) }
+    Binding { target: window.mpv; property: "subtitleLangs"; value: App.subtitleLangs.replace(/ /g, "") }
     Binding { target: IdleInhibitor; property: "active"; value: window.playingNow }
 
     // ---- Accent colour -----------------------------------------------------
@@ -432,6 +435,11 @@ ApplicationWindow {
         case "cookies": return (arg === "" ? (App.removeCookies(), "") : App.importCookies(arg)) || "ok"
         case "check-quality": App.checkQuality(); return "ok"
         case "check-cookies": App.checkCookies(); return "ok"
+        case "fetch-subtitles": App.fetchSubtitles(); return "ok"
+        case "subtitles": // subtitles on|off, or the languages to fetch: subtitles en,ja
+            if (arg === "on" || arg === "off") App.subtitlesOn = arg === "on"
+            else App.subtitleLangs = arg
+            return "ok"
         case "step": { // step <video id> <delta>
             const sp = arg.split(" ")
             return "" + window.stepReview(parseInt(sp[0]), parseInt(sp[1] || "1"))
@@ -473,7 +481,8 @@ ApplicationWindow {
                 hwdec: mpv.hwdec, videoSize: mpv.videoSize.width + "x" + mpv.videoSize.height,
                 audioTrack: mpv.audioTrack, audioTracks: mpv.audioTracks.length,
                 busy: App.busy, status: App.statusText, counts: App.trackCounts,
-                cookies: App.hasCookies, checkingCookies: App.checkingCookies, cookiesState: App.cookiesState,
+                subtitleLangs: App.subtitleLangs, subtitlesOn: App.subtitlesOn, hasSubtitles: window.mpv.hasSubtitles,
+                fetchingSubtitles: App.fetchingSubtitles, cookies: App.hasCookies, checkingCookies: App.checkingCookies, cookiesState: App.cookiesState,
                 cookiesStatus: App.cookiesStatus, checkingQuality: App.checkingQuality, reviewCount: App.reviewCount,
                 facet: App.videos.facetType, reviewLabel: controlBar.reviewLabel,
                 accent: "" + Theme.accent, accentMode: App.accent, theme: App.themeMode, dark: Theme.dark,

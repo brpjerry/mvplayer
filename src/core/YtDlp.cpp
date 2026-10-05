@@ -1,5 +1,7 @@
 #include "core/YtDlp.h"
 
+#include "core/Subtitles.h"
+
 #include "core/Util.h"
 
 #include <QCoreApplication>
@@ -206,6 +208,45 @@ bool YtDlp::downloadAudio(const QString &id, const QString &dir, QString *file, 
         if (error)
             *error = QStringLiteral("yt-dlp produced no audio file");
         return false;
+    }
+    return true;
+}
+
+bool YtDlp::downloadSubtitles(const QString &id, const QString &dir, const QStringList &languages,
+                              QHash<QString, QString> *files, QString *error)
+{
+    files->clear();
+    if (languages.isEmpty())
+        return true;
+    // Each language with its variants: "en", "en-GB", "en-<label>".
+    QStringList wanted;
+    for (const QString &l : languages)
+        wanted << l << l + QStringLiteral("-.*");
+    QStringList args;
+    args << QStringLiteral("--skip-download") << QStringLiteral("--write-subs") << QStringLiteral("--sub-langs")
+         << wanted.join(QLatin1Char(',')) << QStringLiteral("--sub-format") << QStringLiteral("srv3")
+         << QStringLiteral("--no-progress") << QStringLiteral("-o") << QDir(dir).filePath(QStringLiteral("subs.%(ext)s"))
+         << url(id);
+    ProcOptions opts;
+    opts.cancel = m_cancel;
+    opts.timeoutMs = 5 * 60 * 1000;
+    const ProcResult r = run(args, opts);
+    if (!r.ok()) {
+        if (error)
+            *error = r.errorText();
+        return false;
+    }
+    // subs.<language>.srv3
+    QHash<QString, QString> got;
+    const QFileInfoList entries = QDir(dir).entryInfoList({QStringLiteral("subs.*.srv3")}, QDir::Files);
+    for (const QFileInfo &fi : entries) {
+        const QString name = fi.fileName();
+        got.insert(name.mid(5, name.size() - 5 - 5), fi.absoluteFilePath());
+    }
+    for (const QString &l : languages) {
+        const QString key = Subtitles::pickLanguage(got.keys(), l);
+        if (!key.isEmpty())
+            files->insert(l, got.value(key));
     }
     return true;
 }

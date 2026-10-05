@@ -3,6 +3,7 @@
 #include "core/Matcher.h"
 #include "core/Util.h"
 
+#include <QHash>
 #include <QJsonObject>
 
 #include <atomic>
@@ -38,6 +39,12 @@ public:
 
     // What YouTube offers the account for a video, without downloading.
     bool premiumInfo(const QString &id, QJsonObject *info, QString *error);
+
+    // The video's own subtitles (not the machine-made ones) in YouTube's
+    // format, for the languages wanted: language wanted -> file in `dir`.
+    // None is not an error.
+    bool downloadSubtitles(const QString &id, const QString &dir, const QStringList &languages,
+                           QHash<QString, QString> *files, QString *error);
 
     // Whether the account's cookies still work, asked of one video.
     enum class Account { Premium, Ordinary, Expired, Unknown };

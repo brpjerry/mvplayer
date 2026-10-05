@@ -246,7 +246,30 @@ MpvItem::MpvItem(QQuickItem *parent)
     setOption(mpv, "audio-display", "no");
     setOption(mpv, "audio-client-name", "MV Player");
     setOption(mpv, "video-timing-offset", "0");
+    // YouTube's encodes band badly in dark gradients. A little stronger than
+    // mpv's defaults, with less grain added.
+    setOption(mpv, "deband", "yes");
+    setOption(mpv, "deband-iterations", "2");
+    setOption(mpv, "deband-threshold", "48");
+    setOption(mpv, "deband-range", "20");
+    setOption(mpv, "deband-grain", "16");
     setOption(mpv, "volume-max", "100");
+    // Subtitles lie beside the video as "<name>.<language>.srt". Plain ones
+    // get this look; those that carry their own styling (.ass) keep it.
+    setOption(mpv, "sub-auto", "exact");
+    setOption(mpv, "subs-fallback", "yes");
+    setOption(mpv, "subs-with-matching-audio", "yes");
+    setOption(mpv, "sub-font", "sans-serif");
+    setOption(mpv, "sub-font-size", "42");
+    setOption(mpv, "sub-color", "#FFFFFFFF");
+    setOption(mpv, "sub-outline-color", "#E6000000");
+    setOption(mpv, "sub-outline-size", "2.2");
+    setOption(mpv, "sub-shadow-offset", "0");
+    setOption(mpv, "sub-blur", "0.3");
+    setOption(mpv, "sub-margin-y", "40");
+    setOption(mpv, "sub-visibility", m_subtitlesVisible ? "yes" : "no");
+    if (!m_subtitleLangs.isEmpty())
+        setOption(mpv, "slang", m_subtitleLangs.toUtf8().constData());
     if (g_silent)
         setOption(mpv, "ao", "null");
     // Compiled video shaders are reused across runs, so opening a video does
@@ -391,6 +414,29 @@ void MpvItem::setVolume(double v)
         return;
     double pct = qBound(0.0, v, 1.0) * 100.0;
     mpv_set_property_async(m_core->mpv, 0, "volume", MPV_FORMAT_DOUBLE, &pct);
+}
+
+void MpvItem::setSubtitlesVisible(bool v)
+{
+    if (v == m_subtitlesVisible)
+        return;
+    m_subtitlesVisible = v;
+    if (m_core && m_core->mpv) {
+        int flag = v ? 1 : 0;
+        mpv_set_property_async(m_core->mpv, 0, "sub-visibility", MPV_FORMAT_FLAG, &flag);
+    }
+    emit subtitlesVisibleChanged();
+}
+
+void MpvItem::setSubtitleLangs(const QString &langs)
+{
+    if (langs == m_subtitleLangs)
+        return;
+    m_subtitleLangs = langs;
+    // Takes effect with the next file.
+    if (m_core && m_core->mpv)
+        mpv_set_property_string(m_core->mpv, "slang", langs.toUtf8().constData());
+    emit subtitleLangsChanged();
 }
 
 void MpvItem::setMuted(bool m)
@@ -557,6 +603,7 @@ void MpvItem::handleProperty(const mpv_event_property *prop)
 void MpvItem::refreshTracks()
 {
     QVariantList tracks;
+    bool subs = false;
     mpv_node node;
     if (mpv_get_property(m_core->mpv, "track-list", MPV_FORMAT_NODE, &node) >= 0) {
         if (node.format == MPV_FORMAT_NODE_ARRAY) {
@@ -582,6 +629,8 @@ void MpvItem::refreshTracks()
                 }
                 if (type == QLatin1String("audio"))
                     tracks.append(m);
+                else if (type == QLatin1String("sub"))
+                    subs = true;
             }
         }
         mpv_free_node_contents(&node);
@@ -589,5 +638,9 @@ void MpvItem::refreshTracks()
     if (tracks != m_audioTracks) {
         m_audioTracks = tracks;
         emit audioTracksChanged();
+    }
+    if (subs != m_hasSubtitles) {
+        m_hasSubtitles = subs;
+        emit hasSubtitlesChanged();
     }
 }
