@@ -61,7 +61,7 @@ int main(int argc, char **argv)
         {QStringLiteral("reject"), QStringLiteral("Turn down a video that waits for review, by its YouTube id: it is deleted and its tracks have no video (repeatable)."), QStringLiteral("id")},
         {QStringLiteral("check-quality"), QStringLiteral("Look at the videos already imported again and rebuild those the account is offered in better quality.")},
     });
-    parser.addPositionalArgument(QStringLiteral("command"), QStringLiteral("Optional: align <track> <video> | mux <track> <video> <out.mkv> | check-video <video> [keyframes] | same-recording <file> <file>"));
+    parser.addPositionalArgument(QStringLiteral("command"), QStringLiteral("Optional: align <track> <video> | mux <track> <video> <out.mkv> | check-video <video> [keyframes] | same-recording <file> <file> | same-version <track title> <album> <video title>"));
     parser.process(app);
 
     const QStringList pos = parser.positionalArguments();
@@ -90,6 +90,16 @@ int main(int argc, char **argv)
         out << (AudioPrint::sameRecording(a, b) ? "same" : "different") << ": "
             << QString::number(AudioPrint::distance(a, b) * 100, 'f', 1) << "% of fingerprint bits differ, "
             << a.size() << " and " << b.size() << " items" << Qt::endl;
+        return 0;
+    }
+
+    if (pos.value(0) == QLatin1String("same-version")) {
+        if (pos.size() != 4)
+            parser.showHelp(2);
+        TrackInfo t;
+        t.title = pos[1];
+        t.album = pos[2];
+        out << (Matcher::sameVersion(t, pos[3]) ? "same" : "different") << Qt::endl;
         return 0;
     }
 

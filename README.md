@@ -96,8 +96,9 @@ For every track without a video (`src/core/ImportManager.cpp`):
    comparison is made in the mid band, by the size of the correlation, at an
    offset that is followed as it drifts. Where the two merely match poorly
    and the video adds nothing of its own, the track still goes in.
-   The track's audio takes the video's place when about two thirds of it is
-   demonstrably the same waveform. The same performance in another mix
+   The track's audio takes the video's place when 72% of it is demonstrably
+   the same waveform — nearly all of it where track and video name different
+   versions, since a version made over the original keeps most of it. The same performance in another mix
    (reverb added, the voice at another level) shows less than that, as does
    a cover over the same backing; there the fingerprints have to cover the
    song, the loudness of the two has to move together at the offset found,

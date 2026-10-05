@@ -267,7 +267,7 @@ look = [e for e in events if e.get("event") == "lookup"][0]
 c = look["checked"][0]
 assert look["decision"] == "review" and c["decision"] == "review" and c["reason"], look
 m = c["measured"]
-assert m["fingerprintCoverage"] > 0.8 and 0.2 < m["sameWaveform"] < 0.65 and "loudnessCorrelation" in m, m
+assert m["fingerprintCoverage"] > 0.8 and 0.2 < m["sameWaveform"] < 0.72 and "loudnessCorrelation" in m, m
 assert [e["verdict"] for e in events if e.get("event") == "verdict"] == ["accept", "reject"]
 assert any(e.get("event") == "track" and e["what"] == "new" for e in events)
 PY

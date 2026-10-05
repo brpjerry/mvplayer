@@ -88,17 +88,48 @@ QJsonObject measurements(const AudioAlign::Result &r)
 }
 
 // Is this the track's own recording, so that its audio can take the video's
-// place? About two thirds of the track (or of a shorter video) have to be
-// demonstrably the same waveform. Measured on a real library: another master
-// of the recording (quieter, re-equalised, drifting, inverted) shows 67% and
-// more; a remix over the same vocal 59%, live takes and covers over the same
-// backing 25–51%.
+// place? Most of the track (or of a shorter video) has to be demonstrably
+// the same waveform. Measured on a real library: another master of the
+// recording (quieter, re-equalised, drifting, inverted) shows 77% and more;
+// another singer over the same backing 67%, a remix over the same vocal 59%,
+// live takes and covers 25–51%.
+constexpr double kOwnWaveform = 0.72;
+
 bool audioReplaceable(const AudioAlign::Result &r)
 {
     if (r.byOffset)
         return true;
     const double whole = std::min(r.trackSec, r.videoSec);
-    return !r.segments.isEmpty() && r.goodSec >= 0.65 * whole && r.goodSec >= 0.6 * r.fpMatchedSec;
+    return !r.segments.isEmpty() && r.goodSec >= kOwnWaveform * whole && r.goodSec >= 0.6 * r.fpMatchedSec;
+}
+
+// Where track and video name different versions ("prompt αU ver." against
+// none), the waveform has to overrule the names: a version made over the
+// original keeps its backing and some of its lines, and showed 90%; the
+// same recording under another label 99.8% and more.
+constexpr double kOwnWaveformOtherVersion = 0.97;
+
+bool ownRecording(const AudioAlign::Result &r, const TrackInfo &track, const QString &videoTitle)
+{
+    if (!audioReplaceable(r))
+        return false;
+    return r.byOffset || Matcher::sameVersion(track, videoTitle)
+        || r.goodSec >= kOwnWaveformOtherVersion * std::min(r.trackSec, r.videoSec);
+}
+
+// What a candidate that is not taken as the track's recording lacks.
+QString unconfirmedReason(const AudioAlign::Result &r, const TrackInfo &track, const QString &videoTitle)
+{
+    const int share = qRound(100 * r.goodSec / qMax(1.0, std::min(r.trackSec, r.videoSec)));
+    if (audioReplaceable(r)) {
+        return QStringLiteral("%1% of it is demonstrably the track's waveform, but track and video are marked as different versions (%2% needed then)")
+            .arg(share)
+            .arg(qRound(100 * kOwnWaveformOtherVersion));
+    }
+    return QStringLiteral("only %1% of it is demonstrably the track's waveform (%2% needed)%3")
+        .arg(share)
+        .arg(qRound(100 * kOwnWaveform))
+        .arg(Matcher::sameVersion(track, videoTitle) ? QString() : QStringLiteral("; track and video are marked as different versions"));
 }
 
 // The whole track at the one offset at which the loudness of the two rises
@@ -1090,7 +1121,8 @@ void ImportManager::runJob(qint64 trackId, const ImportSettings &cfg)
                     // A track of lesser quality than YouTube's audio has no
                     // audio of its own at stake and shares on the song alone.
                     const bool own = cfg.replaceAudio && libraryIsBetter(track, storedYoutubeQuality(*existing));
-                    if (existing->review && own && audioReplaceable(ar)) {
+                    const bool recording = ownRecording(ar, track, existing->ytTitle);
+                    if (existing->review && own && recording) {
                         // It waits for a verdict on behalf of a track that is
                         // only the song (a live take, looked up first). This
                         // track is demonstrably its recording: the video is
@@ -1128,7 +1160,7 @@ void ImportManager::runJob(qint64 trackId, const ImportSettings &cfg)
                                QStringLiteral("shares the video of “%1”").arg(existing->title));
                         return;
                     }
-                    if (audioReplaceable(ar)
+                    if (recording
                         && (existing->audioSource == QLatin1String("library") || putLibraryAudioIn(*existing, track, ar, cfg, &error))) {
                         checked(c, QStringLiteral("shared"),
                                 QStringLiteral("already in the library through “%1”, and the same recording: %2% of it is demonstrably the same waveform")
@@ -1142,9 +1174,8 @@ void ImportManager::runJob(qint64 trackId, const ImportSettings &cfg)
                     if (m_cancel)
                         return cleanup();
                     checked(c, QStringLiteral("different-recording"),
-                            QStringLiteral("already in the library as the video of “%1”; this track is the song but not that recording: %2% of it is demonstrably the same waveform (65% needed)")
-                                .arg(existing->title)
-                                .arg(qRound(100 * ar.goodSec / qMax(1.0, std::min(ar.trackSec, ar.videoSec)))),
+                            QStringLiteral("already in the library as the video of “%1”; this track is the song but not that recording: %2")
+                                .arg(existing->title, unconfirmedReason(ar, track, existing->ytTitle)),
                             &ar);
                     reasons << QStringLiteral("“%1” is the video of another recording of the song").arg(c.title);
                     continue;
@@ -1203,7 +1234,7 @@ void ImportManager::runJob(qint64 trackId, const ImportSettings &cfg)
         // taken, for review, when no candidate fits outright. (A lossy file
         // may still be the lesser one next to the account's audio.)
         bool forReview = false;
-        if (cfg.replaceAudio && libraryIsBetter(track, youtubeQuality(info)) && !audioReplaceable(ar)) {
+        if (cfg.replaceAudio && libraryIsBetter(track, youtubeQuality(info)) && !ownRecording(ar, track, c.title)) {
             bool premiumWins = false;
             if (!track.lossless && yt.hasCookies()) {
                 QString premiumFile;
@@ -1263,9 +1294,7 @@ void ImportManager::runJob(qint64 trackId, const ImportSettings &cfg)
 
         if (forReview) {
             checked(c, QStringLiteral("unconfirmed"),
-                    QStringLiteral("the song by its fingerprints, but only %1% of it is demonstrably the track's waveform (65% needed)%2")
-                        .arg(qRound(100 * ar.goodSec / qMax(1.0, std::min(ar.trackSec, ar.videoSec))))
-                        .arg(Matcher::sameVersion(track, c.title) ? QString() : QStringLiteral("; track and video are marked as different versions")),
+                    QStringLiteral("the song by its fingerprints, but %1").arg(unconfirmedReason(ar, track, c.title)),
                     &ar, {{QStringLiteral("youtubeKbps"), qRound(YtDlp::audioKbps(info))}});
             reasons << QStringLiteral("“%1” could not be confirmed as this recording").arg(c.title);
             unconfirmed.append({c, dir, audioFile, info, ar});
