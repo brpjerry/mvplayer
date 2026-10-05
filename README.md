@@ -136,9 +136,10 @@ For every track without a video (`src/core/ImportManager.cpp`):
    A video already in the library plays the audio of the track that got
    it first. When a later track turns out to be the video's own audio — at
    least 90% of the waveform, and clearly more than the track that holds it
-   (the English version of a song against the Japanese video, say) — the
-   video changes hands: it gets the later track's audio, and the earlier
-   one is looked up again without that upload.
+   (the Japanese track against a video first given to the song's English
+   version, say) — the video plays the later track from then on. The
+   earlier track keeps the video as well: whether it is another master of
+   the same performance or another version of the song cannot be measured.
 3. **Download** the best video stream and the YouTube thumbnail.
 4. **Align** the track to the video's soundtrack (`src/core/AudioAlign.cpp`):
    fingerprints find where the track sits, cross-correlation makes that

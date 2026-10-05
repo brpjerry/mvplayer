@@ -772,15 +772,6 @@ void Database::setTrackPending(qint64 trackId)
     run(q);
 }
 
-void Database::releaseTrack(qint64 trackId, const QString &message)
-{
-    QSqlQuery q(conn());
-    q.prepare(QStringLiteral("UPDATE tracks SET state = 'pending', video_id = NULL, message = ? WHERE id = ?"));
-    q.addBindValue(message);
-    q.addBindValue(trackId);
-    run(q);
-}
-
 namespace {
 QString rejectionKey(const TrackInfo &t)
 {

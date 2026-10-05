@@ -325,9 +325,9 @@ echo "$REPORT" | tail -1 | cut -c1-200
 echo "== a video changes hands"
 # "Sixth" is the song "Six" with something else over it for one second in
 # four, and longer (another language's version, as it were). Looked up
-# first, it is given the video: three quarters of it are the video's audio. When "Six" itself turns up, it is the video's
-# own audio through and through: it takes the video over with its audio, and
-# "Sixth" is looked up again without that upload.
+# first, it is given the video: three quarters of it are the video's audio.
+# When "Six" itself turns up, it is the video's own audio through and
+# through: the video plays "Six" from then on, and "Sixth" keeps it too.
 mkdir -p "$WORK/lib8/Gil" "$WORK/lib9/Gil" "$WORK/mvlib9"
 ffmpeg -v error -y -f lavfi -i "$(song 350 47 | sed 's/d=20/d=40/')" -metadata title="Six" -metadata artist=Gil "$WORK/lib9/Gil/six.flac"
 ffmpeg -v error -y -i "$WORK/lib9/Gil/six.flac" -f lavfi -i "$(song 520 31 | sed 's/d=20/d=48/')" -filter_complex \
@@ -341,14 +341,15 @@ echo "$OUT" | grep -E "^\[import\]|^done:" | cut -c1-150
 [[ "$OUT" == *"done: 1 videos; tracks: done=1"* ]]
 OUT=$(MVPLAYER_YTDLP="$SITE" timeout 120 "$BUILD/mvplayer-import" --allow-still-images --music-dir "$WORK/lib8" --music-dir "$WORK/lib9" --mv-dir "$WORK/mvlib9" --jobs 1 2>&1)
 echo "$OUT" | grep -E "^\[import\]|^done:" | cut -c1-170
-[[ "$OUT" == *"takes “Gil - Six (Official Video)” over from “Sixth”"* && "$OUT" == *"done: 1 videos;"* ]]
+[[ "$OUT" == *"is the audio of “Gil - Six (Official Video)” now, not “Sixth”"* && "$OUT" == *"done: 1 videos; tracks: done=2"* ]]
 python3 - "$WORK/mvlib9/.mvplayer/library.db" <<'PY'
 import sqlite3, sys
 db = sqlite3.connect(sys.argv[1])
 rows = {t: (s, v, m) for t, s, v, m in db.execute("SELECT title, state, video_id IS NOT NULL, message FROM tracks")}
-assert rows["Six"][:2] == ("done", 1), rows
-assert rows["Sixth"][:2] == ("not_found", 0) and "turned down" in rows["Sixth"][2], rows
+assert rows["Six"][:2] == ("done", 1) and "now plays this track" in rows["Six"][2], rows
+assert rows["Sixth"][:2] == ("done", 1), rows
 assert db.execute("SELECT COUNT(*) FROM videos").fetchone()[0] == 1
+assert db.execute("SELECT COUNT(*) FROM rejected_videos").fetchone()[0] == 0
 print("takeover ok")
 PY
 # The video now plays "Six": all of it the same waveform.
