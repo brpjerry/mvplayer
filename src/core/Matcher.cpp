@@ -140,6 +140,22 @@ bool Matcher::isNonMvTrack(const TrackInfo &track, QString *why)
     return false;
 }
 
+bool Matcher::isTalkTitle(const QString &title)
+{
+    // Folded: full-width letters and circled numbers become plain ones.
+    const QString t = title.normalized(QString::NormalizationForm_KC).toCaseFolded().simplified();
+    static const QString terms = QStringLiteral(
+        "mc|talk|トーク|banter|stage banter|speech|interview|インタビュー|commentary|audio commentary|"
+        "コメンタリー|voice drama|ボイスドラマ|メンバー紹介|band introductions?|encore call|applause|挨拶|ごあいさつ");
+    // The term alone, numbered ("mc06", "mc 2", "talk #3"), and with where it was ("mc5 at ...").
+    static const QRegularExpression whole(
+        QStringLiteral("^(?:%1)\\s*[-#.:]?\\s*\\d{0,3}(?:\\s*(?:at|in|@|~|-)\\s*\\S.*)?$").arg(terms));
+    // ... or as a tag after a title: "(mc)", "[interview]", "-talk-".
+    static const QRegularExpression tag(
+        QStringLiteral("\\S\\s*[(\\[【~-]\\s*(?:%1)\\s*\\d{0,3}\\s*[)\\]】~-]$").arg(terms));
+    return whole.match(t).hasMatch() || tag.match(t).hasMatch();
+}
+
 QStringList Matcher::searchQueries(const TrackInfo &track)
 {
     // Tried in order until one yields a usable result. The variants matter:

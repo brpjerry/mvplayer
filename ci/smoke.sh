@@ -411,6 +411,44 @@ echo "$OUT" | grep -E "^\[subtitles\]"
 [[ "$OUT" == *"1 with subtitles, 0 failed"* ]]
 grep -q "First & second" "$WORK/mvlib4/C/Low [xyz].en.srt"
 
+echo "== talk tracks"
+# Talk between songs is skipped without asking YouTube, when its title says
+# so and it sounds like it: bursts with gaps and no pulse. A song that is
+# merely titled like talk is looked up, and so is talk under a song's title.
+mkdir -p "$WORK/lib6/E" "$WORK/mvlib6"
+TALK="volume='if(lt(mod(t*1.7+2*sin(t*0.9)+1.3*sin(t*2.3)\,1.3)\,0.55)\,1\,0.02)':eval=frame"
+ffmpeg -v error -y -f lavfi -i "anoisesrc=d=30:c=pink:r=48000:a=0.5:seed=1" -af "$TALK" -metadata title="MC1" -metadata artist=Eve "$WORK/lib6/E/mc1.flac"
+ffmpeg -v error -y -f lavfi -i "anoisesrc=d=31:c=pink:r=48000:a=0.5:seed=2" -af "$TALK" -metadata title="Talk to Me" -metadata artist=Eve "$WORK/lib6/E/song-title.flac"
+ffmpeg -v error -y -f lavfi -i "$(song 300 37)" -metadata title="MC 2" -metadata artist=Eve "$WORK/lib6/E/mc2.flac"
+touch -d "10 seconds ago" "$WORK"/lib6/E/*.flac
+CHECK=$("$BUILD/mvplayer-import" talk-check "$WORK/lib6/E/mc1.flac" "$WORK/lib6/E/song-title.flac" "$WORK/lib6/E/mc2.flac" | tr -d '\r')
+echo "$CHECK" | cut -c1-44
+[[ $(echo "$CHECK" | sed -n 1p) == talk*"title talk"* ]]
+[[ $(echo "$CHECK" | sed -n 2p) == talk*"title -"* ]]
+[[ $(echo "$CHECK" | sed -n 3p) == music*"title talk"* ]]
+cat > "$WORK/fake-empty" <<FAKE
+#!/bin/sh
+echo "\$*" >> "$WORK/empty-args"
+echo '{"entries": []}'
+FAKE
+chmod +x "$WORK/fake-empty"
+EMPTY="$WORK/fake-empty"
+if [[ -n "$EXE" ]]; then
+    printf '@"%s" "%%~dp0fake-empty" %%*\r\n' "$(cygpath -w "$(command -v sh)")" > "$WORK/fake-empty.cmd"
+    EMPTY="$WORK/fake-empty.cmd"
+fi
+MVPLAYER_YTDLP="$EMPTY" timeout 120 "$BUILD/mvplayer-import" --music-dir "$WORK/lib6" --mv-dir "$WORK/mvlib6" --jobs 1 2>&1 | grep -E "^\[import\]|^done:"
+python3 - "$WORK/mvlib6/.mvplayer/library.db" "$WORK/empty-args" <<'PY'
+import sqlite3, sys
+db = sqlite3.connect(sys.argv[1])
+state = dict(db.execute("SELECT title, state FROM tracks"))
+assert state == {"MC1": "skipped", "Talk to Me": "not_found", "MC 2": "not_found"}, state
+assert "talk, not a song" in db.execute("SELECT message FROM tracks WHERE title = 'MC1'").fetchone()[0]
+asked = open(sys.argv[2], encoding="utf-8").read()
+assert "MC1" not in asked and "Talk to Me" in asked and "MC 2" in asked, asked
+print("talk tracks ok")
+PY
+
 echo "== binaries start"
 "$BUILD/mvplayer-import" --help >/dev/null
 QT_QPA_PLATFORM=offscreen "$BUILD/mvplayer$EXE" --help >/dev/null

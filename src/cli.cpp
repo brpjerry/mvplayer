@@ -15,6 +15,7 @@
 #include "core/Muxer.h"
 #include "core/Subtitles.h"
 #include "core/TagReader.h"
+#include "core/TalkCheck.h"
 #include "core/Util.h"
 #include "core/YtDlp.h"
 
@@ -65,7 +66,7 @@ int main(int argc, char **argv)
         {QStringLiteral("fetch-subtitles"), QStringLiteral("Fetch the subtitles that the videos already imported lack (needs --subtitles).")},
         {QStringLiteral("check-quality"), QStringLiteral("Look at the videos already imported again and rebuild those the account is offered in better quality.")},
     });
-    parser.addPositionalArgument(QStringLiteral("command"), QStringLiteral("Optional: align <track> <video> | mux <track> <video> <out.mkv> | check-video <video> [keyframes] | same-recording <file> <file> | same-version <track title> <album> <video title> | check-cookies [video id] | convert-subs <file.srv3> <out without extension>"));
+    parser.addPositionalArgument(QStringLiteral("command"), QStringLiteral("Optional: align <track> <video> | mux <track> <video> <out.mkv> | check-video <video> [keyframes] | same-recording <file> <file> | same-version <track title> <album> <video title> | check-cookies [video id] | convert-subs <file.srv3> <out without extension> | talk-check <file>..."));
     parser.process(app);
 
     const QStringList pos = parser.positionalArguments();
@@ -117,6 +118,27 @@ int main(int argc, char **argv)
             return 1;
         }
         out << "wrote " << written << Qt::endl;
+        return 0;
+    }
+
+    if (pos.value(0) == QLatin1String("talk-check")) {
+        if (pos.size() < 2)
+            parser.showHelp(2);
+        for (const QString &file : pos.mid(1)) {
+            std::vector<int16_t> pcm;
+            QString err;
+            if (!AudioAlign::decodeMono(file, &pcm, nullptr, &err)) {
+                out << "error: " << err << Qt::endl;
+                return 1;
+            }
+            TrackInfo t;
+            t.path = file;
+            TagReader::read(t);
+            const TalkCheck::Result r = TalkCheck::measure(pcm);
+            out << (r.talk ? "talk " : r.valid ? "music" : "short") << " pauses " << QString::number(r.pauses, 'f', 2)
+                << " beat " << QString::number(r.beat, 'f', 2) << " title " << (Matcher::isTalkTitle(t.title) ? "talk" : "-")
+                << "\t" << file << Qt::endl;
+        }
         return 0;
     }
 

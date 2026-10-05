@@ -1,5 +1,7 @@
 #include "core/ImportManager.h"
 
+#include "core/TalkCheck.h"
+
 #include "core/Subtitles.h"
 
 #include "core/AudioAlign.h"
@@ -1100,6 +1102,24 @@ void ImportManager::runJob(qint64 trackId, const ImportSettings &cfg)
     if (Matcher::isNonMvTrack(track, &why)) {
         finish(QStringLiteral("skipped"), 0, why);
         return;
+    }
+    // Talk between songs (a stage announcement, an interview) has no video
+    // to find. A title can mislead and so can the sound, so it takes both.
+    if (Matcher::isTalkTitle(track.title)) {
+        std::vector<int16_t> pcm;
+        QString decodeError;
+        if (AudioAlign::decodeMono(track.path, &pcm, &m_cancel, &decodeError)) {
+            const TalkCheck::Result talk = TalkCheck::measure(pcm);
+            if (talk.talk) {
+                finish(QStringLiteral("skipped"), 0,
+                       QStringLiteral("talk, not a song: titled as such and sounds like it (%1% pauses, beat %2)")
+                           .arg(qRound(talk.pauses * 100))
+                           .arg(talk.beat, 0, 'f', 2));
+                return;
+            }
+        }
+        if (m_cancel)
+            return cleanup();
     }
 
     // ---- 1. Search ---------------------------------------------------------
