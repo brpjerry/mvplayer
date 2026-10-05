@@ -40,6 +40,10 @@ struct TrackInfo {
     int attempts = 0;
     qint64 lastAttempt = 0;
     QString message;
+    // Its file is in none of the music folders any more. The track is kept
+    // with what is known about it, and takes that up again if the file
+    // comes back; until then it is in no count and is not looked up.
+    bool absent = false;
 };
 
 inline double trackQuality(const TrackInfo &t)

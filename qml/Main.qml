@@ -120,7 +120,8 @@ ApplicationWindow {
             load(row)
             // A video under review plays in its thumbnail, next to the
             // others and with its verdict buttons; a click on it enlarges it.
-            if (list[row].review) {
+            // So does every video when that is how the user wants it.
+            if (list[row].review || !App.autoExpand) {
                 window.view = "grid"
                 playerView.openCollapsed(decodeWidth)
                 return
@@ -196,6 +197,8 @@ ApplicationWindow {
     // Subtitles belong to the full view: over a thumbnail they are specks.
     Binding { target: window.mpv; property: "subtitlesVisible"; value: App.subtitlesOn && (window.view === "player" || window.fullscreen) }
     Binding { target: window.mpv; property: "subtitleLangs"; value: App.subtitleLangs.replace(/ /g, "") }
+    Binding { target: window.mpv; property: "subtitleOutline"; value: App.subtitleOutline }
+    Binding { target: window.mpv; property: "subtitleShadow"; value: App.subtitleShadow }
     Binding { target: IdleInhibitor; property: "active"; value: window.playingNow }
 
     // ---- Accent colour -----------------------------------------------------
@@ -436,6 +439,13 @@ ApplicationWindow {
         case "check-quality": App.checkQuality(); return "ok"
         case "check-cookies": App.checkCookies(); return "ok"
         case "fetch-subtitles": App.fetchSubtitles(); return "ok"
+        case "delete-untracked": return "" + App.deleteUntracked()
+        case "auto-expand": App.autoExpand = arg !== "off"; return "ok"
+        case "subtitle-style": { // subtitle-style <outline> <shadow>
+            const st = arg.split(" ")
+            App.subtitleOutline = parseFloat(st[0]); App.subtitleShadow = parseFloat(st[1] || "0")
+            return "ok"
+        }
         case "subtitles": // subtitles on|off, or the languages to fetch: subtitles en,ja
             if (arg === "on" || arg === "off") App.subtitlesOn = arg === "on"
             else App.subtitleLangs = arg
@@ -481,6 +491,7 @@ ApplicationWindow {
                 hwdec: mpv.hwdec, videoSize: mpv.videoSize.width + "x" + mpv.videoSize.height,
                 audioTrack: mpv.audioTrack, audioTracks: mpv.audioTracks.length,
                 busy: App.busy, status: App.statusText, counts: App.trackCounts,
+                untracked: App.untrackedCount, autoExpand: App.autoExpand, subtitleOutline: App.subtitleOutline, subtitleShadow: App.subtitleShadow,
                 subtitleLangs: App.subtitleLangs, subtitlesOn: App.subtitlesOn, hasSubtitles: window.mpv.hasSubtitles,
                 fetchingSubtitles: App.fetchingSubtitles, cookies: App.hasCookies, checkingCookies: App.checkingCookies, cookiesState: App.cookiesState,
                 cookiesStatus: App.cookiesStatus, checkingQuality: App.checkingQuality, reviewCount: App.reviewCount,

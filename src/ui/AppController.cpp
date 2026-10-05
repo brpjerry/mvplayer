@@ -4,6 +4,8 @@
 #include "core/YtDlp.h"
 
 #include <QCollator>
+
+#include <cmath>
 #include <QDir>
 #include <QLocale>
 #include <QRegularExpression>
@@ -118,6 +120,9 @@ AppController::AppController(const AppOptions &options, QObject *parent)
     m_cfg.subtitleLangs = m_settings->value(QStringLiteral("import/subtitleLangs"), QStringList{language}).toStringList();
     m_cfg.subtitleLangs.removeAll(QString());
     m_subtitlesOn = m_settings->value(QStringLiteral("player/subtitles"), true).toBool();
+    m_subtitleOutline = qBound(0.0, m_settings->value(QStringLiteral("player/subtitleOutline"), 2.2).toDouble(), 6.0);
+    m_subtitleShadow = qBound(0.0, m_settings->value(QStringLiteral("player/subtitleShadow"), 0.0).toDouble(), 6.0);
+    m_autoExpand = m_settings->value(QStringLiteral("player/autoExpand"), true).toBool();
     m_cfg.ytdlpArgs = m_settings->value(QStringLiteral("import/ytdlpArgs")).toStringList();
     if (YtDlp::looksLikeCookies(cookiesPath()))
         m_cfg.cookiesFile = cookiesPath();
@@ -260,6 +265,7 @@ void AppController::refreshCounts()
         counts.insert(QStringLiteral("total"), total);
     }
     m_trackCounts = counts;
+    m_untrackedCount = m_manager ? m_manager->untrackedCount() : 0;
     emit activityChanged();
 }
 
@@ -338,6 +344,9 @@ void AppController::saveSettings()
     m_settings->setValue(QStringLiteral("player/muted"), m_muted);
     m_settings->setValue(QStringLiteral("import/subtitleLangs"), m_cfg.subtitleLangs);
     m_settings->setValue(QStringLiteral("player/subtitles"), m_subtitlesOn);
+    m_settings->setValue(QStringLiteral("player/subtitleOutline"), m_subtitleOutline);
+    m_settings->setValue(QStringLiteral("player/subtitleShadow"), m_subtitleShadow);
+    m_settings->setValue(QStringLiteral("player/autoExpand"), m_autoExpand);
 }
 
 void AppController::addMusicDir(const QString &dir)
@@ -554,6 +563,42 @@ void AppController::setSubtitlesOn(bool on)
     m_subtitlesOn = on;
     saveSettings();
     emit settingsChanged();
+}
+
+void AppController::setSubtitleOutline(double v)
+{
+    v = qBound(0.0, std::round(v * 10) / 10, 6.0);
+    if (v == m_subtitleOutline)
+        return;
+    m_subtitleOutline = v;
+    saveSettings();
+    emit settingsChanged();
+}
+
+void AppController::setSubtitleShadow(double v)
+{
+    v = qBound(0.0, std::round(v * 10) / 10, 6.0);
+    if (v == m_subtitleShadow)
+        return;
+    m_subtitleShadow = v;
+    saveSettings();
+    emit settingsChanged();
+}
+
+void AppController::setAutoExpand(bool v)
+{
+    if (v == m_autoExpand)
+        return;
+    m_autoExpand = v;
+    saveSettings();
+    emit settingsChanged();
+}
+
+int AppController::deleteUntracked()
+{
+    const int n = m_manager ? m_manager->deleteUntracked() : 0;
+    refreshCounts();
+    return n;
 }
 
 bool AppController::fetchingSubtitles() const

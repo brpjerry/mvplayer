@@ -134,6 +134,12 @@ Result scan(const QStringList &rootsIn, Database &db, const std::atomic<bool> *c
         t.lastAttempt = old.lastAttempt;
         t.state = old.state;
         t.message = old.message;
+        t.absent = false;
+        // Its video was deleted while it was away: to be looked up again.
+        if (old.absent && t.state == QLatin1String("done") && t.videoId <= 0) {
+            t.state = QStringLiteral("pending");
+            t.message.clear();
+        }
         const bool retagged = t.title != old.title || t.artist != old.artist
             || t.albumArtist != old.albumArtist || t.album != old.album;
         if (t.state != QLatin1String("done") && retagged) {
@@ -172,6 +178,15 @@ Result scan(const QStringList &rootsIn, Database &db, const std::atomic<bool> *c
 
             const auto old = known.constFind(path);
             if (old != known.constEnd() && old->mtime == mtime && old->size == size) {
+                if (old->absent) {
+                    // Its folder is part of the library again: the track is
+                    // back with its video and all that was found out.
+                    TrackInfo t = *old;
+                    refresh(t, *old);
+                    ++res.returned;
+                    note(t, QStringLiteral("returned"), QStringLiteral("back in the music folders: keeps its video and state"));
+                    continue;
+                }
                 current.insert(old->id, *old);
                 continue;
             }
@@ -416,10 +431,12 @@ Result scan(const QStringList &rootsIn, Database &db, const std::atomic<bool> *c
     }
 
     // Tracks that left the library, or whose folder is no longer part of
-    // it. Their videos stay in the MV library.
+    // it, are kept as absent: if the files come back, by the same path or
+    // recognised at another, they take up their videos and results where
+    // they left them. Their videos stay in the MV library meanwhile.
     for (const TrackInfo &g : std::as_const(gone)) {
-        if (!moved.contains(g.id)) {
-            db.removeTrack(g.id);
+        if (!moved.contains(g.id) && !g.absent) {
+            db.setTrackAbsent(g.id, true);
             ++res.removed;
         }
     }

@@ -132,7 +132,7 @@ echo 100 > "$WORK/calls"
 OUT=$(MVPLAYER_YTDLP="$FAKE" MVPLAYER_PAUSE_SECS=1 timeout 60 "$BUILD/mvplayer-import" \
     --music-dir "$WORK/lib2" --mv-dir "$WORK/mvlib2" 2>&1)
 echo "$OUT" | grep -E "^\[scan\]|^done:"
-[[ "$OUT" == *"2 tracks: 0 new, 2 changed, 0 removed"* && "$OUT" == *"done: 1 videos;"* ]]
+[[ "$OUT" == *"2 tracks: 0 new, 2 changed, 0 back, 0 gone"* && "$OUT" == *"done: 1 videos;"* ]]
 [[ $(cat "$WORK/calls") -eq 100 ]]
 python3 - "$WORK/mvlib2/.mvplayer/library.db" <<'PY'
 import sqlite3, sys
@@ -173,7 +173,7 @@ touch -d "10 seconds ago" "$WORK"/lib3/B/*
 OUT=$(MVPLAYER_YTDLP="$FAKE" MVPLAYER_PAUSE_SECS=1 timeout 60 "$BUILD/mvplayer-import" \
     --music-dir "$WORK/lib3" --mv-dir "$WORK/mvlib2" 2>&1)
 echo "$OUT" | grep -E "^\[scan\]|^done:"
-[[ "$OUT" == *"3 tracks: 1 new, 2 changed, 0 removed"* && "$OUT" == *"done: 1 videos;"* ]]
+[[ "$OUT" == *"3 tracks: 1 new, 2 changed, 0 back, 0 gone"* && "$OUT" == *"done: 1 videos;"* ]]
 # One lookup: "Song two" has no video, and the album cut's title was never tried.
 [[ $(cat "$WORK/calls") -eq 104 ]]
 [[ "$OUT" == *"Song two (album cut): No music video found"* ]]
@@ -448,6 +448,25 @@ asked = open(sys.argv[2], encoding="utf-8").read()
 assert "MC1" not in asked and "Talk to Me" in asked and "MC 2" in asked, asked
 print("talk tracks ok")
 PY
+
+echo "== music folders removed and added"
+# A track whose folder leaves the library is kept as absent, its video stays
+# and counts as untracked. When the folder is back, the track has its video
+# again without a lookup. Deleting untracked videos takes file and subtitles.
+tracks_low() { python3 -c "import sqlite3, sys; print(sqlite3.connect(sys.argv[1]).execute(\"SELECT absent, state, video_id IS NOT NULL FROM tracks WHERE title = 'Low'\").fetchall())" "$WORK/mvlib4/.mvplayer/library.db"; }
+[[ "$(tracks_low)" == "[(0, 'done', 1)]" && -f "$WORK/mvlib4/C/Low [xyz].en.srt" ]]
+: > "$WORK/empty-args"
+OUT=$(MVPLAYER_YTDLP="$EMPTY" timeout 120 "$BUILD/mvplayer-import" --music-dir "$WORK/lib6" --mv-dir "$WORK/mvlib4" --jobs 1 2>&1)
+echo "$OUT" | grep -E "^\[scan\]"
+[[ "$OUT" == *"1 gone"* && "$(tracks_low)" == "[(1, 'done', 1)]" && -f "$WORK/mvlib4/C/Low [xyz].mkv" ]]
+OUT=$(MVPLAYER_YTDLP="$EMPTY" timeout 120 "$BUILD/mvplayer-import" --music-dir "$WORK/lib6" --music-dir "$WORK/lib4" --mv-dir "$WORK/mvlib4" --jobs 1 2>&1)
+echo "$OUT" | grep -E "^\[scan\]"
+[[ "$OUT" == *"1 back"* && "$(tracks_low)" == "[(0, 'done', 1)]" ]]
+! grep -q "Low" "$WORK/empty-args"
+OUT=$(MVPLAYER_YTDLP="$EMPTY" timeout 120 "$BUILD/mvplayer-import" --music-dir "$WORK/lib6" --mv-dir "$WORK/mvlib4" --jobs 1 --delete-untracked 2>&1)
+echo "$OUT" | grep -E "^deleted|^\[library\]"
+[[ "$OUT" == *"deleted 1 untracked videos"* && "$(tracks_low)" == "[]" ]]
+[[ ! -e "$WORK/mvlib4/C/Low [xyz].mkv" && ! -e "$WORK/mvlib4/C/Low [xyz].en.srt" && ! -d "$WORK/mvlib4/C" ]]
 
 echo "== binaries start"
 "$BUILD/mvplayer-import" --help >/dev/null

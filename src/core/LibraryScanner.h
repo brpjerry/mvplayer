@@ -14,7 +14,8 @@ struct Result {
     int total = 0;
     int added = 0;
     int changed = 0;
-    int removed = 0;
+    int removed = 0;               // left the music folders (kept, as absent)
+    int returned = 0;              // absent tracks whose file is back
     bool unsettled = false;        // some files were still being written; scan again soon
     bool ok = false;
     // For the import log: one entry per file that is new to the library,

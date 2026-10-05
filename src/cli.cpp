@@ -64,6 +64,7 @@ int main(int argc, char **argv)
         {QStringLiteral("reject"), QStringLiteral("Turn down a video that waits for review, by its YouTube id: it is deleted and its tracks have no video (repeatable)."), QStringLiteral("id")},
         {QStringLiteral("subtitles"), QStringLiteral("Languages of the subtitles to fetch with each video, e.g. \"en,ja\"."), QStringLiteral("languages")},
         {QStringLiteral("fetch-subtitles"), QStringLiteral("Fetch the subtitles that the videos already imported lack (needs --subtitles).")},
+        {QStringLiteral("delete-untracked"), QStringLiteral("After reading the music folders, delete the videos that none of their tracks has.")},
         {QStringLiteral("check-quality"), QStringLiteral("Look at the videos already imported again and rebuild those the account is offered in better quality.")},
     });
     parser.addPositionalArgument(QStringLiteral("command"), QStringLiteral("Optional: align <track> <video> | mux <track> <video> <out.mkv> | check-video <video> [keyframes] | same-recording <file> <file> | same-version <track title> <album> <video title> | check-cookies [video id] | convert-subs <file.srv3> <out without extension> | talk-check <file>..."));
@@ -258,6 +259,10 @@ int main(int argc, char **argv)
             << Qt::endl;
     });
     QObject::connect(&mgr, &ImportManager::idle, &app, [&] {
+        if (parser.isSet(QStringLiteral("delete-untracked"))) {
+            const int n = mgr.deleteUntracked();
+            out << "deleted " << n << " untracked videos" << Qt::endl;
+        }
         const QHash<QString, int> c = db.trackStateCounts();
         const QVector<VideoInfo> videos = db.allVideos();
         const auto waiting = std::count_if(videos.begin(), videos.end(), [](const VideoInfo &v) { return v.review; });

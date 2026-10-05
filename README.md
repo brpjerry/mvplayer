@@ -83,6 +83,20 @@ oldest first beyond 2 GB; "Retry tracks without a video" searches afresh.
 The import log's `requests` counts what each lookup asked for, `fromCache`
 how much of that needed no request.
 
+## Changing the music folders
+
+A track whose file is in none of the music folders any more — its folder was
+removed in Settings, or the file deleted — is not forgotten: it is kept as
+absent, out of every count and never looked up. When the file is in a music
+folder again, by the same path (a parent folder added in place of its
+subfolders) or recognised by its sound at another, the track is back with
+its video and everything found out about it, without a search.
+
+The videos of absent tracks stay in the library and play as before. Settings
+counts them as untracked and offers to delete them: the video, its thumbnail
+and subtitles, and what was remembered of its tracks, so that those are
+looked up afresh should they ever return. Headless: `--delete-untracked`.
+
 ## Subtitles
 
 Where the uploader of a video provides subtitles in one of the languages set
@@ -92,7 +106,8 @@ captions and translations are not fetched. Plain subtitles are shown in the
 player's own style; those that use YouTube's styling (colours, sizes,
 positions) are converted to `.ass` and keep it. "Fetch for my videos" gets
 them for the videos already in the library; the button in the control bar
-switches them off. Headless: `--subtitles en,ja`, with `--fetch-subtitles`
+switches them off. The outline and the drop shadow of plain subtitles are
+set in Settings. Headless: `--subtitles en,ja`, with `--fetch-subtitles`
 for existing videos.
 
 ## How importing works
