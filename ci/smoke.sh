@@ -271,6 +271,10 @@ assert m["fingerprintCoverage"] > 0.8 and 0.2 < m["sameWaveform"] < 0.72 and "lo
 assert [e["verdict"] for e in events if e.get("event") == "verdict"] == ["accept", "reject"]
 assert any(e.get("event") == "track" and e["what"] == "new" for e in events)
 PY
+# What was fetched for the candidate is remembered for the next track that
+# meets it, and the log says how much of a lookup needed no request.
+[[ -f "$WORK/mvlib5/.mvplayer/cache/videos/liv/audio.opus" && -f "$WORK/mvlib5/.mvplayer/cache/videos/liv/audio.info.json" ]]
+grep -q '"fromCache"' "$WORK/mvlib5/.mvplayer/import-log.jsonl"
 REPORT=$(python3 "$(dirname "$0")/../tools/import-report.py" "$WORK/mvlib5")
 echo "$REPORT" | tail -1 | cut -c1-200
 [[ "$REPORT" == *"review → you: reject"* && "$REPORT" == *"46%"* ]]

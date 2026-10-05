@@ -29,6 +29,24 @@ public:
 
     bool hasCookies() const { return !m_cookiesFile.isEmpty(); }
 
+    // A folder to remember things in between tracks: the same video is a
+    // candidate for the single, the album cut and the live take of a song.
+    //  - search results, for a day;
+    //  - each video's audio and description, so that it is fetched once, and
+    //    the page is not opened again for its picture and its download while
+    //    the addresses in the description are good (a couple of hours);
+    //  - what a caller has found out about a video (see note()).
+    // Without one, nothing is remembered.
+    void setCacheDir(const QString &dir) { m_cacheDir = dir; }
+    // Something found out about a video, by name; empty when not known.
+    QJsonObject note(const QString &id, const QString &name) const;
+    void setNote(const QString &id, const QString &name, const QJsonObject &value) const;
+    // How many requests the cache has answered for this wrapper.
+    int cacheHits() const { return m_cacheHits; }
+    // Drops what is older than `maxAgeDays`, then the oldest until the
+    // folder is under `maxBytes`. For when nothing is being imported.
+    static void pruneCache(const QString &dir, qint64 maxBytes, int maxAgeDays);
+
     // Lists the first `count` YouTube results for `query`.
     bool search(const QString &query, int count, QVector<YtCandidate> *out, QString *error);
 
@@ -79,6 +97,12 @@ private:
     // failure says that signing in is what is missing.
     ProcResult run(const QStringList &args, const ProcOptions &opts);
     static QString url(const QString &id);
+    QString cacheEntry(const QString &id) const; // the video's folder in the cache, or empty
+    // The video's description from the cache, while its addresses are good.
+    QString freshInfo(const QString &id) const;
+    // Runs a download from the remembered description; from the page when
+    // there is none or it no longer works.
+    ProcResult runFor(const QString &id, const QStringList &args, const ProcOptions &opts);
 
     QString m_program;
     QStringList m_extraArgs;
@@ -87,4 +111,6 @@ private:
     // several run at once: each wrapper works on a copy of its own.
     std::unique_ptr<QTemporaryFile> m_cookiesCopy;
     const std::atomic<bool> *m_cancel;
+    QString m_cacheDir;
+    int m_cacheHits = 0;
 };

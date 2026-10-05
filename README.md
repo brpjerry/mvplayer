@@ -70,6 +70,19 @@ cmake --build build
 programs and every library they load into `packaging/windows/stage` and
 compiles `packaging/windows/mvplayer.iss`.
 
+## What is remembered between tracks
+
+The single, the album cut, the live take and the remix of a song all turn up
+the same candidates. In `<MV folder>/.mvplayer/cache` the importer keeps, per
+candidate video, the audio it listened to, YouTube's description of the video
+and whether its picture is a still image, and the results of each search for
+a day. A video is then fetched and judged once; and while the description is
+fresh (two hours) its picture and the video itself are downloaded from it
+without opening the page again. Entries are dropped after two weeks, the
+oldest first beyond 2 GB; "Retry tracks without a video" searches afresh.
+The import log's `requests` counts what each lookup asked for, `fromCache`
+how much of that needed no request.
+
 ## Subtitles
 
 Where the uploader of a video provides subtitles in one of the languages set
