@@ -49,8 +49,10 @@ struct Result {
     bool byOffset = false;
     // Where the video stops the song and carries on with it later — a
     // reaction video pausing to talk, a scene cut into a music video: how
-    // many seconds of other audio lie inside the song, and in how many
-    // places. Time before the song starts or after it ends is not counted.
+    // many seconds of the video between its first and last piece of the
+    // song are none of it, and in how many places. Time before the song
+    // starts or after it ends is not counted, nor is the song in another
+    // order (a video opening with a few bars of the chorus).
     double interruptedSec(int *places = nullptr) const;
 
     QString summary() const;

@@ -234,13 +234,15 @@ AudioAlign::Result placedWhole(AudioAlign::Result r, bool *exact = nullptr)
 // agree in places at the offset the loudness gives, and neither side is
 // marked as a version the other is not (live, remix, cover, ...), it is taken
 // for the track's recording, and the track is placed whole at that offset.
-AudioAlign::Result fitted(AudioAlign::Result r, const TrackInfo &track, const QString &videoTitle)
+AudioAlign::Result fitted(AudioAlign::Result r, const TrackInfo &track, const QString &videoTitle, const QString &channel)
 {
     if (r.segments.isEmpty() || audioReplaceable(r))
         return r;
     const double whole = std::min(r.trackSec, r.videoSec);
+    // Another singer over the same backing fits all of this as well: the
+    // upload has to be one of the track's artists', by its title or channel.
     if (r.fpMatchedSec < 0.8 * whole || r.goodSec < 0.2 * whole || r.contourCorr < 0.5
-        || !Matcher::sameVersion(track, videoTitle))
+        || !Matcher::sameVersion(track, videoTitle) || !Matcher::namesArtist(track, videoTitle, channel))
         return r;
     bool exact = false;
     const AudioAlign::Result placed = placedWhole(r, &exact);
@@ -282,6 +284,13 @@ ImportManager::ImportManager(Database *db, QObject *parent)
     // Catches what directory watching cannot see, such as tags edited in place.
     m_periodic.setInterval(10 * 60 * 1000);
     connect(&m_periodic, &QTimer::timeout, this, [this] {
+        // The cache of candidates grows by gigabytes an hour while a large
+        // library is imported. What is in use was just read or written, and
+        // the oldest goes first.
+        if (m_started) {
+            const QString dir = cacheDir(settings().mvDir);
+            QThreadPool::globalInstance()->start([dir] { YtDlp::pruneCache(dir, 2LL * 1024 * 1024 * 1024, 14); });
+        }
         requeueRetryable();
         rescan();
     });
@@ -857,7 +866,7 @@ QString ImportManager::upgradeVideo(const VideoInfo &video, const ImportSettings
         std::vector<int16_t> trackPcm, mvPcm;
         if (AudioAlign::decodeMono(source->path, &trackPcm, &m_cancel, &error)
             && AudioAlign::decodeMono(audioFile, &mvPcm, &m_cancel, &error)) {
-            plan.align = fitted(AudioAlign::align(trackPcm, mvPcm), *source, video.ytTitle);
+            plan.align = fitted(AudioAlign::align(trackPcm, mvPcm), *source, video.ytTitle, video.ytChannel);
             plan.track = *source;
             plan.replaceAudio = audioMatches(plan.align) && audioReplaceable(plan.align)
                 && libraryIsBetter(*source, youtubeQuality(audioInfo));
@@ -1027,6 +1036,7 @@ void ImportManager::runJob(qint64 trackId, const ImportSettings &cfg)
     const YtDlp *ytForLog = nullptr;
     QJsonArray logQueries, logCandidates, logChecked;
     qint64 heldVideoForLog = 0;
+    bool joinedReview = false; // linked to a video that waits for review through another track
     QJsonArray logVideos; // what was brought into the library
     auto writeLog = [&](const QString &outcome, const QString &message) {
         // accept: the track has its video. review: it has videos waiting for
@@ -1034,7 +1044,7 @@ void ImportManager::runJob(qint64 trackId, const ImportSettings &cfg)
         const bool reviewing = std::any_of(logVideos.begin(), logVideos.end(), [](const QJsonValue &v) {
             return v.toObject().value(QLatin1String("review")).toBool();
         });
-        const QString decision = outcome == QLatin1String("done") ? (reviewing || heldVideoForLog > 0 ? QStringLiteral("review") : QStringLiteral("accept"))
+        const QString decision = outcome == QLatin1String("done") ? (reviewing || heldVideoForLog > 0 || joinedReview ? QStringLiteral("review") : QStringLiteral("accept"))
             : outcome == QLatin1String("not_found") ? QStringLiteral("reject")
             : outcome == QLatin1String("skipped") ? QStringLiteral("skipped")
             : QStringLiteral("undecided");
@@ -1235,6 +1245,14 @@ void ImportManager::runJob(qint64 trackId, const ImportSettings &cfg)
             o.insert(QStringLiteral("rejected"), c.rejectReason);
         logCandidates.append(o);
     }
+    // A cut of the song (the 90 seconds used as a show's opening) is its
+    // video only for want of a full one: uploads of about the track's length
+    // are examined first.
+    if (track.duration > 0) {
+        std::stable_partition(shortlisted.begin(), shortlisted.end(), [&track](const YtCandidate &c) {
+            return c.duration <= 0 || c.duration >= 0.6 * track.duration;
+        });
+    }
     if (shortlisted.isEmpty()) {
         finish(QStringLiteral("not_found"), 0,
                QStringLiteral("none of %1 search results looked like an official video").arg(candidates.size()));
@@ -1323,7 +1341,7 @@ void ImportManager::runJob(qint64 trackId, const ImportSettings &cfg)
             std::vector<int16_t> pcm;
             if (QFile::exists(existing->path) && AudioAlign::decodeMono(existing->path, &pcm, &m_cancel, &error, heard)) {
                 anyChecked = true;
-                const AudioAlign::Result ar = fitted(AudioAlign::align(trackPcm, pcm), track, existing->ytTitle);
+                const AudioAlign::Result ar = fitted(AudioAlign::align(trackPcm, pcm), track, existing->ytTitle, existing->ytChannel);
                 if (audioMatches(ar)) {
                     // The video belongs to another track already. This one
                     // joins it when it is demonstrably the same recording (a
@@ -1369,8 +1387,10 @@ void ImportManager::runJob(qint64 trackId, const ImportSettings &cfg)
                                 existing->review ? QStringLiteral("already waiting for review through “%1”: one more track for the same verdict").arg(existing->title)
                                                  : QStringLiteral("already in the library through “%1”, and the song by its fingerprints").arg(existing->title),
                                 &ar);
+                        joinedReview = existing->review;
                         finish(QStringLiteral("done"), existing->id,
-                               QStringLiteral("shares the video of “%1”").arg(existing->title));
+                               existing->review ? QStringLiteral("for your review, with “%1”").arg(existing->title)
+                                                : QStringLiteral("shares the video of “%1”").arg(existing->title));
                         return;
                     }
                     if (recording
@@ -1431,7 +1451,7 @@ void ImportManager::runJob(qint64 trackId, const ImportSettings &cfg)
             continue;
         }
         anyChecked = true;
-        const AudioAlign::Result ar = fitted(AudioAlign::align(trackPcm, mvPcm), track, c.title);
+        const AudioAlign::Result ar = fitted(AudioAlign::align(trackPcm, mvPcm), track, c.title, c.channel);
         qInfo().noquote() << QStringLiteral("[align] %1 ~ “%2” [%3]: %4").arg(track.title, c.title, c.id, ar.summary());
         if (!audioMatches(ar)) {
             checked(c, QStringLiteral("different"), mismatchReason(ar), &ar);

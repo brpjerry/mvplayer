@@ -304,6 +304,10 @@ bool YtDlp::downloadAudio(const QString &id, const QString &workDir, QString *fi
                     *info = cachedInfo;
                 *file = have;
                 ++m_cacheHits;
+                // In use: not the next to be pruned.
+                QFile used(have);
+                if (used.open(QIODevice::ReadWrite))
+                    used.setFileTime(QDateTime::currentDateTime(), QFileDevice::FileModificationTime);
                 return true;
             }
         }

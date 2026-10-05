@@ -68,7 +68,7 @@ const QStringList &versionTerms()
         QStringLiteral("fancam"), QStringLiteral("concert"), QStringLiteral("shorts"),
         QStringLiteral("歌ってみた"), QStringLiteral("弾いてみた"), QStringLiteral("叩いてみた"),
         QStringLiteral("踊ってみた"), QStringLiteral("カラオケ"), QStringLiteral("ライブ"),
-        QStringLiteral("カバー"), QStringLiteral("ピアノ"), QStringLiteral("リアクション"), QStringLiteral("反応"),
+        QStringLiteral("カバー"), QStringLiteral("ピアノ"), QStringLiteral("リアクション"), QStringLiteral("反応"), QStringLiteral("歌いました"),
         QStringLiteral("耐久"), QStringLiteral("メイキング"), QStringLiteral("予告"),
         QStringLiteral("ティザー"), QStringLiteral("クロスフェード"), QStringLiteral("試聴"),
     };
@@ -87,6 +87,8 @@ const QStringList &fanTerms()
         // Korean and Thai subtitle uploads: lyrics, subtitles, translation, pronunciation
         QStringLiteral("가사"), QStringLiteral("자막"), QStringLiteral("해석"), QStringLiteral("발음"),
         QStringLiteral("번역"), QStringLiteral("한글"), QStringLiteral("ซับไทย"),
+        // a picture put to someone's song: "PV made for it", "drew it"
+        QStringLiteral("つけてみた"), QStringLiteral("付けてみた"), QStringLiteral("描いてみた"),
         // fan-made and compiled videos
         QStringLiteral("創作"), QStringLiteral("自制"), QStringLiteral("自製"), QStringLiteral("compiled"),
         QStringLiteral("fanmade"), QStringLiteral("fan made"), QStringLiteral("fan mv"),
@@ -179,8 +181,10 @@ bool Matcher::sameVersion(const TrackInfo &track, const QString &videoTitle)
         if (hasTerm(video, term) != (hasTerm(title, term) || hasTerm(album, term)))
             return false;
     }
-    // "(English Ver.)", "(Prayer Ver.)", "Rap version": a named version on
-    // one side has to be named on the other.
+    // "(English Ver.)", "(Prayer Ver.)", "Rap version": a version the video
+    // names has to be named by the track, and one the track's title names
+    // by the video. A version only the album is named after ("... -3 nuits
+    // ver.-") is not every track's: the video need not name it.
     const auto named = [](const QString &tok) {
         QSet<QString> out;
         static const QRegularExpression re(QStringLiteral("(\\S+) (?:ver|version)(?= )"));
@@ -189,7 +193,32 @@ bool Matcher::sameVersion(const TrackInfo &track, const QString &videoTitle)
             out.insert(it.next().captured(1));
         return out;
     };
-    return named(video) == (named(title) | named(album));
+    const QSet<QString> inVideo = named(video), inTitle = named(title);
+    if (!(inTitle | named(album)).contains(inVideo) || !inVideo.contains(inTitle))
+        return false;
+
+    // "... feat. 初音ミク": sung by someone the track does not have. The
+    // producer's own upload of a song is its other singer's version.
+    static const QRegularExpression feat(QStringLiteral(" (?:feat|ft|featuring) (\\S+)"));
+    const QString whose = title + album + tokens(track.artist) + tokens(track.albumArtist);
+    auto it = feat.globalMatch(video);
+    while (it.hasNext()) {
+        const QString singer = it.next().captured(1);
+        if (singer.size() >= 2 && !whose.contains(singer))
+            return false;
+    }
+    return true;
+}
+
+bool Matcher::namesArtist(const TrackInfo &track, const QString &videoTitle, const QString &channel)
+{
+    const QString ct = tokens(videoTitle), ch = tokens(channel);
+    for (const QString &n : artistNames(track)) {
+        const QString nt = tokens(n).trimmed();
+        if (nt.size() >= 2 && (ct.contains(nt) || ch.contains(nt)))
+            return true;
+    }
+    return false;
 }
 
 void Matcher::rank(const TrackInfo &track, QVector<YtCandidate> &candidates)

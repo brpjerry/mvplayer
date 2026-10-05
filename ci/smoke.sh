@@ -75,8 +75,21 @@ ffmpeg -v error -y -i "$WORK/track.flac" -f lavfi -i "anoisesrc=d=20:c=pink:r=48
     "[1][0]concat=n=2:v=0:a=1" -c:a libopus -b:a 96k "$WORK/intro.opus"
 SUMMARY=$("$BUILD/mvplayer-import" align "$WORK/track.flac" "$WORK/reaction.opus")
 echo "$SUMMARY" | grep -o "interrupted[^,]*"
-[[ "$SUMMARY" == *"interrupted 2 times by 24.0s"* ]]
+[[ "$SUMMARY" == *"interrupted 2 times by 23."* || "$SUMMARY" == *"interrupted 2 times by 24."* ]]
 [[ "$("$BUILD/mvplayer-import" align "$WORK/track.flac" "$WORK/intro.opus")" != *"interrupted"* ]]
+# A video that opens with a few bars from the middle of the song and then
+# plays it through is all song, in another order: not interrupted.
+ffmpeg -v error -y -i "$WORK/track.flac" -filter_complex \
+    "[0]atrim=20:30,asetpts=N/SR/TB[t];[t][0]concat=n=2:v=0:a=1" -c:a libopus -b:a 96k "$WORK/teaser.opus"
+SUMMARY=$("$BUILD/mvplayer-import" align "$WORK/track.flac" "$WORK/teaser.opus")
+echo "$SUMMARY" | grep -o "waveform[^,]*"
+[[ "$SUMMARY" == *"segment(s)"* && "$SUMMARY" != *"interrupted"* ]]
+# Versions by name: another singer the track does not have, and a version
+# that only the album is named after.
+[[ $("$BUILD/mvplayer-import" same-version "Twins" "Twins" "Twins / Producer feat. Someone Else" | tr -d '\r') == different ]]
+[[ $("$BUILD/mvplayer-import" same-version "Twins feat. Someone" "Twins" "Twins / Producer feat. Someone Else" | tr -d '\r') == same ]]
+[[ $("$BUILD/mvplayer-import" same-version "Far" "Rain -3 nuits ver.-" "Artist - Far MUSIC VIDEO" | tr -d '\r') == same ]]
+[[ $("$BUILD/mvplayer-import" same-version "Rain -3 nuits ver.-" "Rain -3 nuits ver.-" "Artist - Rain MUSIC VIDEO" | tr -d '\r') == different ]]
 
 echo "== mux"
 "$BUILD/mvplayer-import" mux "$WORK/track.flac" "$WORK/mv.mkv" "$WORK/out.mkv"

@@ -411,20 +411,21 @@ double Result::interruptedSec(int *places) const
 {
     QVector<Segment> order = segments;
     std::sort(order.begin(), order.end(), [](const Segment &a, const Segment &b) { return a.mvStart < b.mvStart; });
-    qint64 inserted = 0;
+    // Video time between the first piece and the last that no piece covers.
+    // Not the jumps of the offset: a video that opens with a few bars of the
+    // chorus before the song begins is all song, in another order.
+    qint64 uncovered = 0, coveredTo = 0;
     int count = 0;
-    for (int i = 1; i < order.size(); ++i) {
-        // The track is at (video position - lag): a lag that grew is video
-        // time the track has no part in.
-        const qint64 jump = order[i].lag - order[i - 1].lag;
-        if (jump > kRate) {
-            inserted += jump;
+    for (int i = 0; i < order.size(); ++i) {
+        if (i > 0 && order[i].mvStart - coveredTo > kRate) {
+            uncovered += order[i].mvStart - coveredTo;
             ++count;
         }
+        coveredTo = std::max(coveredTo, order[i].mvEnd);
     }
     if (places)
         *places = count;
-    return double(inserted) / kRate;
+    return double(uncovered) / kRate;
 }
 
 QString Result::summary() const
