@@ -47,6 +47,12 @@ struct Result {
     // Set by the importer when the same performance was recognised in another
     // mix: the one segment places the whole track by its offset.
     bool byOffset = false;
+    // Where the video stops the song and carries on with it later — a
+    // reaction video pausing to talk, a scene cut into a music video: how
+    // many seconds of other audio lie inside the song, and in how many
+    // places. Time before the song starts or after it ends is not counted.
+    double interruptedSec(int *places = nullptr) const;
+
     QString summary() const;
 };
 

@@ -64,6 +64,20 @@ assert abs(float(re.search(r"gain ([-\d.]+) dB", s).group(1)) - 4.0) < 1.0, s
 print("another master ok")
 PY
 
+echo "== align: an interrupted song"
+# A reaction video: the whole song, stopped twice for talk. Every part of it
+# is the track's waveform, and it is still not the song's video. Time before
+# and after the song is another matter.
+ffmpeg -v error -y -i "$WORK/track.flac" -f lavfi -i "anoisesrc=d=60:c=pink:r=48000:a=0.3:seed=3" -filter_complex \
+    "[0]atrim=0:17[a];[1]atrim=0:12[n1];[0]atrim=17:34,asetpts=N/SR/TB[b];[1]atrim=20:32,asetpts=N/SR/TB[n2];[0]atrim=34,asetpts=N/SR/TB[c];[a][n1][b][n2][c]concat=n=5:v=0:a=1" \
+    -c:a libopus -b:a 96k "$WORK/reaction.opus"
+ffmpeg -v error -y -i "$WORK/track.flac" -f lavfi -i "anoisesrc=d=20:c=pink:r=48000:a=0.3:seed=4" -filter_complex \
+    "[1][0]concat=n=2:v=0:a=1" -c:a libopus -b:a 96k "$WORK/intro.opus"
+SUMMARY=$("$BUILD/mvplayer-import" align "$WORK/track.flac" "$WORK/reaction.opus")
+echo "$SUMMARY" | grep -o "interrupted[^,]*"
+[[ "$SUMMARY" == *"interrupted 2 times by 24.0s"* ]]
+[[ "$("$BUILD/mvplayer-import" align "$WORK/track.flac" "$WORK/intro.opus")" != *"interrupted"* ]]
+
 echo "== mux"
 "$BUILD/mvplayer-import" mux "$WORK/track.flac" "$WORK/mv.mkv" "$WORK/out.mkv"
 STREAMS=$(ffprobe -v error -show_entries stream=codec_type,codec_name -of csv=p=0 "$WORK/out.mkv" | tr '\n' ' ')

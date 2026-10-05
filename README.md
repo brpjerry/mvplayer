@@ -129,7 +129,10 @@ For every track without a video (`src/core/ImportManager.cpp`):
    change between samples). The track also has to make up at least half of
    the video: a short edit of a song (the cut used as a show's opening, say)
    does not take the video of the full version, only one of about its own
-   length. If nothing passes, nothing is imported for that track.
+   length. Nor is a video taken that stops the song and carries on with it
+   later — a reaction video pausing to talk — however much of it is the
+   track: more than 15 seconds of other audio inside the song sends it to
+   review. If nothing passes, nothing is imported for that track.
 3. **Download** the best video stream and the YouTube thumbnail.
 4. **Align** the track to the video's soundtrack (`src/core/AudioAlign.cpp`):
    fingerprints find where the track sits, cross-correlation makes that

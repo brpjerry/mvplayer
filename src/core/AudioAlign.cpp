@@ -407,6 +407,26 @@ void contour(const std::vector<float> &M, const std::vector<float> &T, qint64 *l
 
 } // namespace
 
+double Result::interruptedSec(int *places) const
+{
+    QVector<Segment> order = segments;
+    std::sort(order.begin(), order.end(), [](const Segment &a, const Segment &b) { return a.mvStart < b.mvStart; });
+    qint64 inserted = 0;
+    int count = 0;
+    for (int i = 1; i < order.size(); ++i) {
+        // The track is at (video position - lag): a lag that grew is video
+        // time the track has no part in.
+        const qint64 jump = order[i].lag - order[i - 1].lag;
+        if (jump > kRate) {
+            inserted += jump;
+            ++count;
+        }
+    }
+    if (places)
+        *places = count;
+    return double(inserted) / kRate;
+}
+
 QString Result::summary() const
 {
     QStringList parts;
@@ -424,6 +444,9 @@ QString Result::summary() const
         parts << QStringLiteral("gain %1 dB").arg(20 * std::log10(gain), 0, 'f', 2);
     if (!segments.isEmpty() && pcmMatchedSec > 0)
         parts << QStringLiteral("%1% of it plainly the same").arg(qRound(100 * goodSec / pcmMatchedSec));
+    int places = 0;
+    if (const double other = interruptedSec(&places); places > 0)
+        parts << QStringLiteral("interrupted %1 times by %2s of other audio").arg(places).arg(other, 0, 'f', 1);
     if (inverted)
         parts << QStringLiteral("polarity inverted");
     if (!segments.isEmpty())
