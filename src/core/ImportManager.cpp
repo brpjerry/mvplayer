@@ -1222,7 +1222,10 @@ void ImportManager::runJob(qint64 trackId, const ImportSettings &cfg)
                 return postpone();
             continue;
         }
-        noteSuccess();
+        // A search that works shows the network is there, not that videos
+        // can be had: YouTube asks "are you a bot" of video pages alone.
+        // Only a download proves the pause is over (see withRetry).
+        m_failStreak = 0;
         logQueries.append(QJsonObject{{QStringLiteral("q"), query}, {QStringLiteral("results"), found.size()}});
         searched = true;
         for (YtCandidate &c : found) {
@@ -1302,8 +1305,15 @@ void ImportManager::runJob(qint64 trackId, const ImportSettings &cfg)
     // try after a short pause settles most of them.
     // A refusal aimed at this client as a whole is not retried at all.
     auto withRetry = [&](const std::function<bool()> &attempt) {
+        // What the cache answered, or what was downloaded from a remembered
+        // description, did not open the video's page: no proof either.
+        const int fromCache = yt.cacheHits();
+        const auto proven = [&] {
+            if (yt.cacheHits() == fromCache)
+                noteSuccess();
+        };
         if (attempt()) {
-            noteSuccess();
+            proven();
             return true;
         }
         if (m_cancel || YtDlp::looksBlocked(error)) {
@@ -1313,7 +1323,7 @@ void ImportManager::runJob(qint64 trackId, const ImportSettings &cfg)
         for (int i = 0; i < 30 && !m_cancel; ++i)
             QThread::msleep(100);
         if (!m_cancel && attempt()) {
-            noteSuccess();
+            proven();
             return true;
         }
         noteFailure(error);
@@ -1732,8 +1742,12 @@ void ImportManager::runJob(qint64 trackId, const ImportSettings &cfg)
         report(QStringLiteral("Fetching subtitles"), -1, chosen.title);
         QString why;
         ++nSubs;
-        if (fetchSubtitlesFor(yt, chosen.id, outFile, cfg.subtitleLangs, chosenDir, &why) < 0 && !m_cancel)
+        if (fetchSubtitlesFor(yt, chosen.id, outFile, cfg.subtitleLangs, chosenDir, &why) < 0 && !m_cancel) {
             qWarning().noquote() << "[import] no subtitles for" << chosen.id << ":" << why;
+            // The video is had; but a refusal here is a refusal all the same.
+            if (YtDlp::looksBlocked(why))
+                noteFailure(why);
+        }
     }
 
     VideoInfo v;
