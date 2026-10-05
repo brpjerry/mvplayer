@@ -68,7 +68,7 @@ const QStringList &versionTerms()
         QStringLiteral("fancam"), QStringLiteral("concert"), QStringLiteral("shorts"),
         QStringLiteral("歌ってみた"), QStringLiteral("弾いてみた"), QStringLiteral("叩いてみた"),
         QStringLiteral("踊ってみた"), QStringLiteral("カラオケ"), QStringLiteral("ライブ"),
-        QStringLiteral("カバー"), QStringLiteral("ピアノ"), QStringLiteral("リアクション"),
+        QStringLiteral("カバー"), QStringLiteral("ピアノ"), QStringLiteral("リアクション"), QStringLiteral("反応"),
         QStringLiteral("耐久"), QStringLiteral("メイキング"), QStringLiteral("予告"),
         QStringLiteral("ティザー"), QStringLiteral("クロスフェード"), QStringLiteral("試聴"),
     };
@@ -82,7 +82,7 @@ const QStringList &fanTerms()
         QStringLiteral("lyrics"), QStringLiteral("lyric"), QStringLiteral("romaji"), QStringLiteral("sub"),
         QStringLiteral("subs"), QStringLiteral("subtitle"), QStringLiteral("subtitles"),
         QStringLiteral("vietsub"), QStringLiteral("engsub"), QStringLiteral("español"),
-        QStringLiteral("歌詞"), QStringLiteral("翻译"), QStringLiteral("翻譯"), QStringLiteral("中日"),
+        QStringLiteral("歌詞"), QStringLiteral("翻译"), QStringLiteral("翻譯"), QStringLiteral("翻訳"), QStringLiteral("中日"),
         QStringLiteral("中字"), QStringLiteral("字幕"), QStringLiteral("和訳"), QStringLiteral("高音質"),
         // Korean and Thai subtitle uploads: lyrics, subtitles, translation, pronunciation
         QStringLiteral("가사"), QStringLiteral("자막"), QStringLiteral("해석"), QStringLiteral("발음"),

@@ -128,6 +128,7 @@ QJsonObject measurements(const AudioAlign::Result &r)
         {QStringLiteral("gainDb"), r.segments.isEmpty() ? 0 : round(20 * std::log10(r.gain), 2)},
         {QStringLiteral("polarityInverted"), r.inverted},
         {QStringLiteral("placedByOffset"), r.byOffset},
+        {QStringLiteral("interruptedSec"), round(r.interruptedSec(), 1)},
     };
 }
 
@@ -153,9 +154,28 @@ bool audioReplaceable(const AudioAlign::Result &r)
 // same recording under another label 99.8% and more.
 constexpr double kOwnWaveformOtherVersion = 0.97;
 
+// A video that stops the song to carry on with it later is not the song's
+// video as it stands, however much of the waveform is the track's: a
+// reaction video had all of a track, in 19 pieces with talk in between.
+// (An interlude cut into a real music video looks the same; the user says.)
+constexpr double kMaxInterruptedSec = 15;
+
+bool interrupted(const AudioAlign::Result &r)
+{
+    return r.interruptedSec() > kMaxInterruptedSec;
+}
+
+QString interruptedReason(const AudioAlign::Result &r)
+{
+    int places = 0;
+    const double other = r.interruptedSec(&places);
+    return QStringLiteral("the song is interrupted in this video: %1 s of other audio inside it, in %2 %3")
+        .arg(qRound(other)).arg(places).arg(places == 1 ? QStringLiteral("place") : QStringLiteral("places"));
+}
+
 bool ownRecording(const AudioAlign::Result &r, const TrackInfo &track, const QString &videoTitle)
 {
-    if (!audioReplaceable(r))
+    if (!audioReplaceable(r) || interrupted(r))
         return false;
     return r.byOffset || Matcher::sameVersion(track, videoTitle)
         || r.goodSec >= kOwnWaveformOtherVersion * std::min(r.trackSec, r.videoSec);
@@ -165,6 +185,8 @@ bool ownRecording(const AudioAlign::Result &r, const TrackInfo &track, const QSt
 QString unconfirmedReason(const AudioAlign::Result &r, const TrackInfo &track, const QString &videoTitle)
 {
     const int share = qRound(100 * r.goodSec / qMax(1.0, std::min(r.trackSec, r.videoSec)));
+    if (audioReplaceable(r) && interrupted(r))
+        return QStringLiteral("%1% of it is demonstrably the track's waveform, but %2").arg(share).arg(interruptedReason(r));
     if (audioReplaceable(r)) {
         return QStringLiteral("%1% of it is demonstrably the track's waveform, but track and video are marked as different versions (%2% needed then)")
             .arg(share)
@@ -1442,6 +1464,15 @@ void ImportManager::runJob(qint64 trackId, const ImportSettings &cfg)
             }
             if (!premiumWins)
                 forReview = true;
+        }
+
+        // Where nothing is at stake for the library's audio there is no
+        // review either: such a video is simply not the song's.
+        if (!forReview && interrupted(ar)) {
+            checked(c, QStringLiteral("different"), interruptedReason(ar), &ar);
+            reasons << QStringLiteral("“%1” interrupts the song").arg(c.title);
+            QDir(dir).removeRecursively();
+            continue;
         }
 
         if (cfg.skipStillImages) {
