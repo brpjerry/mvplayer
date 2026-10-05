@@ -34,6 +34,7 @@ public:
         ReviewEndRole,
         ReviewOptionRole,  // which of its group's options this is, from 1
         ReviewOptionsRole, // how many options the group has
+        SameTitleRole,     // of a video under review: a library video with its title {album, ytTitle}
     };
 
     explicit VideoModel(QObject *parent = nullptr);
@@ -52,6 +53,9 @@ public:
     QVariantMap toMap(int row) const;
     // The videos waiting as options alongside `v` (itself included), by id.
     QVector<qint64> reviewOptions(const VideoInfo &v) const;
+    // The accepted video that has the title of `v`, a video under review:
+    // the song may have its video already. Null when there is none.
+    const VideoInfo *sameTitle(const VideoInfo &v) const;
 
 private:
     static QString buildSearchText(const VideoInfo &v);

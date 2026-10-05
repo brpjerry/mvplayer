@@ -340,6 +340,7 @@ Item {
         height: root.restRect.height
         option: wanted ? root.current.reviewOption : 1
         options: wanted ? root.current.reviewOptions : 1
+        sameTitle: wanted ? root.current.sameTitle : ({})
         onApproved: root.reviewApproved()
         onRejected: root.reviewRejected()
         onStepped: (delta) => root.reviewStepped(delta)

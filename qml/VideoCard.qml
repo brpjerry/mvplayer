@@ -17,6 +17,7 @@ Item {
     required property string ytTitle
     required property int reviewOption   // which of the options for this track is shown, from 1
     required property int reviewOptions
+    required property var sameTitle     // a library video with this title, for a video under review
 
     property bool current: false   // this video is loaded in the player
     property bool playing: false   // ...and not paused
@@ -186,6 +187,7 @@ Item {
         height: thumbItem.height
         option: root.reviewOption
         options: root.reviewOptions
+        sameTitle: root.sameTitle
         onApproved: root.approved()
         onRejected: root.rejected()
         onStepped: (delta) => root.stepped(delta)
