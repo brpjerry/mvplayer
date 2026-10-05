@@ -68,7 +68,8 @@ const QStringList &versionTerms()
         QStringLiteral("fancam"), QStringLiteral("concert"), QStringLiteral("shorts"),
         QStringLiteral("歌ってみた"), QStringLiteral("弾いてみた"), QStringLiteral("叩いてみた"),
         QStringLiteral("踊ってみた"), QStringLiteral("カラオケ"), QStringLiteral("ライブ"),
-        QStringLiteral("カバー"), QStringLiteral("ピアノ"), QStringLiteral("リアクション"), QStringLiteral("反応"), QStringLiteral("歌いました"),
+        QStringLiteral("カバー"), QStringLiteral("ピアノ"), QStringLiteral("リアクション"), QStringLiteral("反応"), QStringLiteral("歌いました"), QStringLiteral("演奏してみた"), QStringLiteral("ギター"),
+        QStringLiteral("ベース"), QStringLiteral("ドラム"),
         // a game being played to the song
         QStringLiteral("beat saber"), QStringLiteral("project diva"), QStringLiteral("full combo"),
         QStringLiteral("perfect combo"), QStringLiteral("expertplus"), QStringLiteral("osu"), QStringLiteral("gameplay"),
@@ -84,6 +85,7 @@ const QStringList &fanTerms()
 {
     static const QStringList t = {
         QStringLiteral("lyrics"), QStringLiteral("lyric"), QStringLiteral("romaji"), QStringLiteral("sub"),
+        QStringLiteral("unofficial"), QStringLiteral("非公式"),
         QStringLiteral("subs"), QStringLiteral("subtitle"), QStringLiteral("subtitles"),
         QStringLiteral("vietsub"), QStringLiteral("engsub"), QStringLiteral("español"),
         QStringLiteral("歌詞"), QStringLiteral("翻译"), QStringLiteral("翻譯"), QStringLiteral("翻訳"), QStringLiteral("中日"),
@@ -149,7 +151,10 @@ bool Matcher::isNonMvTrack(const TrackInfo &track, QString *why)
 bool Matcher::isTalkTitle(const QString &title)
 {
     // Folded: full-width letters and circled numbers become plain ones.
-    const QString t = title.normalized(QString::NormalizationForm_KC).toCaseFolded().simplified();
+    QString t = title.normalized(QString::NormalizationForm_KC).toCaseFolded().simplified();
+    // "～MC01～", "-MC-": the same, dressed up.
+    static const QRegularExpression wrapper(QStringLiteral("^[~〜～\\-—–\\s]+|[~〜～\\-—–\\s]+$"));
+    t.remove(wrapper);
     static const QString terms = QStringLiteral(
         "mc|talk|トーク|banter|stage banter|speech|interview|インタビュー|commentary|audio commentary|"
         "コメンタリー|voice drama|ボイスドラマ|メンバー紹介|band introductions?|encore call|applause|挨拶|ごあいさつ");
@@ -232,10 +237,17 @@ bool Matcher::namesArtist(const TrackInfo &track, const QString &videoTitle, con
             return w.size() >= 2 && (ct.contains(w) || ch.contains(w));
         });
     }
+    // A tag may hold a name twice over or several names: "Kizuna AI
+    // (キズナアイ)", "CANI CLUB/カニ研究会", "A & B". Any one of them will do.
+    static const QRegularExpression parts(QStringLiteral("[()（）\\[\\]【】/／&＆、,;]+"));
     for (const QString &n : artistNames(track)) {
-        const QString nt = tokens(n).trimmed();
-        if (nt.size() >= 2 && (ct.contains(nt) || ch.contains(nt)))
-            return true;
+        QStringList forms = n.split(parts, Qt::SkipEmptyParts);
+        forms.prepend(n);
+        for (const QString &form : std::as_const(forms)) {
+            const QString nt = tokens(form).trimmed();
+            if (nt.size() >= 2 && (ct.contains(nt) || ch.contains(nt)))
+                return true;
+        }
     }
     return false;
 }

@@ -97,6 +97,8 @@ rank() { "$BUILD/mvplayer-import" rank-check "$@" | tr -d '\r'; }
 [[ $(rank "Prism" "Clara" "Prism (Lyric Video) lyrics" "Clara Official YouTube Channel") == "trusted, names the artist" ]]
 [[ $(rank "Prism" "Clara" "Prism MV" "We love Val & Clara") == "trusted, names the artist" ]]
 [[ $(rank "Prism" "Clara" "Prism / Somebody MV" "Somebody Official") == "trusted, does not name the artist" ]]
+# A tag that holds the name in two scripts: either will do.
+[[ $(rank "Again" "Kizu Ai (キズアイ)" "キズアイ - Again (Official)" "Somebody Records") == "trusted, names the artist" ]]
 # A producer's upload names the producer whoever sings: the singer counts.
 [[ $(rank "Whip" "Works feat.Rio" "【MV】Whip／mona（CV：Shiina）【Works】" "Works OFFICIAL" verified) == "trusted, does not name the artist" ]]
 [[ $(rank "Whip" "Works feat.Rio" "【MV】Whip／Works feat. Rio" "Works OFFICIAL" verified) == "trusted, names the artist" ]]
@@ -529,6 +531,30 @@ START=$SECONDS
 OUT=$(MVPLAYER_STALL_SECS=1 MVPLAYER_YTDLP="$SLOW" timeout 100 "$BUILD/mvplayer-import" --music-dir "$WORK/lib7" --mv-dir "$WORK/mvlib7" --jobs 1 2>&1)
 echo "$OUT" | grep -E "^\[import\]|^done:" | cut -c1-160
 [[ "$OUT" == *"too slow"* && $((SECONDS - START)) -lt 40 ]]
+
+echo "== searches work, videos are refused"
+# YouTube's bot check applies to video pages, not to searches. A search that
+# works must not count as the end of the pause: the waits have to grow.
+mkdir -p "$WORK/mvlib8"
+echo 0 > "$WORK/refused"
+cat > "$WORK/fake-refuse" <<FAKE
+#!/bin/sh
+case " \$* " in
+*" -J "*) echo '{"entries": [{"id": "ref", "ie_key": "Youtube", "title": "Fay - Slow (Official Video)", "channel": "Fay", "duration": 20, "channel_is_verified": true}]}' ;;
+*)  n=\$(cat "$WORK/refused"); echo \$((n + 1)) > "$WORK/refused"
+    if [ "\$n" -lt 3 ]; then echo "ERROR: [youtube] ref: Sign in to confirm you’re not a bot" >&2; else echo "ERROR: [youtube] ref: Video unavailable" >&2; fi
+    exit 1 ;;
+esac
+FAKE
+chmod +x "$WORK/fake-refuse"
+REFUSE="$WORK/fake-refuse"
+if [[ -n "$EXE" ]]; then
+    printf '@"%s" "%%~dp0fake-refuse" %%*\r\n' "$(cygpath -w "$(command -v sh)")" > "$WORK/fake-refuse.cmd"
+    REFUSE="$WORK/fake-refuse.cmd"
+fi
+OUT=$(MVPLAYER_PAUSE_SECS=1 MVPLAYER_YTDLP="$REFUSE" timeout 100 "$BUILD/mvplayer-import" --music-dir "$WORK/lib7" --mv-dir "$WORK/mvlib8" --jobs 1 2>&1)
+echo "$OUT" | grep -E "^\[import\] paused|^done:" | cut -c1-70
+[[ "$OUT" == *"paused for 0:01"* && "$OUT" == *"paused for 0:02"* && "$OUT" == *"paused for 0:04"* ]]
 
 echo "== binaries start"
 "$BUILD/mvplayer-import" --help >/dev/null
