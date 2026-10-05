@@ -58,6 +58,11 @@ class AppController : public QObject
     Q_PROPERTY(bool hasCookies READ hasCookies NOTIFY settingsChanged)
     Q_PROPERTY(QString cookiesAdded READ cookiesAdded NOTIFY settingsChanged)
     Q_PROPERTY(bool checkingQuality READ checkingQuality NOTIFY activityChanged)
+    // What asking YouTube about the cookies said: "" (not asked), "premium",
+    // "ordinary", "expired" or "unknown", and the sentence that goes with it.
+    Q_PROPERTY(bool checkingCookies READ checkingCookies NOTIFY cookiesCheckChanged)
+    Q_PROPERTY(QString cookiesState READ cookiesState NOTIFY cookiesCheckChanged)
+    Q_PROPERTY(QString cookiesStatus READ cookiesStatus NOTIFY cookiesCheckChanged)
 
     Q_PROPERTY(bool busy READ busy NOTIFY activityChanged)
     Q_PROPERTY(bool scanning READ scanning NOTIFY activityChanged)
@@ -115,6 +120,10 @@ public:
     // Stores a copy of `file`. Returns what is wrong with it, or nothing.
     Q_INVOKABLE QString importCookies(const QString &file);
     Q_INVOKABLE void removeCookies();
+    bool checkingCookies() const { return m_checkingCookies; }
+    QString cookiesState() const { return m_cookiesState; }
+    QString cookiesStatus() const { return m_cookiesStatus; }
+    Q_INVOKABLE void checkCookies();
     bool checkingQuality() const;
     Q_INVOKABLE void checkQuality();
 
@@ -158,6 +167,7 @@ signals:
     void facetsChanged();
     void settingsChanged();
     void activityChanged();
+    void cookiesCheckChanged();
     void volumeChanged();
     void appearanceChanged();
     void systemDarkChanged();
@@ -170,10 +180,14 @@ private:
     void refreshCounts();
     void saveSettings();
     QString cookiesPath() const;
+    void setCookiesCheck(const QString &state, const QString &status);
 
     AppOptions m_options;
     std::unique_ptr<QSettings> m_settings;
     ImportSettings m_cfg;
+    bool m_checkingCookies = false;
+    int m_cookiesCheck = 0; // counts checks, so that a late answer about replaced cookies is dropped
+    QString m_cookiesState, m_cookiesStatus;
 
     std::unique_ptr<Database> m_db;
     std::unique_ptr<ImportManager> m_manager;

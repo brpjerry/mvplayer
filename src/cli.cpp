@@ -61,7 +61,7 @@ int main(int argc, char **argv)
         {QStringLiteral("reject"), QStringLiteral("Turn down a video that waits for review, by its YouTube id: it is deleted and its tracks have no video (repeatable)."), QStringLiteral("id")},
         {QStringLiteral("check-quality"), QStringLiteral("Look at the videos already imported again and rebuild those the account is offered in better quality.")},
     });
-    parser.addPositionalArgument(QStringLiteral("command"), QStringLiteral("Optional: align <track> <video> | mux <track> <video> <out.mkv> | check-video <video> [keyframes] | same-recording <file> <file> | same-version <track title> <album> <video title>"));
+    parser.addPositionalArgument(QStringLiteral("command"), QStringLiteral("Optional: align <track> <video> | mux <track> <video> <out.mkv> | check-video <video> [keyframes] | same-recording <file> <file> | same-version <track title> <album> <video title> | check-cookies [video id]"));
     parser.process(app);
 
     const QStringList pos = parser.positionalArguments();
@@ -148,7 +148,7 @@ int main(int argc, char **argv)
         return 0;
     }
 
-    if (!parser.isSet(QStringLiteral("music-dir")))
+    if (!parser.isSet(QStringLiteral("music-dir")) && pos.value(0) != QLatin1String("check-cookies"))
         parser.showHelp(2);
 
     ImportSettings cfg;
@@ -164,6 +164,29 @@ int main(int argc, char **argv)
         cfg.cookiesFile = QFileInfo(parser.value(QStringLiteral("cookies"))).absoluteFilePath();
         if (!YtDlp::looksLikeCookies(cfg.cookiesFile)) {
             out << "error: " << cfg.cookiesFile << " is not a cookies.txt with YouTube cookies" << Qt::endl;
+            return 1;
+        }
+    }
+    if (pos.value(0) == QLatin1String("check-cookies")) {
+        if (cfg.cookiesFile.isEmpty()) {
+            out << "error: check-cookies needs --cookies" << Qt::endl;
+            return 1;
+        }
+        YtDlp yt(qEnvironmentVariable("MVPLAYER_YTDLP", toolPath(QStringLiteral("yt-dlp"))), cfg.ytdlpArgs, cfg.cookiesFile, nullptr);
+        double kbps = 0;
+        QString err;
+        switch (yt.checkAccount(pos.value(1, QStringLiteral("dQw4w9WgXcQ")), &kbps, &err)) {
+        case YtDlp::Account::Premium:
+            out << "valid: the account is offered audio at " << qRound(kbps) << " kbit/s" << Qt::endl;
+            return 0;
+        case YtDlp::Account::Ordinary:
+            out << "accepted, but no Premium audio is offered: " << qRound(kbps) << " kbit/s at best" << Qt::endl;
+            return 1;
+        case YtDlp::Account::Expired:
+            out << "expired: " << err << Qt::endl;
+            return 1;
+        case YtDlp::Account::Unknown:
+            out << "error: " << err << Qt::endl;
             return 1;
         }
     }

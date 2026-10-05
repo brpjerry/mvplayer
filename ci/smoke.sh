@@ -325,11 +325,16 @@ PY
 # Cookies the browser has rotated since: yt-dlp only warns and lists what
 # anyone is offered. That must be said, not pass for "nothing better".
 touch "$WORK/expired"
+C=$(MVPLAYER_YTDLP="$PREMIUM" "$BUILD/mvplayer-import" --cookies "$WORK/cookies.txt" check-cookies || true); echo "$C"
+[[ "$C" == expired:* ]]
 OUT=$(MVPLAYER_YTDLP="$PREMIUM" timeout 120 "$BUILD/mvplayer-import" --music-dir "$WORK/lib4" --mv-dir "$WORK/mvlib4" \
     --cookies "$WORK/cookies.txt" --check-quality 2>&1)
 echo "$OUT" | grep -E "^\[quality\]"
 [[ "$OUT" == *"0 upgraded, 1 failed; stopped because the account's cookies have expired"* ]]
 rm "$WORK/expired" "$WORK/premium-args"
+C=$(MVPLAYER_YTDLP="$PREMIUM" "$BUILD/mvplayer-import" --cookies "$WORK/cookies.txt" check-cookies); echo "$C"
+[[ "$C" == valid:*"250 kbit/s" ]]
+rm "$WORK/premium-args"
 OUT=$(MVPLAYER_YTDLP="$PREMIUM" timeout 120 "$BUILD/mvplayer-import" --music-dir "$WORK/lib4" --mv-dir "$WORK/mvlib4" \
     --cookies "$WORK/cookies.txt" --check-quality 2>&1)
 echo "$OUT" | grep -E "^\[quality\]|^\[audio\]|warning"

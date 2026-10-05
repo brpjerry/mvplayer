@@ -38,6 +38,10 @@ public:
 
     // What YouTube offers the account for a video, without downloading.
     bool premiumInfo(const QString &id, QJsonObject *info, QString *error);
+
+    // Whether the account's cookies still work, asked of one video.
+    enum class Account { Premium, Ordinary, Expired, Unknown };
+    Account checkAccount(const QString &id, double *kbps, QString *error);
     // From yt-dlp's metadata: the best audio bitrate on offer (kbit/s), the
     // tallest picture, and the bitrate of the format that was downloaded.
     static double bestAudioKbps(const QJsonObject &info);

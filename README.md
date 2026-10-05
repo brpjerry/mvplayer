@@ -211,6 +211,10 @@ only. From then on every imported video is built from that audio — as its
 "YouTube audio" track, and as its main audio where the library's own does not
 replace it.
 
+"Check cookies" asks YouTube whether the cookies still work. Browsers replace
+them every so often, and an export goes stale with that; exporting from a
+private window that is then closed keeps them alive longer.
+
 "Check videos for better quality" goes through the videos already in the
 library, one at a time, and rebuilds those the account is offered something
 better for: the audio is fetched again and put into the existing file, the
@@ -220,7 +224,8 @@ The account is used for nothing else. Searches and video downloads stay
 anonymous (the "1080p Premium" picture needs no account, and signed-in
 clients are not offered it); the cookies are only tried for a video that
 cannot be had without signing in, such as an age-restricted one. Headless:
-`--cookies cookies.txt` and `--check-quality`.
+`--cookies cookies.txt` with `--check-quality`, or with the `check-cookies`
+command.
 
 ### Headless
 

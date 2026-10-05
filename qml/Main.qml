@@ -431,6 +431,7 @@ ApplicationWindow {
         case "rescan": App.rescan(); return "ok"
         case "cookies": return (arg === "" ? (App.removeCookies(), "") : App.importCookies(arg)) || "ok"
         case "check-quality": App.checkQuality(); return "ok"
+        case "check-cookies": App.checkCookies(); return "ok"
         case "step": { // step <video id> <delta>
             const sp = arg.split(" ")
             return "" + window.stepReview(parseInt(sp[0]), parseInt(sp[1] || "1"))
@@ -472,7 +473,8 @@ ApplicationWindow {
                 hwdec: mpv.hwdec, videoSize: mpv.videoSize.width + "x" + mpv.videoSize.height,
                 audioTrack: mpv.audioTrack, audioTracks: mpv.audioTracks.length,
                 busy: App.busy, status: App.statusText, counts: App.trackCounts,
-                cookies: App.hasCookies, checkingQuality: App.checkingQuality, reviewCount: App.reviewCount,
+                cookies: App.hasCookies, checkingCookies: App.checkingCookies, cookiesState: App.cookiesState,
+                cookiesStatus: App.cookiesStatus, checkingQuality: App.checkingQuality, reviewCount: App.reviewCount,
                 facet: App.videos.facetType, reviewLabel: controlBar.reviewLabel,
                 accent: "" + Theme.accent, accentMode: App.accent, theme: App.themeMode, dark: Theme.dark,
                 systemDark: App.systemDark, bg: "" + Theme.bg, musicDirs: App.musicDirs, frameColor: "" + mpv.frameColor,
