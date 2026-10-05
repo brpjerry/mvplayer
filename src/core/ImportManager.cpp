@@ -159,7 +159,8 @@ constexpr double kOwnWaveformOtherVersion = 0.97;
 // tracks were measured against that. So the English version of a song, looked
 // up first, kept the Japanese video, and the Japanese track then "shared" it
 // at 80%. A track that is all but identical to the video's own audio, where
-// the track holding the video is clearly less so, takes the video over.
+// the track holding the video is clearly less so, becomes the audio the
+// video plays. The holder stays linked to the video.
 constexpr double kTakeoverShare = 0.90;  // of the newcomer, against YouTube's audio
 constexpr double kTakeoverMargin = 0.08; // by which the holder has to fall short of it
 
@@ -1421,35 +1422,22 @@ void ImportManager::runJob(qint64 trackId, const ImportSettings &cfg)
                                 }
                             }
                             if (!losing.isEmpty() && putLibraryAudioIn(*existing, track, own, cfg, &error, false, 1)) {
-                                const QString why = QStringLiteral("“%1” [%2] fits the audio of “%3” better (%4% against %5%) and took the video")
-                                                        .arg(track.title, track.album, c.title)
-                                                        .arg(qRound(100 * waveformShare(own))).arg(qRound(100 * holderShare));
-                                QSet<qint64> again;
-                                QVector<qint64> requeue;
-                                for (const TrackInfo &o : std::as_const(losing)) {
-                                    // Not theirs: they look again, and not at this upload.
-                                    m_db->rejectVideoFor(o, c.id);
-                                    m_db->releaseTrack(o.id, why);
-                                    const qint64 key = o.recording > 0 ? o.recording : -o.id;
-                                    if (!again.contains(key)) {
-                                        again.insert(key);
-                                        requeue << o.id;
-                                    }
-                                }
+                                // The tracks that held it keep it. Whether a
+                                // track at 70% is another master of the same
+                                // performance (which shares) or another
+                                // language's version (which should not) the
+                                // waveform cannot say, and some hold their
+                                // video by the user's own verdict. What
+                                // changes is whose audio the video plays.
                                 checked(c, QStringLiteral("takeover"),
-                                        QStringLiteral("already in the library through “%1”, but this track is the video's own audio: %2% of it the same waveform, against %3% for “%1”")
+                                        QStringLiteral("already in the library through “%1”, but this track is the video's own audio: %2% of it the same waveform, against %3% for “%1”. The video now plays this track; “%1” keeps it too")
                                             .arg(holderTitle).arg(qRound(100 * waveformShare(own))).arg(qRound(100 * holderShare)),
                                         &own);
-                                qInfo().noquote() << QStringLiteral("[import] “%1” [%2] takes “%3” over from “%4”: %5% against %6% of the video's own audio")
+                                qInfo().noquote() << QStringLiteral("[import] “%1” [%2] is the audio of “%3” now, not “%4”: %5% against %6% of the video's own audio")
                                                          .arg(track.title, track.album, c.title, holderTitle)
                                                          .arg(qRound(100 * waveformShare(own))).arg(qRound(100 * holderShare));
-                                finish(QStringLiteral("done"), existing->id, QStringLiteral("takes “%1” over from “%2”").arg(c.title, holderTitle));
-                                QMetaObject::invokeMethod(this, [this, requeue] {
-                                    for (qint64 id : requeue)
-                                        enqueue(id);
-                                    emit activityChanged();
-                                    pump();
-                                }, Qt::QueuedConnection);
+                                finish(QStringLiteral("done"), existing->id,
+                                       QStringLiteral("shares the video of “%1”, which now plays this track").arg(holderTitle));
                                 return;
                             }
                             if (m_cancel)
