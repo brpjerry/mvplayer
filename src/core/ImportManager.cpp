@@ -1750,22 +1750,37 @@ void ImportManager::runJob(qint64 trackId, const ImportSettings &cfg)
     QVector<qint64> added;
     QString firstSummary, lastError;
     qint64 group = heldGroup;
-    for (const Pick &pick : std::as_const(picks)) {
-        // The outright match still holds its claim from the examination.
-        if (forReview) {
-            if (!claimVideo(pick.c.id)) {
-                cleanup();
-                break;
-            }
-            if (m_db->videoByYtId(pick.c.id)) {
-                releaseVideo(pick.c.id); // another track brought it in meanwhile
-                continue;
-            }
+    // The videos stay claimed until this track's result is recorded. Released
+    // sooner, another track could act on one of them in between — take an
+    // option out of review before the track waiting for it was linked to it,
+    // which left that track with the wrong video and an option with none.
+    QStringList claimed;
+    const auto release = qScopeGuard([&] {
+        for (const QString &id : std::as_const(claimed))
+            releaseVideo(id);
+    });
+    if (forReview) {
+        // All of them first, in one order for every track: two tracks that
+        // each hold one option and wait for the other's would wait for ever.
+        QStringList ids;
+        for (const Pick &pick : std::as_const(picks))
+            ids << pick.c.id;
+        ids.sort();
+        for (const QString &id : std::as_const(ids)) {
+            if (!claimVideo(id))
+                return cleanup();
+            claimed << id;
         }
+    } else {
+        // The outright match still holds its claim from the examination.
+        claimed << picks.first().c.id;
+    }
+    for (const Pick &pick : std::as_const(picks)) {
+        if (forReview && m_db->videoByYtId(pick.c.id))
+            continue; // another track brought it in meanwhile
         qint64 videoId = 0;
         QString summary;
         const Got got = bringIn(pick, forReview, group, &videoId, &summary);
-        releaseVideo(pick.c.id);
         if (got == Got::Stopped) {
             // Half a set of options is no use: the track looks again later.
             for (qint64 id : std::as_const(added)) {

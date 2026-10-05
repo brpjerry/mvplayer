@@ -406,8 +406,14 @@ QVector<VideoInfo> Database::untrackedVideos()
 {
     QVector<VideoInfo> out;
     QSqlQuery q(conn());
-    q.prepare(QStringLiteral("SELECT %1 FROM videos WHERE NOT EXISTS"
-                             " (SELECT 1 FROM tracks WHERE tracks.video_id = videos.id AND tracks.absent = 0) ORDER BY id")
+    // Of the options that wait for review for a track, the track is linked
+    // to one: the others are its videos as well.
+    q.prepare(QStringLiteral(
+                  "SELECT %1 FROM videos WHERE NOT EXISTS"
+                  " (SELECT 1 FROM tracks t JOIN videos g ON g.id = t.video_id WHERE t.absent = 0 AND"
+                  "  (g.id = videos.id OR (videos.review = 1 AND g.review = 1 AND"
+                  "   COALESCE(NULLIF(g.review_group, 0), g.id) = COALESCE(NULLIF(videos.review_group, 0), videos.id))))"
+                  " ORDER BY id")
                   .arg(QLatin1String(kVideoCols)));
     if (run(q)) {
         while (q.next())
