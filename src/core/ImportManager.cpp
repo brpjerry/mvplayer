@@ -247,10 +247,11 @@ AudioAlign::Result fitted(AudioAlign::Result r, const TrackInfo &track, const QS
     if (r.segments.isEmpty() || audioReplaceable(r))
         return r;
     const double whole = std::min(r.trackSec, r.videoSec);
-    // Another singer over the same backing fits all of this as well: the
-    // upload has to be one of the track's artists', by its title or channel.
+    // Another singer over the same backing fits all of this as well, and so
+    // does somebody's re-upload with other audio under it: this much trust
+    // in so little waveform is for the artist's own channel alone.
     if (r.fpMatchedSec < 0.8 * whole || r.goodSec < 0.2 * whole || r.contourCorr < 0.5
-        || !Matcher::sameVersion(track, videoTitle) || !Matcher::namesArtist(track, videoTitle, channel))
+        || !Matcher::sameVersion(track, videoTitle) || !Matcher::isOwnChannel(track, channel))
         return r;
     bool exact = false;
     const AudioAlign::Result placed = placedWhole(r, &exact);
