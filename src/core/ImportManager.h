@@ -90,6 +90,8 @@ public:
     bool busy() const { return m_scanning || m_upgrading || m_reviewJobs > 0 || m_blocked || m_active > 0 || !m_queue.isEmpty(); }
 
     static QString dataDir(const QString &mvDir);
+    // What is remembered about candidate videos between tracks.
+    static QString cacheDir(const QString &mvDir);
 
 signals:
     void jobChanged(const JobStatus &status);

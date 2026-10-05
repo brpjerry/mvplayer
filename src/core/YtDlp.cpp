@@ -6,6 +6,10 @@
 
 #include <QCoreApplication>
 #include <QDir>
+#include <QSaveFile>
+#include <QFileInfo>
+#include <QDateTime>
+#include <QCryptographicHash>
 #include <QFile>
 #include <QJsonArray>
 #include <QJsonDocument>
@@ -94,6 +98,95 @@ ProcResult YtDlp::run(const QStringList &args, const ProcOptions &opts)
     return account.isEmpty() ? r : runProcess(m_program, baseArgs() + account + args, opts);
 }
 
+QString YtDlp::cacheEntry(const QString &id) const
+{
+    return m_cacheDir.isEmpty() ? QString() : QDir(m_cacheDir).filePath(QStringLiteral("videos/") + id);
+}
+
+QString YtDlp::freshInfo(const QString &id) const
+{
+    const QString entry = cacheEntry(id);
+    if (entry.isEmpty())
+        return {};
+    // The addresses in it are signed for about six hours.
+    const QFileInfo fi(QDir(entry).filePath(QStringLiteral("audio.info.json")));
+    const bool fresh = fi.exists() && fi.lastModified().secsTo(QDateTime::currentDateTime()) < 2 * 3600;
+    return fresh ? fi.absoluteFilePath() : QString();
+}
+
+ProcResult YtDlp::runFor(const QString &id, const QStringList &args, const ProcOptions &opts)
+{
+    const QString info = freshInfo(id);
+    if (!info.isEmpty()) {
+        const ProcResult r = runProcess(m_program, baseArgs() + args + QStringList{QStringLiteral("--load-info-json"), info}, opts);
+        if (r.ok() || (m_cancel && m_cancel->load())) {
+            ++m_cacheHits;
+            return r;
+        }
+        // An address that lapsed early, a page that changed: ask again.
+    }
+    return run(args + QStringList{url(id)}, opts);
+}
+
+QJsonObject YtDlp::note(const QString &id, const QString &name) const
+{
+    const QString entry = cacheEntry(id);
+    QFile f(QDir(entry).filePath(name + QStringLiteral(".note.json")));
+    if (entry.isEmpty() || !f.open(QIODevice::ReadOnly))
+        return {};
+    return QJsonDocument::fromJson(f.readAll()).object();
+}
+
+void YtDlp::setNote(const QString &id, const QString &name, const QJsonObject &value) const
+{
+    const QString entry = cacheEntry(id);
+    if (entry.isEmpty() || !QDir().mkpath(entry))
+        return;
+    QSaveFile f(QDir(entry).filePath(name + QStringLiteral(".note.json")));
+    if (f.open(QIODevice::WriteOnly) && f.write(QJsonDocument(value).toJson(QJsonDocument::Compact)) > 0)
+        f.commit();
+}
+
+void YtDlp::pruneCache(const QString &dir, qint64 maxBytes, int maxAgeDays)
+{
+    const QDateTime now = QDateTime::currentDateTime();
+    QDir searches(QDir(dir).filePath(QStringLiteral("search")));
+    for (const QFileInfo &fi : searches.entryInfoList(QDir::Files)) {
+        if (fi.lastModified().secsTo(now) > 24 * 3600)
+            QFile::remove(fi.absoluteFilePath());
+    }
+    struct Entry {
+        QString path;
+        QDateTime when;
+        qint64 bytes = 0;
+    };
+    QVector<Entry> entries;
+    qint64 total = 0;
+    QDir videos(QDir(dir).filePath(QStringLiteral("videos")));
+    for (const QFileInfo &d : videos.entryInfoList(QDir::Dirs | QDir::NoDotAndDotDot)) {
+        Entry e;
+        e.path = d.absoluteFilePath();
+        for (const QFileInfo &f : QDir(e.path).entryInfoList(QDir::Files)) {
+            e.bytes += f.size();
+            if (!e.when.isValid() || f.lastModified() > e.when)
+                e.when = f.lastModified();
+        }
+        if (!e.when.isValid() || e.when.daysTo(now) > maxAgeDays) {
+            QDir(e.path).removeRecursively();
+            continue;
+        }
+        total += e.bytes;
+        entries << e;
+    }
+    std::sort(entries.begin(), entries.end(), [](const Entry &a, const Entry &b) { return a.when < b.when; });
+    for (const Entry &e : std::as_const(entries)) {
+        if (total <= maxBytes)
+            break;
+        QDir(e.path).removeRecursively();
+        total -= e.bytes;
+    }
+}
+
 QStringList YtDlp::baseArgs() const
 {
     QStringList a = {
@@ -136,19 +229,40 @@ QString YtDlp::url(const QString &id)
 
 bool YtDlp::search(const QString &query, int count, QVector<YtCandidate> *out, QString *error)
 {
-    QStringList args = baseArgs();
-    args << QStringLiteral("--flat-playlist") << QStringLiteral("-J")
-         << QStringLiteral("ytsearch%1:%2").arg(count).arg(query);
-    ProcOptions opts;
-    opts.cancel = m_cancel;
-    opts.timeoutMs = 120000;
-    const ProcResult r = runProcess(m_program, args, opts);
-    if (!r.ok()) {
-        if (error)
-            *error = r.errorText();
-        return false;
+    // The same query comes up for every file of a song.
+    QString cached;
+    QByteArray json;
+    if (!m_cacheDir.isEmpty()) {
+        const QByteArray key = QCryptographicHash::hash(QStringLiteral("%1:%2").arg(count).arg(query).toUtf8(), QCryptographicHash::Sha1).toHex();
+        cached = QDir(m_cacheDir).filePath(QStringLiteral("search/%1.json").arg(QString::fromLatin1(key)));
+        QFile f(cached);
+        if (QFileInfo(cached).lastModified().secsTo(QDateTime::currentDateTime()) < 24 * 3600 && f.open(QIODevice::ReadOnly)) {
+            json = f.readAll();
+            ++m_cacheHits;
+        }
     }
-    const QJsonArray entries = QJsonDocument::fromJson(r.out).object().value(QLatin1String("entries")).toArray();
+    if (json.isEmpty()) {
+        QStringList args = baseArgs();
+        args << QStringLiteral("--flat-playlist") << QStringLiteral("-J")
+             << QStringLiteral("ytsearch%1:%2").arg(count).arg(query);
+        ProcOptions opts;
+        opts.cancel = m_cancel;
+        opts.timeoutMs = 120000;
+        const ProcResult r = runProcess(m_program, args, opts);
+        if (!r.ok()) {
+            if (error)
+                *error = r.errorText();
+            return false;
+        }
+        json = r.out;
+        if (!cached.isEmpty() && QJsonDocument::fromJson(json).isObject()) {
+            QDir().mkpath(QFileInfo(cached).absolutePath());
+            QSaveFile f(cached);
+            if (f.open(QIODevice::WriteOnly) && f.write(json) == json.size())
+                f.commit();
+        }
+    }
+    const QJsonArray entries = QJsonDocument::fromJson(json).object().value(QLatin1String("entries")).toArray();
     int rank = 0;
     for (const QJsonValue &v : entries) {
         const QJsonObject e = v.toObject();
@@ -172,10 +286,31 @@ bool YtDlp::search(const QString &query, int count, QVector<YtCandidate> *out, Q
     return true;
 }
 
-bool YtDlp::downloadAudio(const QString &id, const QString &dir, QString *file, QJsonObject *info, QString *error,
+bool YtDlp::downloadAudio(const QString &id, const QString &workDir, QString *file, QJsonObject *info, QString *error,
                           bool premium)
 {
     const QString name = premium ? QStringLiteral("premium") : QStringLiteral("audio");
+    // What anyone is offered is kept: the next track that has this video as
+    // a candidate listens to the same file.
+    const QString entry = premium ? QString() : cacheEntry(id);
+    const QString dir = entry.isEmpty() ? workDir : entry;
+    if (!entry.isEmpty()) {
+        const QString have = findFile(entry, name, {QStringLiteral(".json"), QStringLiteral(".part"), QStringLiteral(".ytdl")});
+        QFile jf(QDir(entry).filePath(name + QStringLiteral(".info.json")));
+        if (!have.isEmpty() && jf.open(QIODevice::ReadOnly)) {
+            const QJsonObject cachedInfo = QJsonDocument::fromJson(jf.readAll()).object();
+            if (!cachedInfo.isEmpty()) {
+                if (info)
+                    *info = cachedInfo;
+                *file = have;
+                ++m_cacheHits;
+                return true;
+            }
+        }
+        // Half an entry is none.
+        QDir(entry).removeRecursively();
+        QDir().mkpath(entry);
+    }
     QStringList args;
     args << QStringLiteral("-f") << QStringLiteral("ba/b") << QStringLiteral("--no-progress")
          << QStringLiteral("--write-info-json") << QStringLiteral("-o")
@@ -340,11 +475,11 @@ bool YtDlp::downloadPreview(const QString &id, const QString &dir, QString *file
 {
     QStringList args;
     args << QStringLiteral("-f") << QStringLiteral("wv*[height>=144]/wv*/w") << QStringLiteral("--no-progress")
-         << QStringLiteral("-o") << QDir(dir).filePath(QStringLiteral("preview.%(ext)s")) << url(id);
+         << QStringLiteral("-o") << QDir(dir).filePath(QStringLiteral("preview.%(ext)s"));
     ProcOptions opts;
     opts.cancel = m_cancel;
     opts.timeoutMs = 15 * 60 * 1000;
-    const ProcResult r = run(args, opts);
+    const ProcResult r = runFor(id, args, opts);
     if (!r.ok()) {
         if (error)
             *error = r.errorText();
@@ -362,7 +497,7 @@ bool YtDlp::downloadVideo(const QString &id, const QString &dir, const std::func
          << QStringLiteral("--convert-thumbnails") << QStringLiteral("jpg") << QStringLiteral("--newline")
          << QStringLiteral("--progress-template")
          << QStringLiteral("download:MVP %(progress.downloaded_bytes)s %(progress.total_bytes)s %(progress.total_bytes_estimate)s")
-         << QStringLiteral("-o") << QDir(dir).filePath(QStringLiteral("video.%(ext)s")) << url(id);
+         << QStringLiteral("-o") << QDir(dir).filePath(QStringLiteral("video.%(ext)s"));
     ProcOptions opts;
     opts.cancel = m_cancel;
     opts.timeoutMs = 4 * 60 * 60 * 1000;
@@ -379,7 +514,7 @@ bool YtDlp::downloadVideo(const QString &id, const QString &dir, const std::func
         if (total > 0)
             progress(qBound(0.0, done / total, 1.0));
     };
-    const ProcResult r = run(args, opts);
+    const ProcResult r = runFor(id, args, opts);
     if (!r.ok()) {
         if (error)
             *error = r.errorText();
