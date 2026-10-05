@@ -18,7 +18,8 @@ def main():
     tsv = "--tsv" in sys.argv
     data = os.path.join(args[0], ".mvplayer")
     events = []
-    for name in ("import-log.jsonl.1", "import-log.jsonl"):
+    # Oldest first: .8 … .1 are earlier generations of the log.
+    for name in [f"import-log.jsonl.{n}" for n in range(8, 0, -1)] + ["import-log.jsonl"]:
         path = os.path.join(data, name)
         if os.path.exists(path):
             with open(path, encoding="utf-8") as f:

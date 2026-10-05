@@ -54,6 +54,7 @@ bool audioMatches(const AudioAlign::Result &r)
 constexpr int kFailStreakLimit = 8;         // consecutive network failures that also trip the breaker
 constexpr int kMaxPauseSecs = 2 * 60 * 60;
 constexpr qint64 kLogRotateBytes = 8 * 1024 * 1024;
+constexpr int kLogGenerations = 8;
 
 // Why a video's soundtrack does not count as containing the track.
 QString mismatchReason(const AudioAlign::Result &r)
@@ -459,7 +460,11 @@ void ImportManager::appendLog(const QJsonObject &entry)
     const QString path = QDir(dataDir(settings().mvDir)).filePath(QStringLiteral("import-log.jsonl"));
     QMutexLocker lock(&m_logMutex);
     if (QFileInfo(path).size() > kLogRotateBytes) {
-        QFile::remove(path + QStringLiteral(".1"));
+        // .1 is the newest of the old ones. Enough of them for the import
+        // of a large library to be looked into afterwards.
+        QFile::remove(path + QStringLiteral(".%1").arg(kLogGenerations));
+        for (int n = kLogGenerations - 1; n >= 1; --n)
+            QFile::rename(path + QStringLiteral(".%1").arg(n), path + QStringLiteral(".%1").arg(n + 1));
         QFile::rename(path, path + QStringLiteral(".1"));
     }
     QFile f(path);
