@@ -125,6 +125,7 @@ ProcResult YtDlp::run(const QStringList &args, const ProcOptions &opts)
     static const QStringList signs = {
         QStringLiteral("confirm your age"), QStringLiteral("age-restricted"), QStringLiteral("members-only"),
         QStringLiteral("join this channel"), QStringLiteral("private video"), QStringLiteral("login required"),
+        QStringLiteral("please sign in"),
     };
     const QString e = r.errorText().toLower();
     if (std::none_of(signs.begin(), signs.end(), [&e](const QString &s) { return e.contains(s); }))
@@ -319,6 +320,10 @@ bool YtDlp::search(const QString &query, int count, QVector<YtCandidate> *out, Q
         if (c.channel.isEmpty())
             c.channel = e.value(QLatin1String("uploader")).toString();
         c.duration = e.value(QLatin1String("duration")).toDouble();
+        // No length: a stream that is on air around the clock (the search
+        // does not always say so). Its "download" would never end.
+        if (c.duration <= 0)
+            continue;
         c.views = qint64(e.value(QLatin1String("view_count")).toDouble());
         c.verified = e.value(QLatin1String("channel_is_verified")).toBool();
         c.rank = rank++;

@@ -207,7 +207,8 @@ bool Matcher::sameVersion(const TrackInfo &track, const QString &videoTitle)
 
     // "... feat. 初音ミク": sung by someone the track does not have. The
     // producer's own upload of a song is its other singer's version.
-    static const QRegularExpression feat(QStringLiteral(" (?:feat|ft|featuring) (\\S+)"));
+    // Likewise "… ／mona（CV：夏川椎菜）", "（Vo：…）": the voice is named.
+    static const QRegularExpression feat(QStringLiteral(" (?:feat|ft|featuring|cv|vo|vocal) (\\S+)"));
     const QString whose = title + album + tokens(track.artist) + tokens(track.albumArtist);
     auto it = feat.globalMatch(video);
     while (it.hasNext()) {
@@ -221,6 +222,16 @@ bool Matcher::sameVersion(const TrackInfo &track, const QString &videoTitle)
 bool Matcher::namesArtist(const TrackInfo &track, const QString &videoTitle, const QString &channel)
 {
     const QString ct = tokens(videoTitle), ch = tokens(channel);
+    // "Producer feat. Singer": the singer is who has to be named. The
+    // producer's uploads all carry the producer's name, whoever sings.
+    static const QRegularExpression feat(QStringLiteral(" (?:feat|ft|featuring) (.+)$"));
+    const QRegularExpressionMatch m = feat.match(tokens(track.artist));
+    if (m.hasMatch()) {
+        const QStringList singers = m.captured(1).split(QLatin1Char(' '), Qt::SkipEmptyParts);
+        return std::any_of(singers.begin(), singers.end(), [&](const QString &w) {
+            return w.size() >= 2 && (ct.contains(w) || ch.contains(w));
+        });
+    }
     for (const QString &n : artistNames(track)) {
         const QString nt = tokens(n).trimmed();
         if (nt.size() >= 2 && (ct.contains(nt) || ch.contains(nt)))

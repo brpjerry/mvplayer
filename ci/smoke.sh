@@ -97,6 +97,10 @@ rank() { "$BUILD/mvplayer-import" rank-check "$@" | tr -d '\r'; }
 [[ $(rank "Prism" "Clara" "Prism (Lyric Video) lyrics" "Clara Official YouTube Channel") == "trusted, names the artist" ]]
 [[ $(rank "Prism" "Clara" "Prism MV" "We love Val & Clara") == "trusted, names the artist" ]]
 [[ $(rank "Prism" "Clara" "Prism / Somebody MV" "Somebody Official") == "trusted, does not name the artist" ]]
+# A producer's upload names the producer whoever sings: the singer counts.
+[[ $(rank "Whip" "Works feat.Rio" "【MV】Whip／mona（CV：Shiina）【Works】" "Works OFFICIAL" verified) == "trusted, does not name the artist" ]]
+[[ $(rank "Whip" "Works feat.Rio" "【MV】Whip／Works feat. Rio" "Works OFFICIAL" verified) == "trusted, names the artist" ]]
+[[ $("$BUILD/mvplayer-import" same-version "Whip" "Songs" "【MV】Whip／mona（CV：Shiina）【Works】" | tr -d '\r') == different ]]
 
 echo "== mux"
 "$BUILD/mvplayer-import" mux "$WORK/track.flac" "$WORK/mv.mkv" "$WORK/out.mkv"
