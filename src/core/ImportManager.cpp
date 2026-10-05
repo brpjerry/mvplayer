@@ -268,6 +268,11 @@ ImportManager::~ImportManager()
     stop();
 }
 
+QString ImportManager::cacheDir(const QString &mvDir)
+{
+    return QDir(dataDir(mvDir)).filePath(QStringLiteral("cache"));
+}
+
 QString ImportManager::dataDir(const QString &mvDir)
 {
     return QDir(mvDir).filePath(QStringLiteral(".mvplayer"));
@@ -295,6 +300,9 @@ void ImportManager::start()
     // Leftovers from a previous run that was interrupted: scratch files, and
     // half-written outputs if the process was killed outright mid-mux.
     QDir(QDir(dataDir(cfg.mvDir)).filePath(QStringLiteral("tmp"))).removeRecursively();
+    // What was remembered about candidates: not for ever, and not without bound.
+    YtDlp::pruneCache(cacheDir(cfg.mvDir), 2LL * 1024 * 1024 * 1024, 14);
+
     QDirIterator partials(cfg.mvDir, {QStringLiteral("*.mkv.part.mkv")}, QDir::Files, QDirIterator::Subdirectories);
     while (partials.hasNext())
         QFile::remove(partials.next());
@@ -605,6 +613,7 @@ void ImportManager::subtitleVideos(const ImportSettings &cfg)
     }
     m_upgradeTotal = int(videos.size());
     YtDlp yt(qEnvironmentVariable("MVPLAYER_YTDLP", toolPath(QStringLiteral("yt-dlp"))), cfg.ytdlpArgs, cfg.cookiesFile, &m_cancel);
+    yt.setCacheDir(cacheDir(cfg.mvDir));
     const QString workDir = QDir(dataDir(cfg.mvDir)).filePath(QStringLiteral("tmp/subtitles"));
     int withSubs = 0, failed = 0;
     for (const VideoInfo &v : std::as_const(videos)) {
@@ -725,6 +734,7 @@ QString ImportManager::upgradeVideo(const VideoInfo &video, const ImportSettings
     }
 
     YtDlp yt(qEnvironmentVariable("MVPLAYER_YTDLP", toolPath(QStringLiteral("yt-dlp"))), cfg.ytdlpArgs, cfg.cookiesFile, &m_cancel);
+    yt.setCacheDir(cacheDir(cfg.mvDir));
     QString error;
     QJsonObject offer;
     if (!yt.premiumInfo(video.ytId, &offer, &error)) {
@@ -835,6 +845,8 @@ QString ImportManager::upgradeVideo(const VideoInfo &video, const ImportSettings
 
 void ImportManager::retryUnmatched()
 {
+    // Asked to look again: with fresh eyes, not at yesterday's search results.
+    QDir(QDir(cacheDir(settings().mvDir)).filePath(QStringLiteral("search"))).removeRecursively();
     m_db->resetTracks({QStringLiteral("not_found"), QStringLiteral("failed")});
     for (const TrackInfo &t : m_db->pendingRecordings())
         enqueue(t.id);
@@ -955,6 +967,7 @@ void ImportManager::runJob(qint64 trackId, const ImportSettings &cfg)
     QElapsedTimer clock;
     clock.start();
     int nSearch = 0, nAudio = 0, nPreview = 0, nVideo = 0, nSubs = 0;
+    const YtDlp *ytForLog = nullptr;
     QJsonArray logQueries, logCandidates, logChecked;
     qint64 heldVideoForLog = 0;
     QJsonArray logVideos; // what was brought into the library
@@ -986,7 +999,7 @@ void ImportManager::runJob(qint64 trackId, const ImportSettings &cfg)
             {QStringLiteral("videos"), logVideos},
             {QStringLiteral("seconds"), qRound(clock.elapsed() / 100.0) / 10.0},
             {QStringLiteral("requests"), QJsonObject{{QStringLiteral("search"), nSearch}, {QStringLiteral("audio"), nAudio},
-                                                      {QStringLiteral("preview"), nPreview}, {QStringLiteral("video"), nVideo}, {QStringLiteral("subtitles"), nSubs}}},
+                                                      {QStringLiteral("preview"), nPreview}, {QStringLiteral("video"), nVideo}, {QStringLiteral("subtitles"), nSubs}, {QStringLiteral("fromCache"), ytForLog ? ytForLog->cacheHits() : 0}}},
             {QStringLiteral("queries"), logQueries},
             {QStringLiteral("candidates"), logCandidates},
             {QStringLiteral("checked"), logChecked},
@@ -1092,6 +1105,8 @@ void ImportManager::runJob(qint64 trackId, const ImportSettings &cfg)
     // ---- 1. Search ---------------------------------------------------------
     report(QStringLiteral("Searching"));
     YtDlp yt(qEnvironmentVariable("MVPLAYER_YTDLP", toolPath(QStringLiteral("yt-dlp"))), cfg.ytdlpArgs, cfg.cookiesFile, &m_cancel);
+    yt.setCacheDir(cacheDir(cfg.mvDir));
+    ytForLog = &yt;
     QVector<YtCandidate> candidates;
     QSet<QString> seen;
     bool searched = false;
@@ -1378,24 +1393,39 @@ void ImportManager::runJob(qint64 trackId, const ImportSettings &cfg)
 
         if (cfg.skipStillImages) {
             report(QStringLiteral("Checking video"), -1, c.title);
-            QString preview;
-            ++nPreview;
-            if (!withRetry([&] { return yt.downloadPreview(c.id, dir, &preview, &error); })) {
+            // A still image is one for every track that has it as a candidate.
+            Muxer::StillCheck check;
+            const QJsonObject known = yt.note(c.id, QStringLiteral("picture"));
+            if (known.value(QLatin1String("samples")).toInt() > 0) {
+                check.valid = true;
+                check.still = known.value(QLatin1String("still")).toBool();
+                check.movingShare = known.value(QLatin1String("movingShare")).toDouble();
+                check.samples = known.value(QLatin1String("samples")).toInt();
+            } else {
+                QString preview;
+                ++nPreview;
+                if (!withRetry([&] { return yt.downloadPreview(c.id, dir, &preview, &error); })) {
+                    if (m_cancel)
+                        return cleanup();
+                    checked(c, QStringLiteral("error"), QStringLiteral("its picture could not be downloaded: %1").arg(error), &ar);
+                    if (m_blocked)
+                        return postpone();
+                    // Never accept a video whose picture could not be looked at.
+                    undecided = true;
+                    reasons << QStringLiteral("%1: %2").arg(c.id, error);
+                    QDir(dir).removeRecursively();
+                    continue;
+                }
+                check = Muxer::checkStill(preview, false, &m_cancel);
+                QFile::remove(preview);
                 if (m_cancel)
                     return cleanup();
-                checked(c, QStringLiteral("error"), QStringLiteral("its picture could not be downloaded: %1").arg(error), &ar);
-                if (m_blocked)
-                    return postpone();
-                // Never accept a video whose picture could not be looked at.
-                undecided = true;
-                reasons << QStringLiteral("%1: %2").arg(c.id, error);
-                QDir(dir).removeRecursively();
-                continue;
+                if (check.valid) {
+                    yt.setNote(c.id, QStringLiteral("picture"),
+                               {{QStringLiteral("still"), check.still}, {QStringLiteral("movingShare"), check.movingShare},
+                                {QStringLiteral("samples"), check.samples}});
+                }
             }
-            const Muxer::StillCheck check = Muxer::checkStill(preview, false, &m_cancel);
-            QFile::remove(preview);
-            if (m_cancel)
-                return cleanup();
             const QJsonObject picture{{QStringLiteral("movingShare"), std::round(check.movingShare * 1000) / 1000},
                                       {QStringLiteral("framePairs"), qMax(0, check.samples - 1)}};
             if (!check.valid) {
