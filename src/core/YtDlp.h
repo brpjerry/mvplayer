@@ -57,6 +57,9 @@ public:
     // True when an error message means YouTube is refusing this client
     // altogether (rate limit, bot check) rather than one video failing.
     static bool looksBlocked(const QString &error);
+    // True when an error message says the account's cookies are no longer
+    // accepted: browsers rotate them, and an export goes stale within days.
+    static bool cookiesExpired(const QString &error);
 
 private:
     QStringList baseArgs() const;

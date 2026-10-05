@@ -542,8 +542,9 @@ void ImportManager::upgradeVideos(const ImportSettings &cfg)
     const QVector<VideoInfo> videos = m_db->allVideos();
     m_upgradeTotal = int(videos.size());
     int rebuilt = 0, failed = 0;
+    bool expired = false;
     for (const VideoInfo &v : videos) {
-        if (m_cancel || m_blocked)
+        if (m_cancel || m_blocked || expired)
             break;
         JobStatus st;
         st.upgrade = true;
@@ -559,6 +560,10 @@ void ImportManager::upgradeVideos(const ImportSettings &cfg)
             break;
         rebuilt += outcome == QLatin1String("done");
         failed += outcome == QLatin1String("failed");
+        // Without the account there is nothing to find for any video.
+        expired = outcome == QLatin1String("failed") && YtDlp::cookiesExpired(detail);
+        appendLog({{QStringLiteral("event"), QStringLiteral("quality")}, {QStringLiteral("ytId"), v.ytId},
+                   {QStringLiteral("title"), v.title}, {QStringLiteral("outcome"), outcome}, {QStringLiteral("detail"), detail}});
         st.finished = true;
         st.outcome = outcome;
         st.detail = detail;
@@ -574,8 +579,13 @@ void ImportManager::upgradeVideos(const ImportSettings &cfg)
         emit activityChanged();
     }
     if (!m_cancel) {
+        const char *stopped = expired ? "; stopped because the account's cookies have expired"
+            : m_blocked ? "; stopped because YouTube is limiting requests" : "";
         qInfo("[quality] checked %d of %d videos: %d upgraded, %d failed%s", m_upgradeDone.load(), int(videos.size()),
-              rebuilt, failed, m_blocked ? "; stopped because YouTube is limiting requests" : "");
+              rebuilt, failed, stopped);
+        appendLog({{QStringLiteral("event"), QStringLiteral("quality-check")}, {QStringLiteral("checked"), m_upgradeDone.load()},
+                   {QStringLiteral("videos"), int(videos.size())}, {QStringLiteral("upgraded"), rebuilt}, {QStringLiteral("failed"), failed},
+                   {QStringLiteral("stopped"), QString::fromLatin1(stopped).mid(2)}});
     }
 }
 
@@ -607,13 +617,15 @@ QString ImportManager::upgradeVideo(const VideoInfo &video, const ImportSettings
     QString error;
     QJsonObject offer;
     if (!yt.premiumInfo(video.ytId, &offer, &error)) {
-        if (!m_cancel)
+        if (!m_cancel && !YtDlp::cookiesExpired(error))
             noteFailure(error);
         return fail(error);
     }
     noteSuccess();
     const double offered = YtDlp::bestAudioKbps(offer);
-    const bool betterAudio = offered >= have * 1.3;
+    // Only the account's audio counts: what anyone is offered is listed at
+    // its nominal bitrate, above what a quiet song was measured at.
+    const bool betterAudio = offered >= have * 1.3 && offered >= 200;
     const bool betterVideo = YtDlp::bestHeight(offer) > video.height;
     if (!betterAudio && !betterVideo) {
         *detail = QStringLiteral("%1p, audio %2 kbit/s").arg(video.height).arg(qRound(have));

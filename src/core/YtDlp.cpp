@@ -227,6 +227,12 @@ bool YtDlp::premiumInfo(const QString &id, QJsonObject *info, QString *error)
             *error = r.errorText();
         return false;
     }
+    // yt-dlp carries on without the account, and lists what anyone is offered.
+    if (r.err.contains("cookies are no longer valid")) {
+        if (error)
+            *error = QStringLiteral("the account's cookies have expired: export cookies.txt from the browser again");
+        return false;
+    }
     *info = QJsonDocument::fromJson(r.out).object();
     if (info->value(QLatin1String("formats")).toArray().isEmpty()) {
         if (error)
@@ -234,6 +240,11 @@ bool YtDlp::premiumInfo(const QString &id, QJsonObject *info, QString *error)
         return false;
     }
     return true;
+}
+
+bool YtDlp::cookiesExpired(const QString &error)
+{
+    return error.contains(QLatin1String("cookies have expired"));
 }
 
 double YtDlp::bestAudioKbps(const QJsonObject &info)

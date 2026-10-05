@@ -285,7 +285,12 @@ cat > "$WORK/fake-premium" <<FAKE
 echo "\$*" >> "$WORK/premium-args"
 case " \$* " in *" --cookies "*) ;; *) echo "ERROR: no cookies given" >&2; exit 1 ;; esac
 case " \$* " in
-*" -J "*) echo '{"formats": [{"format_id": "774", "vcodec": "none", "acodec": "opus", "abr": 250}]}' ;;
+*" -J "*) if [ -f "$WORK/expired" ]; then
+        echo "WARNING: [youtube] The provided YouTube account cookies are no longer valid." >&2
+        echo '{"formats": [{"format_id": "251", "vcodec": "none", "acodec": "opus", "abr": 130}]}'
+    else
+        echo '{"formats": [{"format_id": "774", "vcodec": "none", "acodec": "opus", "abr": 250}]}'
+    fi ;;
 *)  out=; prev=
     for a in "\$@"; do [ "\$prev" = "-o" ] && out=\$a; prev=\$a; done
     dir=\$(dirname "\$out")
@@ -317,6 +322,14 @@ db.execute("INSERT INTO videos (yt_id, path, title, audio_source, added_at) "
 db.execute("UPDATE tracks SET state = 'done', video_id = (SELECT id FROM videos)")
 db.commit()
 PY
+# Cookies the browser has rotated since: yt-dlp only warns and lists what
+# anyone is offered. That must be said, not pass for "nothing better".
+touch "$WORK/expired"
+OUT=$(MVPLAYER_YTDLP="$PREMIUM" timeout 120 "$BUILD/mvplayer-import" --music-dir "$WORK/lib4" --mv-dir "$WORK/mvlib4" \
+    --cookies "$WORK/cookies.txt" --check-quality 2>&1)
+echo "$OUT" | grep -E "^\[quality\]"
+[[ "$OUT" == *"0 upgraded, 1 failed; stopped because the account's cookies have expired"* ]]
+rm "$WORK/expired" "$WORK/premium-args"
 OUT=$(MVPLAYER_YTDLP="$PREMIUM" timeout 120 "$BUILD/mvplayer-import" --music-dir "$WORK/lib4" --mv-dir "$WORK/mvlib4" \
     --cookies "$WORK/cookies.txt" --check-quality 2>&1)
 echo "$OUT" | grep -E "^\[quality\]|^\[audio\]|warning"
