@@ -108,6 +108,7 @@ struct VideoInfo {
 
     QString ytTitle;
     QString ytChannel;
+    QString ytChannelId; // UC…; empty for videos from before it was kept
     QJsonObject tags;
     qint64 addedAt = 0;
 };

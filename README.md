@@ -133,6 +133,14 @@ For every track without a video (`src/core/ImportManager.cpp`):
    later — a reaction video pausing to talk — however much of it is the
    track: more than 15 seconds of other audio inside the song sends it to
    review. If nothing passes, nothing is imported for that track.
+   Only an upload on the artist's own channel is taken as the track's
+   video outright. The channel is the artist's when it is named after the
+   artist and nothing else ("Artist", "Artist Official"), when MusicBrainz
+   lists it for the artist (asked once per artist, remembered in the
+   library), or when you approved one of its videos for the artist in
+   review. Anything else that matches — a label's upload, a verified
+   re-upload channel, a video titled "Music Video" by anyone — goes to
+   review, where the card shows the channel.
    A video already in the library plays the audio of the track that got
    it first. When a later track turns out to be the video's own audio — at
    least 90% of the waveform, and clearly more than the track that holds it

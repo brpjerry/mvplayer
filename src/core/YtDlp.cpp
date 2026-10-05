@@ -320,6 +320,7 @@ bool YtDlp::search(const QString &query, int count, QVector<YtCandidate> *out, Q
             continue;
         c.title = e.value(QLatin1String("title")).toString();
         c.channel = e.value(QLatin1String("channel")).toString();
+        c.channelId = e.value(QLatin1String("channel_id")).toString();
         if (c.channel.isEmpty())
             c.channel = e.value(QLatin1String("uploader")).toString();
         c.duration = e.value(QLatin1String("duration")).toDouble();

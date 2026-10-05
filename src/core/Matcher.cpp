@@ -122,7 +122,9 @@ const QStringList &nonMvTrackTerms()
     return t;
 }
 
-QStringList artistNames(const TrackInfo &t)
+} // namespace
+
+QStringList Matcher::artistNames(const TrackInfo &t)
 {
     QStringList names = splitMulti(t.albumArtist);
     for (const QString &a : splitMulti(t.artist)) {
@@ -131,8 +133,6 @@ QStringList artistNames(const TrackInfo &t)
     }
     return names;
 }
-
-} // namespace
 
 bool Matcher::isNonMvTrack(const TrackInfo &track, QString *why)
 {
@@ -255,8 +255,9 @@ bool Matcher::isOwnChannel(const TrackInfo &track, const QString &channel)
 {
     QString rest = tokens(channel);
     bool named = false;
-    static const QRegularExpression parts(QStringLiteral("[()（）\\[\\]【】/／&＆、,;]+"));
-    for (const QString &n : artistNames(track)) {
+    // "Producer feat. Singer": the producer's channel is the artist's.
+    static const QRegularExpression parts(QStringLiteral("[()（）\\[\\]【】/／&＆、,;]+|\\s*\\b(?:feat|ft|featuring)\\.?\\s*"));
+    for (const QString &n : Matcher::artistNames(track)) {
         QStringList forms = n.split(parts, Qt::SkipEmptyParts);
         forms.prepend(n);
         for (const QString &form : std::as_const(forms)) {
@@ -294,7 +295,7 @@ bool Matcher::namesArtist(const TrackInfo &track, const QString &videoTitle, con
     // A tag may hold a name twice over or several names: "Kizuna AI
     // (キズナアイ)", "CANI CLUB/カニ研究会", "A & B". Any one of them will do.
     static const QRegularExpression parts(QStringLiteral("[()（）\\[\\]【】/／&＆、,;]+"));
-    for (const QString &n : artistNames(track)) {
+    for (const QString &n : Matcher::artistNames(track)) {
         QStringList forms = n.split(parts, Qt::SkipEmptyParts);
         forms.prepend(n);
         for (const QString &form : std::as_const(forms)) {
@@ -310,7 +311,7 @@ void Matcher::rank(const TrackInfo &track, QVector<YtCandidate> &candidates)
 {
     const QString titleTok = tokens(track.title);
     const QString albumTok = tokens(track.album);
-    const QStringList names = artistNames(track);
+    const QStringList names = Matcher::artistNames(track);
     const int total = candidates.size();
 
     for (YtCandidate &c : candidates) {
@@ -318,7 +319,7 @@ void Matcher::rank(const TrackInfo &track, QVector<YtCandidate> &candidates)
         const QString ch = tokens(c.channel);
         c.score = 0;
         c.trusted = false;
-        c.vouched = false;
+        c.ownChannel = false;
         c.rejectReason.clear();
 
         // Auto-generated "Artist - Topic" uploads are a still image over the audio.
@@ -357,23 +358,14 @@ void Matcher::rank(const TrackInfo &track, QVector<YtCandidate> &candidates)
 
         // Artist
         bool artistInTitle = false, artistIsChannel = false;
-        QString channelRest = ch;
         for (const QString &n : names) {
             const QString nt = tokens(n).trimmed();
             if (nt.size() < 2)
                 continue;
             artistInTitle |= ct.contains(nt);
             artistIsChannel |= ch.contains(nt);
-            channelRest.replace(nt, QStringLiteral(" "));
         }
-        // "Artist", "Artist Official", "アーティスト公式チャンネル": the artist's
-        // own. "We love A & B" names the artist and is a fan's.
-        static const QRegularExpression generic(QStringLiteral(
-            " (?:official|channel|music|youtube|vevo|tv|records|公式|チャンネル|オフィシャル|[a-z]|\\d+)(?= )"));
-        QString rest = channelRest.simplified().prepend(QLatin1Char(' ')).append(QLatin1Char(' '));
-        while (rest.contains(generic))
-            rest.replace(generic, QString());
-        const bool channelIsOnlyArtist = artistIsChannel && rest.trimmed().isEmpty();
+        const bool channelIsOnlyArtist = isOwnChannel(track, c.channel);
         if (artistInTitle || artistIsChannel)
             c.score += 20;
         if (artistIsChannel)
@@ -415,7 +407,7 @@ void Matcher::rank(const TrackInfo &track, QVector<YtCandidate> &candidates)
         // A channel that merely has the artist's name among other words
         // gets that trust only for titles that do not look like a fan's.
         c.trusted = (artistIsChannel && (!fan || channelIsOnlyArtist)) || ((c.verified || official) && !fan);
-        c.vouched = c.trusted && (channelIsOnlyArtist || c.verified);
+        c.ownChannel = channelIsOnlyArtist;
     }
 
     std::stable_sort(candidates.begin(), candidates.end(), [](const YtCandidate &a, const YtCandidate &b) {

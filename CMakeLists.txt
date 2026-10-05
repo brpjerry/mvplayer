@@ -9,7 +9,7 @@ if(NOT CMAKE_BUILD_TYPE)
     set(CMAKE_BUILD_TYPE RelWithDebInfo)
 endif()
 
-find_package(Qt6 6.5 REQUIRED COMPONENTS Core Sql)
+find_package(Qt6 6.5 REQUIRED COMPONENTS Core Sql Network)
 qt_standard_project_setup(REQUIRES 6.5)
 
 find_package(PkgConfig REQUIRED)
@@ -31,11 +31,12 @@ qt_add_library(mvcore STATIC
     src/core/Muxer.h src/core/Muxer.cpp
     src/core/TalkCheck.h src/core/TalkCheck.cpp
     src/core/Subtitles.h src/core/Subtitles.cpp
+    src/core/ArtistChannels.h src/core/ArtistChannels.cpp
     src/core/LibraryScanner.h src/core/LibraryScanner.cpp
     src/core/ImportManager.h src/core/ImportManager.cpp
 )
 target_include_directories(mvcore PUBLIC src)
-target_link_libraries(mvcore PUBLIC Qt6::Core Qt6::Sql PkgConfig::TAGLIB PkgConfig::CHROMAPRINT)
+target_link_libraries(mvcore PUBLIC Qt6::Core Qt6::Sql Qt6::Network PkgConfig::TAGLIB PkgConfig::CHROMAPRINT)
 
 # Windows: the icon and version details shown by Explorer.
 if(WIN32)
