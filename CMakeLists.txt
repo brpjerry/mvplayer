@@ -29,6 +29,7 @@ qt_add_library(mvcore STATIC
     src/core/AudioAlign.h src/core/AudioAlign.cpp
     src/core/AudioPrint.h src/core/AudioPrint.cpp
     src/core/Muxer.h src/core/Muxer.cpp
+    src/core/Subtitles.h src/core/Subtitles.cpp
     src/core/LibraryScanner.h src/core/LibraryScanner.cpp
     src/core/ImportManager.h src/core/ImportManager.cpp
 )

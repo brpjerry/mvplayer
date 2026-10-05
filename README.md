@@ -70,6 +70,18 @@ cmake --build build
 programs and every library they load into `packaging/windows/stage` and
 compiles `packaging/windows/mvplayer.iss`.
 
+## Subtitles
+
+Where the uploader of a video provides subtitles in one of the languages set
+in Settings (by default the language of the desktop), they are fetched with
+the video and kept beside it as `<video>.<language>.srt`. Machine-made
+captions and translations are not fetched. Plain subtitles are shown in the
+player's own style; those that use YouTube's styling (colours, sizes,
+positions) are converted to `.ass` and keep it. "Fetch for my videos" gets
+them for the videos already in the library; the button in the control bar
+switches them off. Headless: `--subtitles en,ja`, with `--fetch-subtitles`
+for existing videos.
+
 ## How importing works
 
 For every track without a video (`src/core/ImportManager.cpp`):

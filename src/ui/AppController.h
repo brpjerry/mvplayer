@@ -54,6 +54,11 @@ class AppController : public QObject
     Q_PROPERTY(bool replaceAudio READ replaceAudio WRITE setReplaceAudio NOTIFY settingsChanged)
     Q_PROPERTY(bool allowUnofficial READ allowUnofficial WRITE setAllowUnofficial NOTIFY settingsChanged)
     Q_PROPERTY(bool skipStillImages READ skipStillImages WRITE setSkipStillImages NOTIFY settingsChanged)
+    // Subtitles: the languages fetched with each video ("en, ja"; empty for
+    // none), and whether the player shows them.
+    Q_PROPERTY(QString subtitleLangs READ subtitleLangs WRITE setSubtitleLangs NOTIFY settingsChanged)
+    Q_PROPERTY(bool subtitlesOn READ subtitlesOn WRITE setSubtitlesOn NOTIFY settingsChanged)
+    Q_PROPERTY(bool fetchingSubtitles READ fetchingSubtitles NOTIFY activityChanged)
     // A YouTube Premium account's cookies.txt, kept beside the settings.
     Q_PROPERTY(bool hasCookies READ hasCookies NOTIFY settingsChanged)
     Q_PROPERTY(QString cookiesAdded READ cookiesAdded NOTIFY settingsChanged)
@@ -114,6 +119,12 @@ public:
     bool allowUnofficial() const { return m_cfg.allowUnofficial; }
     void setAllowUnofficial(bool v);
     bool skipStillImages() const { return m_cfg.skipStillImages; }
+    QString subtitleLangs() const { return m_cfg.subtitleLangs.join(QStringLiteral(", ")); }
+    void setSubtitleLangs(const QString &langs);
+    bool subtitlesOn() const { return m_subtitlesOn; }
+    void setSubtitlesOn(bool on);
+    bool fetchingSubtitles() const;
+    Q_INVOKABLE void fetchSubtitles();
     void setSkipStillImages(bool v);
     bool hasCookies() const { return !m_cfg.cookiesFile.isEmpty(); }
     QString cookiesAdded() const;
@@ -210,4 +221,5 @@ private:
     double m_wheelStep = 170;
     double m_volume = 1.0;
     bool m_muted = false;
+    bool m_subtitlesOn = true;
 };

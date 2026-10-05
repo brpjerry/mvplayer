@@ -6,6 +6,7 @@
 #include <QCollator>
 #include <QDir>
 #include <QLocale>
+#include <QRegularExpression>
 #include <QSet>
 #include <QSaveFile>
 #include <QFileInfo>
@@ -110,6 +111,13 @@ AppController::AppController(const AppOptions &options, QObject *parent)
     m_cfg.allowUnofficial = m_settings->value(QStringLiteral("import/allowUnofficial"), false).toBool();
     m_cfg.skipStillImages = m_settings->value(QStringLiteral("import/skipStillImages"), true).toBool();
     m_cfg.concurrency = m_settings->value(QStringLiteral("import/concurrency"), 2).toInt();
+    // By default the language the desktop is in.
+    QString language = QLocale::system().name().section(QLatin1Char('_'), 0, 0).toLower();
+    if (language.size() < 2 || language == QLatin1String("c"))
+        language = QStringLiteral("en");
+    m_cfg.subtitleLangs = m_settings->value(QStringLiteral("import/subtitleLangs"), QStringList{language}).toStringList();
+    m_cfg.subtitleLangs.removeAll(QString());
+    m_subtitlesOn = m_settings->value(QStringLiteral("player/subtitles"), true).toBool();
     m_cfg.ytdlpArgs = m_settings->value(QStringLiteral("import/ytdlpArgs")).toStringList();
     if (YtDlp::looksLikeCookies(cookiesPath()))
         m_cfg.cookiesFile = cookiesPath();
@@ -328,6 +336,8 @@ void AppController::saveSettings()
     m_settings->setValue(QStringLiteral("import/skipStillImages"), m_cfg.skipStillImages);
     m_settings->setValue(QStringLiteral("player/volume"), m_volume);
     m_settings->setValue(QStringLiteral("player/muted"), m_muted);
+    m_settings->setValue(QStringLiteral("import/subtitleLangs"), m_cfg.subtitleLangs);
+    m_settings->setValue(QStringLiteral("player/subtitles"), m_subtitlesOn);
 }
 
 void AppController::addMusicDir(const QString &dir)
@@ -517,6 +527,46 @@ void AppController::checkQuality()
         m_manager->checkQuality();
 }
 
+void AppController::setSubtitleLangs(const QString &langs)
+{
+    static const QRegularExpression separators(QStringLiteral("[,;\\s]+"));
+    static const QRegularExpression code(QStringLiteral("^[A-Za-z]{2,3}(-[A-Za-z0-9]{2,8})*$"));
+    QStringList list;
+    for (const QString &l : langs.split(separators, Qt::SkipEmptyParts)) {
+        if (code.match(l).hasMatch() && !list.contains(l))
+            list << l;
+    }
+    if (list == m_cfg.subtitleLangs) {
+        emit settingsChanged(); // the field shows what was understood
+        return;
+    }
+    m_cfg.subtitleLangs = list;
+    saveSettings();
+    if (m_manager)
+        m_manager->setSettings(m_cfg);
+    emit settingsChanged();
+}
+
+void AppController::setSubtitlesOn(bool on)
+{
+    if (on == m_subtitlesOn)
+        return;
+    m_subtitlesOn = on;
+    saveSettings();
+    emit settingsChanged();
+}
+
+bool AppController::fetchingSubtitles() const
+{
+    return m_manager && m_manager->fetchingSubtitles();
+}
+
+void AppController::fetchSubtitles()
+{
+    if (m_manager)
+        m_manager->fetchSubtitles();
+}
+
 void AppController::setSkipStillImages(bool v)
 {
     if (v == m_cfg.skipStillImages)
@@ -556,6 +606,10 @@ QString AppController::statusText() const
     }
     if (m_manager->scanning())
         return tr("Scanning library…");
+    if (m_manager->fetchingSubtitles()) {
+        const int total = m_manager->qualityTotal();
+        return tr("Fetching subtitles · %1 of %2").arg(qMin(total, m_manager->qualityChecked() + 1)).arg(total);
+    }
     if (m_manager->checkingQuality()) {
         const int total = m_manager->qualityTotal();
         return tr("Checking quality · %1 of %2").arg(qMin(total, m_manager->qualityChecked() + 1)).arg(total);

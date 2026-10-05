@@ -25,6 +25,7 @@ struct ImportSettings {
     int concurrency = 2;
     QStringList ytdlpArgs;         // extra yt-dlp arguments (cookies, proxies, ...)
     QString cookiesFile;           // cookies.txt of a YouTube Premium account; empty: none
+    QStringList subtitleLangs;     // subtitles to fetch with a video ("en"); empty: none
     int retryNotFoundDays = 14;
     int pauseBaseSecs = 600;       // first wait after YouTube blocks requests; doubles on repeats
 };
@@ -68,9 +69,13 @@ public:
     // Looks at every video in the library again with the account's cookies
     // and rebuilds those YouTube now offers in better quality.
     void checkQuality();
-    bool checkingQuality() const { return m_upgrading; }
+    bool checkingQuality() const { return m_upgrading && !m_subtitling; }
     int qualityChecked() const { return m_upgradeDone; }
     int qualityTotal() const { return m_upgradeTotal; }
+    // Fetches the subtitles that the videos already imported lack. Shares the
+    // quality check's progress: one pass over the library at a time.
+    void fetchSubtitles();
+    bool fetchingSubtitles() const { return m_upgrading && m_subtitling; }
 
     // Circuit breaker: when YouTube starts refusing requests the whole queue
     // waits instead of failing track after track.
@@ -105,6 +110,7 @@ private:
                            const ImportSettings &cfg, QString *error, bool review = false,
                            int ytAudioStream = 0);
     void upgradeVideos(const ImportSettings &cfg);
+    void subtitleVideos(const ImportSettings &cfg);
     // "done" when the video was rebuilt, "skipped" when it is as good as it gets.
     QString upgradeVideo(const VideoInfo &video, const ImportSettings &cfg, QString *detail);
     void requeueRetryable();
@@ -130,6 +136,7 @@ private:
     bool m_scanning = false;
     std::atomic<int> m_reviewJobs{0};
     std::atomic<bool> m_upgrading{false};
+    std::atomic<bool> m_subtitling{false}; // the pass that is running fetches subtitles
     std::atomic<int> m_upgradeDone{0};
     std::atomic<int> m_upgradeTotal{0};
     bool m_rescanWanted = false;

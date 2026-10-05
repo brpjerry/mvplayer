@@ -362,6 +362,51 @@ OUT=$(MVPLAYER_YTDLP="$PREMIUM" timeout 120 "$BUILD/mvplayer-import" --music-dir
 [[ "$OUT" == *"0 upgraded, 0 failed"* ]]
 [[ $(cd "$WORK/mvlib2/A" && ffprobe -v error -show_entries stream=codec_name -of csv=p=0 "Song one [abc].mkv" | tr -d '\r' | tr '\n' ' ') == "h264 flac opus " ]]
 
+echo "== subtitles"
+# YouTube's subtitle format: plain text becomes .srt for the player to style;
+# colours and positions are kept as .ass.
+cat > "$WORK/plain.srv3" <<'XML'
+<?xml version="1.0" encoding="utf-8" ?><timedtext format="3"><body>
+<p t="1000" d="2000">First &amp; second
+line</p>
+<p t="3000" d="500"> </p>
+<p t="4000" d="1500">Last</p>
+</body></timedtext>
+XML
+cat > "$WORK/styled.srv3" <<'XML'
+<?xml version="1.0" encoding="utf-8" ?><timedtext format="3"><head>
+<pen id="1" b="1" fc="#FF5577"/><wp id="1" ap="1" ah="50" av="10"/>
+</head><body>
+<p t="1000" d="2000" wp="1"><s p="1">Red on top</s></p>
+</body></timedtext>
+XML
+"$BUILD/mvplayer-import" convert-subs "$WORK/plain.srv3" "$WORK/plain.en" | tr -d '\r'
+grep -q "00:00:01,000 --> 00:00:03,000" "$WORK/plain.en.srt"
+grep -q "First & second" "$WORK/plain.en.srt"
+[[ $(grep -c -- "-->" "$WORK/plain.en.srt") -eq 2 ]]
+"$BUILD/mvplayer-import" convert-subs "$WORK/styled.srv3" "$WORK/styled.en" | tr -d '\r'
+grep -q 'an8\\pos(640,84)' "$WORK/styled.en.ass"
+grep -q 'c&H7755FF&' "$WORK/styled.en.ass"
+# A yt-dlp that has British English subtitles only: they serve for "en", and
+# land beside the video that lacked them.
+cat > "$WORK/fake-subs" <<FAKE
+#!/bin/sh
+out=; prev=
+for a in "\$@"; do [ "\$prev" = "-o" ] && out=\$a; prev=\$a; done
+case " \$* " in *" --write-subs "*) cp "$WORK/plain.srv3" "\$(dirname "\$out")/subs.en-GB.srv3" ;; esac
+FAKE
+chmod +x "$WORK/fake-subs"
+SUBS="$WORK/fake-subs"
+if [[ -n "$EXE" ]]; then
+    printf '@"%s" "%%~dp0fake-subs" %%*\r\n' "$(cygpath -w "$(command -v sh)")" > "$WORK/fake-subs.cmd"
+    SUBS="$WORK/fake-subs.cmd"
+fi
+OUT=$(MVPLAYER_YTDLP="$SUBS" timeout 120 "$BUILD/mvplayer-import" --music-dir "$WORK/lib4" --mv-dir "$WORK/mvlib4" \
+    --subtitles en --fetch-subtitles 2>&1)
+echo "$OUT" | grep -E "^\[subtitles\]"
+[[ "$OUT" == *"1 with subtitles, 0 failed"* ]]
+grep -q "First & second" "$WORK/mvlib4/C/Low [xyz].en.srt"
+
 echo "== binaries start"
 "$BUILD/mvplayer-import" --help >/dev/null
 QT_QPA_PLATFORM=offscreen "$BUILD/mvplayer$EXE" --help >/dev/null

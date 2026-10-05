@@ -13,6 +13,7 @@
 #include "core/AudioPrint.h"
 #include "core/ImportManager.h"
 #include "core/Muxer.h"
+#include "core/Subtitles.h"
 #include "core/TagReader.h"
 #include "core/Util.h"
 #include "core/YtDlp.h"
@@ -20,6 +21,7 @@
 #include <QCommandLineParser>
 #include <QCoreApplication>
 #include <QDir>
+#include <QRegularExpression>
 #include <QFileInfo>
 #include <QStandardPaths>
 #include <QTemporaryDir>
@@ -59,9 +61,11 @@ int main(int argc, char **argv)
         {QStringLiteral("cookies"), QStringLiteral("cookies.txt of a YouTube Premium account, for its higher audio bitrate."), QStringLiteral("file")},
         {QStringLiteral("approve"), QStringLiteral("Accept a video that waits for review, by its YouTube id (repeatable)."), QStringLiteral("id")},
         {QStringLiteral("reject"), QStringLiteral("Turn down a video that waits for review, by its YouTube id: it is deleted and its tracks have no video (repeatable)."), QStringLiteral("id")},
+        {QStringLiteral("subtitles"), QStringLiteral("Languages of the subtitles to fetch with each video, e.g. \"en,ja\"."), QStringLiteral("languages")},
+        {QStringLiteral("fetch-subtitles"), QStringLiteral("Fetch the subtitles that the videos already imported lack (needs --subtitles).")},
         {QStringLiteral("check-quality"), QStringLiteral("Look at the videos already imported again and rebuild those the account is offered in better quality.")},
     });
-    parser.addPositionalArgument(QStringLiteral("command"), QStringLiteral("Optional: align <track> <video> | mux <track> <video> <out.mkv> | check-video <video> [keyframes] | same-recording <file> <file> | same-version <track title> <album> <video title> | check-cookies [video id]"));
+    parser.addPositionalArgument(QStringLiteral("command"), QStringLiteral("Optional: align <track> <video> | mux <track> <video> <out.mkv> | check-video <video> [keyframes] | same-recording <file> <file> | same-version <track title> <album> <video title> | check-cookies [video id] | convert-subs <file.srv3> <out without extension>"));
     parser.process(app);
 
     const QStringList pos = parser.positionalArguments();
@@ -100,6 +104,19 @@ int main(int argc, char **argv)
         t.title = pos[1];
         t.album = pos[2];
         out << (Matcher::sameVersion(t, pos[3]) ? "same" : "different") << Qt::endl;
+        return 0;
+    }
+
+    if (pos.value(0) == QLatin1String("convert-subs")) {
+        if (pos.size() != 3)
+            parser.showHelp(2);
+        QString err;
+        const QString written = Subtitles::convertSrv3(pos[1], pos[2], &err);
+        if (written.isEmpty()) {
+            out << (err.isEmpty() ? QStringLiteral("no subtitles in it") : QStringLiteral("error: ") + err) << Qt::endl;
+            return 1;
+        }
+        out << "wrote " << written << Qt::endl;
         return 0;
     }
 
@@ -160,6 +177,11 @@ int main(int argc, char **argv)
     cfg.replaceAudio = !parser.isSet(QStringLiteral("keep-youtube-audio"));
     cfg.skipStillImages = !parser.isSet(QStringLiteral("allow-still-images"));
     cfg.ytdlpArgs = parser.values(QStringLiteral("ytdlp-arg"));
+    cfg.subtitleLangs = parser.value(QStringLiteral("subtitles")).split(QRegularExpression(QStringLiteral("[,\\s]+")), Qt::SkipEmptyParts);
+    if (parser.isSet(QStringLiteral("fetch-subtitles")) && cfg.subtitleLangs.isEmpty()) {
+        out << "error: --fetch-subtitles needs --subtitles" << Qt::endl;
+        return 1;
+    }
     if (parser.isSet(QStringLiteral("cookies"))) {
         cfg.cookiesFile = QFileInfo(parser.value(QStringLiteral("cookies"))).absoluteFilePath();
         if (!YtDlp::looksLikeCookies(cfg.cookiesFile)) {
@@ -234,6 +256,8 @@ int main(int argc, char **argv)
         mgr.retryUnmatched();
     if (parser.isSet(QStringLiteral("check-quality")))
         mgr.checkQuality();
+    if (parser.isSet(QStringLiteral("fetch-subtitles")))
+        mgr.fetchSubtitles();
     for (const QString &id : parser.values(QStringLiteral("approve"))) {
         if (const auto v = db.videoByYtId(id))
             mgr.approveVideo(v->id);

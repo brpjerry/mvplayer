@@ -23,6 +23,11 @@ class MpvItem : public QQuickFramebufferObject
     Q_PROPERTY(bool muted READ muted WRITE setMuted NOTIFY mutedChanged)
     Q_PROPERTY(int audioTrack READ audioTrack WRITE setAudioTrack NOTIFY audioTrackChanged)
     Q_PROPERTY(QVariantList audioTracks READ audioTracks NOTIFY audioTracksChanged)
+    // Subtitles kept beside the video: whether it has any, whether they are
+    // shown, and the languages preferred ("en,ja").
+    Q_PROPERTY(bool hasSubtitles READ hasSubtitles NOTIFY hasSubtitlesChanged)
+    Q_PROPERTY(bool subtitlesVisible READ subtitlesVisible WRITE setSubtitlesVisible NOTIFY subtitlesVisibleChanged)
+    Q_PROPERTY(QString subtitleLangs READ subtitleLangs WRITE setSubtitleLangs NOTIFY subtitleLangsChanged)
     Q_PROPERTY(QSize videoSize READ videoSize NOTIFY videoSizeChanged)
     Q_PROPERTY(QString hwdec READ hwdec NOTIFY hwdecChanged)
     // While enabled, `frameColor` follows the picture: an accent colour taken
@@ -49,6 +54,11 @@ public:
     int audioTrack() const { return m_audioTrack; }
     void setAudioTrack(int id);
     QVariantList audioTracks() const { return m_audioTracks; }
+    bool hasSubtitles() const { return m_hasSubtitles; }
+    bool subtitlesVisible() const { return m_subtitlesVisible; }
+    void setSubtitlesVisible(bool v);
+    QString subtitleLangs() const { return m_subtitleLangs; }
+    void setSubtitleLangs(const QString &langs);
     QSize videoSize() const { return m_videoSize; }
     QString hwdec() const { return m_hwdec; }
     bool colorSampling() const { return m_colorSampling; }
@@ -74,6 +84,9 @@ signals:
     void mutedChanged();
     void audioTrackChanged();
     void audioTracksChanged();
+    void hasSubtitlesChanged();
+    void subtitlesVisibleChanged();
+    void subtitleLangsChanged();
     void videoSizeChanged();
     void hwdecChanged();
     void colorSamplingChanged();
@@ -100,6 +113,9 @@ private:
     bool m_muted = false;
     int m_audioTrack = 0;
     QVariantList m_audioTracks;
+    bool m_hasSubtitles = false;
+    bool m_subtitlesVisible = true;
+    QString m_subtitleLangs;
     QSize m_videoSize;
     QString m_hwdec;
 

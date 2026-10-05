@@ -1,5 +1,7 @@
 #include "core/ImportManager.h"
 
+#include "core/Subtitles.h"
+
 #include "core/AudioAlign.h"
 #include "core/Matcher.h"
 #include "core/Muxer.h"
@@ -60,6 +62,46 @@ QString mismatchReason(const AudioAlign::Result &r)
     if (m < 0.5 * r.videoSec)
         return QStringLiteral("the track is only part of this video: %1 s of %2 s").arg(qRound(m)).arg(qRound(r.videoSec));
     return QStringLiteral("only part of the track is in this video: fingerprints match %1 s of %2 s").arg(qRound(m)).arg(qRound(r.trackSec));
+}
+
+// A video leaves the library with what is kept beside it.
+void removeVideoFiles(const VideoInfo &v)
+{
+    for (const QString &sub : Subtitles::sidecars(v.path))
+        QFile::remove(sub);
+    QFile::remove(v.path);
+    if (!v.thumb.isEmpty())
+        QFile::remove(v.thumb);
+}
+
+// Fetches the subtitles a video lacks, of the languages wanted, and puts them
+// beside it. Returns how many were written; -1 when YouTube could not be asked.
+int fetchSubtitlesFor(YtDlp &yt, const QString &ytId, const QString &videoPath, const QStringList &languages,
+                      const QString &workDir, QString *error)
+{
+    QStringList missing;
+    for (const QString &l : languages) {
+        if (!Subtitles::hasSidecar(videoPath, l))
+            missing << l;
+    }
+    if (missing.isEmpty())
+        return 0;
+    const QString dir = QDir(workDir).filePath(QStringLiteral("subs"));
+    QDir(dir).removeRecursively();
+    QDir().mkpath(dir);
+    const auto cleanup = qScopeGuard([&] { QDir(dir).removeRecursively(); });
+    QHash<QString, QString> files;
+    if (!yt.downloadSubtitles(ytId, dir, missing, &files, error))
+        return -1;
+    int written = 0;
+    for (auto it = files.begin(); it != files.end(); ++it) {
+        QString why;
+        if (!Subtitles::convertSrv3(it.value(), Subtitles::sidecarBase(videoPath, it.key()), &why).isEmpty())
+            ++written;
+        else if (!why.isEmpty())
+            qWarning().noquote() << "[subtitles]" << ytId << it.key() << why;
+    }
+    return written;
 }
 
 // The measurements a decision about a candidate rests on, for the import log.
@@ -436,9 +478,7 @@ void ImportManager::approveVideo(qint64 videoId)
             continue;
         m_db->relinkTracks(other.id, videoId);
         m_db->removeVideo(other.id);
-        QFile::remove(other.path);
-        if (!other.thumb.isEmpty())
-            QFile::remove(other.thumb);
+        removeVideoFiles(other);
         emit videoRemoved(other.id);
     }
     v->review = false;
@@ -502,9 +542,7 @@ void ImportManager::rejectVideo(qint64 videoId)
             m_db->setTrackResult(t.id, QStringLiteral("not_found"), 0, why);
     }
     m_db->removeVideo(videoId);
-    QFile::remove(v->path);
-    if (!v->thumb.isEmpty())
-        QFile::remove(v->thumb);
+    removeVideoFiles(*v);
     qInfo().noquote() << QStringLiteral("[review] rejected “%1” (%2)").arg(v->title, v->ytTitle);
     {
         QJsonArray names;
@@ -534,6 +572,79 @@ void ImportManager::checkQuality()
             pump();
         }, Qt::QueuedConnection);
     });
+}
+
+void ImportManager::fetchSubtitles()
+{
+    if (!m_started || settings().subtitleLangs.isEmpty() || m_upgrading.exchange(true))
+        return;
+    m_subtitling = true;
+    const ImportSettings cfg = settings();
+    m_upgradeDone = 0;
+    m_upgradeTotal = 0;
+    emit activityChanged();
+    m_auditPool.start([this, cfg] {
+        subtitleVideos(cfg);
+        m_subtitling = false;
+        m_upgrading = false;
+        QMetaObject::invokeMethod(this, [this] {
+            emit activityChanged();
+            pump();
+        }, Qt::QueuedConnection);
+    });
+}
+
+void ImportManager::subtitleVideos(const ImportSettings &cfg)
+{
+    QVector<VideoInfo> videos;
+    for (const VideoInfo &v : m_db->allVideos()) {
+        const bool lacks = std::any_of(cfg.subtitleLangs.begin(), cfg.subtitleLangs.end(),
+                                       [&v](const QString &l) { return !Subtitles::hasSidecar(v.path, l); });
+        if (lacks && QFile::exists(v.path))
+            videos << v;
+    }
+    m_upgradeTotal = int(videos.size());
+    YtDlp yt(qEnvironmentVariable("MVPLAYER_YTDLP", toolPath(QStringLiteral("yt-dlp"))), cfg.ytdlpArgs, cfg.cookiesFile, &m_cancel);
+    const QString workDir = QDir(dataDir(cfg.mvDir)).filePath(QStringLiteral("tmp/subtitles"));
+    int withSubs = 0, failed = 0;
+    for (const VideoInfo &v : std::as_const(videos)) {
+        if (m_cancel || m_blocked)
+            break;
+        JobStatus st;
+        st.upgrade = true;
+        st.trackId = -v.id;
+        st.title = v.title;
+        st.artist = splitMulti(v.albumArtist).value(0, v.artist);
+        st.stage = QStringLiteral("Fetching subtitles");
+        emit jobChanged(st);
+
+        QString error;
+        const int got = fetchSubtitlesFor(yt, v.ytId, v.path, cfg.subtitleLangs, workDir, &error);
+        if (m_cancel)
+            break;
+        if (got < 0)
+            noteFailure(error);
+        else
+            noteSuccess();
+        withSubs += got > 0;
+        failed += got < 0;
+        st.finished = true;
+        st.outcome = got > 0 ? QStringLiteral("done") : got < 0 ? QStringLiteral("failed") : QStringLiteral("skipped");
+        st.stage = got > 0 ? QStringLiteral("Subtitles added") : got < 0 ? QStringLiteral("Failed") : QStringLiteral("No subtitles");
+        st.detail = got < 0 ? error : QString();
+        if (got != 0)
+            qInfo().noquote() << QStringLiteral("[subtitles] %1 — %2: %3%4").arg(st.artist, st.title, st.stage, got < 0 ? QStringLiteral(" (") + error + QLatin1Char(')') : QString());
+        appendLog({{QStringLiteral("event"), QStringLiteral("subtitles")}, {QStringLiteral("ytId"), v.ytId},
+                   {QStringLiteral("title"), v.title}, {QStringLiteral("outcome"), st.outcome}, {QStringLiteral("detail"), st.detail}});
+        emit jobChanged(st);
+        ++m_upgradeDone;
+        emit activityChanged();
+    }
+    QDir(workDir).removeRecursively();
+    if (!m_cancel) {
+        qInfo("[subtitles] checked %d of %d videos: %d with subtitles, %d failed%s", m_upgradeDone.load(), int(videos.size()),
+              withSubs, failed, m_blocked ? "; stopped because YouTube is limiting requests" : "");
+    }
 }
 
 void ImportManager::upgradeVideos(const ImportSettings &cfg)
@@ -843,7 +954,7 @@ void ImportManager::runJob(qint64 trackId, const ImportSettings &cfg)
 
     QElapsedTimer clock;
     clock.start();
-    int nSearch = 0, nAudio = 0, nPreview = 0, nVideo = 0;
+    int nSearch = 0, nAudio = 0, nPreview = 0, nVideo = 0, nSubs = 0;
     QJsonArray logQueries, logCandidates, logChecked;
     qint64 heldVideoForLog = 0;
     QJsonArray logVideos; // what was brought into the library
@@ -875,7 +986,7 @@ void ImportManager::runJob(qint64 trackId, const ImportSettings &cfg)
             {QStringLiteral("videos"), logVideos},
             {QStringLiteral("seconds"), qRound(clock.elapsed() / 100.0) / 10.0},
             {QStringLiteral("requests"), QJsonObject{{QStringLiteral("search"), nSearch}, {QStringLiteral("audio"), nAudio},
-                                                      {QStringLiteral("preview"), nPreview}, {QStringLiteral("video"), nVideo}}},
+                                                      {QStringLiteral("preview"), nPreview}, {QStringLiteral("video"), nVideo}, {QStringLiteral("subtitles"), nSubs}}},
             {QStringLiteral("queries"), logQueries},
             {QStringLiteral("candidates"), logCandidates},
             {QStringLiteral("checked"), logChecked},
@@ -1461,6 +1572,16 @@ void ImportManager::runJob(qint64 trackId, const ImportSettings &cfg)
                     QStringLiteral("scale=1280:-2"), outThumb}, o);
     }
 
+    // Its subtitles, where the uploader made some. Their absence, or
+    // YouTube's refusal, is no reason not to have the video.
+    if (!cfg.subtitleLangs.isEmpty() && !m_cancel) {
+        report(QStringLiteral("Fetching subtitles"), -1, chosen.title);
+        QString why;
+        ++nSubs;
+        if (fetchSubtitlesFor(yt, chosen.id, outFile, cfg.subtitleLangs, chosenDir, &why) < 0 && !m_cancel)
+            qWarning().noquote() << "[import] no subtitles for" << chosen.id << ":" << why;
+    }
+
     VideoInfo v;
     v.ytId = chosen.id;
     v.path = outFile;
@@ -1536,9 +1657,7 @@ void ImportManager::runJob(qint64 trackId, const ImportSettings &cfg)
             for (qint64 id : std::as_const(added)) {
                 if (const auto v = m_db->video(id)) {
                     m_db->removeVideo(id);
-                    QFile::remove(v->path);
-                    if (!v->thumb.isEmpty())
-                        QFile::remove(v->thumb);
+                    removeVideoFiles(*v);
                 }
             }
             return;
@@ -1571,9 +1690,7 @@ void ImportManager::runJob(qint64 trackId, const ImportSettings &cfg)
         // A video that fits outright settles it: the options are not needed.
         for (const VideoInfo &old : m_db->reviewOptions(heldGroup)) {
             m_db->removeVideo(old.id);
-            QFile::remove(old.path);
-            if (!old.thumb.isEmpty())
-                QFile::remove(old.thumb);
+            removeVideoFiles(old);
             emit videoRemoved(old.id);
         }
     }
