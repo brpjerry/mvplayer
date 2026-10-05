@@ -279,13 +279,23 @@ void Matcher::rank(const TrackInfo &track, QVector<YtCandidate> &candidates)
 
         // Artist
         bool artistInTitle = false, artistIsChannel = false;
+        QString channelRest = ch;
         for (const QString &n : names) {
             const QString nt = tokens(n).trimmed();
             if (nt.size() < 2)
                 continue;
             artistInTitle |= ct.contains(nt);
             artistIsChannel |= ch.contains(nt);
+            channelRest.replace(nt, QStringLiteral(" "));
         }
+        // "Artist", "Artist Official", "アーティスト公式チャンネル": the artist's
+        // own. "We love A & B" names the artist and is a fan's.
+        static const QRegularExpression generic(QStringLiteral(
+            " (?:official|channel|music|youtube|vevo|tv|records|公式|チャンネル|オフィシャル|[a-z]|\\d+)(?= )"));
+        QString rest = channelRest.simplified().prepend(QLatin1Char(' ')).append(QLatin1Char(' '));
+        while (rest.contains(generic))
+            rest.replace(generic, QString());
+        const bool channelIsOnlyArtist = artistIsChannel && rest.trimmed().isEmpty();
         if (artistInTitle || artistIsChannel)
             c.score += 20;
         if (artistIsChannel)
@@ -324,7 +334,9 @@ void Matcher::rank(const TrackInfo &track, QVector<YtCandidate> &candidates)
         // The artist's own channel is trusted whatever the title says. A
         // verified channel is not on its own: fan channels with subtitled
         // re-uploads are verified too.
-        c.trusted = artistIsChannel || ((c.verified || official) && !fan);
+        // A channel that merely has the artist's name among other words
+        // gets that trust only for titles that do not look like a fan's.
+        c.trusted = (artistIsChannel && (!fan || channelIsOnlyArtist)) || ((c.verified || official) && !fan);
     }
 
     std::stable_sort(candidates.begin(), candidates.end(), [](const YtCandidate &a, const YtCandidate &b) {

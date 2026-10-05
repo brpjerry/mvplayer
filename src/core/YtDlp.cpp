@@ -294,7 +294,9 @@ bool YtDlp::search(const QString &query, int count, QVector<YtCandidate> *out, Q
             return false;
         }
         json = r.out;
-        if (!cached.isEmpty() && QJsonDocument::fromJson(json).isObject()) {
+        // An empty page is not kept: YouTube now and then answers a search
+        // with nothing that it finds a moment later.
+        if (!cached.isEmpty() && !QJsonDocument::fromJson(json).object().value(QLatin1String("entries")).toArray().isEmpty()) {
             QDir().mkpath(QFileInfo(cached).absolutePath());
             QSaveFile f(cached);
             if (f.open(QIODevice::WriteOnly) && f.write(json) == json.size())
@@ -479,6 +481,17 @@ YtDlp::Account YtDlp::checkAccount(const QString &id, double *kbps, QString *err
         *kbps = best;
     // Anyone is offered about 130 kbit/s, a Premium account 256.
     return best >= 200 ? Account::Premium : Account::Ordinary;
+}
+
+bool YtDlp::looksUnavailable(const QString &error)
+{
+    static const QStringList signs = {
+        QStringLiteral("video is not available"), QStringLiteral("video unavailable"),
+        QStringLiteral("has been removed"), QStringLiteral("account associated with this video has been terminated"),
+        QStringLiteral("not available in your country"), QStringLiteral("blocked it in your country"),
+    };
+    const QString e = error.toLower();
+    return !looksBlocked(error) && std::any_of(signs.begin(), signs.end(), [&e](const QString &s) { return e.contains(s); });
 }
 
 bool YtDlp::cookiesExpired(const QString &error)

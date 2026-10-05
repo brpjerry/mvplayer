@@ -174,23 +174,30 @@ QString interruptedReason(const AudioAlign::Result &r)
         .arg(qRound(other)).arg(places).arg(places == 1 ? QStringLiteral("place") : QStringLiteral("places"));
 }
 
-bool ownRecording(const AudioAlign::Result &r, const TrackInfo &track, const QString &videoTitle)
+// The same bar holds where the upload names none of the track's artists, in
+// its title or as its channel. Another performer over the same backing
+// measured 79-93% and was taken: another unit's video, a voice-synth
+// version, a cover that does not call itself one. An artist's own upload
+// under a name in another script is as good as always above the bar.
+bool ownRecording(const AudioAlign::Result &r, const TrackInfo &track, const QString &videoTitle, const QString &channel)
 {
     if (!audioReplaceable(r) || interrupted(r))
         return false;
-    return r.byOffset || Matcher::sameVersion(track, videoTitle)
+    return r.byOffset || (Matcher::sameVersion(track, videoTitle) && Matcher::namesArtist(track, videoTitle, channel))
         || r.goodSec >= kOwnWaveformOtherVersion * std::min(r.trackSec, r.videoSec);
 }
 
 // What a candidate that is not taken as the track's recording lacks.
-QString unconfirmedReason(const AudioAlign::Result &r, const TrackInfo &track, const QString &videoTitle)
+QString unconfirmedReason(const AudioAlign::Result &r, const TrackInfo &track, const QString &videoTitle, const QString &channel)
 {
     const int share = qRound(100 * r.goodSec / qMax(1.0, std::min(r.trackSec, r.videoSec)));
     if (audioReplaceable(r) && interrupted(r))
         return QStringLiteral("%1% of it is demonstrably the track's waveform, but %2").arg(share).arg(interruptedReason(r));
     if (audioReplaceable(r)) {
-        return QStringLiteral("%1% of it is demonstrably the track's waveform, but track and video are marked as different versions (%2% needed then)")
+        return QStringLiteral("%1% of it is demonstrably the track's waveform, but %2 (%3% needed then)")
             .arg(share)
+            .arg(Matcher::sameVersion(track, videoTitle) ? QStringLiteral("the upload names none of the track's artists")
+                                                         : QStringLiteral("track and video are marked as different versions"))
             .arg(qRound(100 * kOwnWaveformOtherVersion));
     }
     return QStringLiteral("only %1% of it is demonstrably the track's waveform (%2% needed)%3")
@@ -1357,7 +1364,7 @@ void ImportManager::runJob(qint64 trackId, const ImportSettings &cfg)
                     // A track of lesser quality than YouTube's audio has no
                     // audio of its own at stake and shares on the song alone.
                     const bool own = cfg.replaceAudio && libraryIsBetter(track, storedYoutubeQuality(*existing));
-                    const bool recording = ownRecording(ar, track, existing->ytTitle);
+                    const bool recording = ownRecording(ar, track, existing->ytTitle, existing->ytChannel);
                     if (existing->review && own && recording) {
                         // It waits for a verdict on behalf of a track that is
                         // only the song (a live take, looked up first). This
@@ -1413,7 +1420,7 @@ void ImportManager::runJob(qint64 trackId, const ImportSettings &cfg)
                         return cleanup();
                     checked(c, QStringLiteral("different-recording"),
                             QStringLiteral("already in the library as the video of “%1”; this track is the song but not that recording: %2")
-                                .arg(existing->title, unconfirmedReason(ar, track, existing->ytTitle)),
+                                .arg(existing->title, unconfirmedReason(ar, track, existing->ytTitle, existing->ytChannel)),
                             &ar);
                     reasons << QStringLiteral("“%1” is the video of another recording of the song").arg(c.title);
                     continue;
@@ -1439,6 +1446,14 @@ void ImportManager::runJob(qint64 trackId, const ImportSettings &cfg)
         if (!withRetry([&] { return yt.downloadAudio(c.id, dir, &audioFile, &info, &error); })) {
             if (m_cancel)
                 return cleanup();
+            // A video that is gone is no candidate; that is not a failure
+            // of the lookup, which would have the track tried over and over.
+            if (YtDlp::looksUnavailable(error)) {
+                anyChecked = true;
+                checked(c, QStringLiteral("unavailable"), QStringLiteral("the video is not available: %1").arg(error.left(160)));
+                reasons << QStringLiteral("“%1” is not available").arg(c.title);
+                continue;
+            }
             checked(c, QStringLiteral("error"), QStringLiteral("its audio could not be downloaded: %1").arg(error));
             if (m_blocked)
                 return postpone();
@@ -1472,7 +1487,7 @@ void ImportManager::runJob(qint64 trackId, const ImportSettings &cfg)
         // taken, for review, when no candidate fits outright. (A lossy file
         // may still be the lesser one next to the account's audio.)
         bool forReview = false;
-        if (cfg.replaceAudio && libraryIsBetter(track, youtubeQuality(info)) && !ownRecording(ar, track, c.title)) {
+        if (cfg.replaceAudio && libraryIsBetter(track, youtubeQuality(info)) && !ownRecording(ar, track, c.title, c.channel)) {
             bool premiumWins = false;
             if (!track.lossless && yt.hasCookies()) {
                 QString premiumFile;
@@ -1556,7 +1571,7 @@ void ImportManager::runJob(qint64 trackId, const ImportSettings &cfg)
 
         if (forReview) {
             checked(c, QStringLiteral("unconfirmed"),
-                    QStringLiteral("the song by its fingerprints, but %1").arg(unconfirmedReason(ar, track, c.title)),
+                    QStringLiteral("the song by its fingerprints, but %1").arg(unconfirmedReason(ar, track, c.title, c.channel)),
                     &ar, {{QStringLiteral("youtubeKbps"), qRound(YtDlp::audioKbps(info))}});
             reasons << QStringLiteral("“%1” could not be confirmed as this recording").arg(c.title);
             unconfirmed.append({c, dir, audioFile, info, ar});
