@@ -152,6 +152,12 @@ Item {
                     onClicked: verdict.modelData.accept ? root.approved() : root.rejected()
                 }
                 Tooltip {
+                    // Below: the buttons are at the top of the card, and
+                    // above them the first row's would leave the grid.
+                    below: true
+                    // And ending at the button's right edge, for the last column.
+                    anchors.horizontalCenter: undefined
+                    x: parent.width - width
                     text: verdict.modelData.tip
                     shown: verdictMouse.containsMouse
                 }
