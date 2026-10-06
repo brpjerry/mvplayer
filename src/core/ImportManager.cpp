@@ -1413,10 +1413,15 @@ void ImportManager::runJob(qint64 trackId, const ImportSettings &cfg)
                 // rules of the day: what has since become acceptable
                 // outright is taken, and the other options let go.
                 std::vector<int16_t> optPcm;
-                QString optError;
+                QString optError, why;
                 const bool known = c.ownChannel || ArtistChannels::isArtistChannel(*m_db, Matcher::artistNames(track), c.channelId, c.channel);
+                std::optional<AudioAlign::Result> judged;
                 if (AudioAlign::decodeMono(existing->path, &optPcm, &m_cancel, &optError, 1)) {
                     const AudioAlign::Result ar = fitted(AudioAlign::align(trackPcm, optPcm), track, existing->ytTitle, existing->ytChannel);
+                    judged = ar;
+                    why = !audioMatches(ar) ? mismatchReason(ar)
+                        : !(cfg.replaceAudio && libraryIsBetter(track, storedYoutubeQuality(*existing))) ? QStringLiteral("the track is the lesser audio")
+                        : unconfirmedReason(ar, track, existing->ytTitle, existing->ytChannel, known);
                     if (audioMatches(ar) && cfg.replaceAudio && libraryIsBetter(track, storedYoutubeQuality(*existing))
                         && ownRecording(ar, track, existing->ytTitle, existing->ytChannel, known, known && !c.ownChannel)) {
                         const qint64 group = heldGroup;
@@ -1445,7 +1450,9 @@ void ImportManager::runJob(qint64 trackId, const ImportSettings &cfg)
                 }
                 if (m_cancel)
                     return cleanup();
-                checked(c, QStringLiteral("option"), QStringLiteral("already waiting for review as one of the track's options"));
+                checked(c, QStringLiteral("option"),
+                        QStringLiteral("already waiting for review as one of the track's options; still: %1").arg(why.isEmpty() ? optError : why),
+                        judged ? &*judged : nullptr);
                 continue;
             }
             // Already in the MV library through another track (a single and
