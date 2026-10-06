@@ -207,8 +207,11 @@ bool Matcher::sameVersion(const TrackInfo &track, const QString &videoTitle, boo
         while (it.hasNext())
             out.insert(it.next().captured(1));
         // "Music Video Full ver." is the whole of it, not another one;
-        // lengths are compared elsewhere.
+        // lengths are compared elsewhere. "LIVE Ver." is the live version,
+        // which the term check above has already weighed on both sides.
         out.remove(QStringLiteral("full"));
+        for (const QString &term : versionTerms())
+            out.remove(term);
         return out;
     };
     const QSet<QString> inVideo = named(video), inTitle = named(title);
@@ -269,6 +272,17 @@ bool Matcher::sameVersion(const TrackInfo &track, const QString &videoTitle, boo
 
 bool Matcher::isOwnChannel(const TrackInfo &track, const QString &channel)
 {
+    // "NayutalieN Official / Nayutan Seijin", "ヨルシカ / n-buna Official": a
+    // channel named twice over, in two scripts or after its two owners. Any
+    // one of the names will do.
+    static const QRegularExpression separators(QStringLiteral("\\s*[/／|｜]\\s*"));
+    const QStringList pieces = channel.split(separators, Qt::SkipEmptyParts);
+    if (pieces.size() > 1) {
+        for (const QString &part : pieces) {
+            if (isOwnChannel(track, part))
+                return true;
+        }
+    }
     QString rest = tokens(channel);
     bool named = false;
     // "Producer feat. Singer": the producer's channel is the artist's.

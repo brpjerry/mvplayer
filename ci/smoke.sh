@@ -107,6 +107,10 @@ rank() { "$BUILD/mvplayer-import" rank-check "$@" | tr -d '\r'; }
 [[ $(rank "propose" "Lana" "【MV】propose / Lana cover" "Somebody") == "dropped: “cover” version, names the artist" ]]
 [[ $(rank "escalate" "Aimee" "Aimee - escalate MUSIC VIDEO&CROSSFADE" "Aimee Official YouTube Channel") == "the artist's channel, names the artist" ]]
 [[ $(rank "Twins" "Clara" "Clara 『Twins』 MV" "Sunny Music (Japan)") == "trusted, names the artist" ]]
+# "LIVE Ver." names the live version, which both sides carry as a word already.
+[[ $("$BUILD/mvplayer-import" same-version "Neuro (feat. Rime) [Live at Virtual, 2022]" "Live" "Neuro feat. Rime (from Live) - Rim (LIVE Ver.)" | tr -d '\r') == same ]]
+# A channel named twice over is the artist's by either name.
+[[ $(rank "Comet" "Nayu" "Comet - Nayu ft.初音ミク MV" "Nayu Official / Nayutan Seijin") == "the artist's channel, names the artist" ]]
 # A synthesised voice credited on the artist's own channel is not another version; a human singer is.
 [[ $("$BUILD/mvplayer-import" same-version "Comet" "Comet" "Comet (ft.初音ミク) OFFICIAL MUSIC VIDEO" own | tr -d '\r') == same ]]
 [[ $("$BUILD/mvplayer-import" same-version "Comet" "Comet" "Comet feat. Somebody OFFICIAL MUSIC VIDEO" own | tr -d '\r') == different ]]
