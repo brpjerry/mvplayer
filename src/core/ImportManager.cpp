@@ -198,12 +198,17 @@ QString interruptedReason(const AudioAlign::Result &r)
 // And only on the artist's own channel. A third party's copy of the song's
 // video fits as well as the real one, and a label's upload may be a cut:
 // those are for the user to judge, in review.
+// `artistChannel`: the channel is the artist's; `knownChannel`: MusicBrainz
+// or the user said so, which is as good as the artist's name on it (the
+// name test is for the producer's channel with another singer's version,
+// and for tags and uploads in different scripts).
 bool ownRecording(const AudioAlign::Result &r, const TrackInfo &track, const QString &videoTitle, const QString &channel,
-                  bool artistChannel)
+                  bool artistChannel, bool knownChannel = false)
 {
     if (!audioReplaceable(r) || interrupted(r) || !artistChannel)
         return false;
-    return r.byOffset || (Matcher::sameVersion(track, videoTitle) && Matcher::namesArtist(track, videoTitle, channel))
+    return r.byOffset
+        || (Matcher::sameVersion(track, videoTitle) && (knownChannel || Matcher::namesArtist(track, videoTitle, channel)))
         || r.goodSec >= kOwnWaveformOtherVersion * std::min(r.trackSec, r.videoSec);
 }
 
@@ -221,7 +226,7 @@ QString unconfirmedReason(const AudioAlign::Result &r, const TrackInfo &track, c
         return QStringLiteral("%1% of it is demonstrably the track's waveform, but %2 (%3% needed then)")
             .arg(share)
             .arg(!Matcher::sameVersion(track, videoTitle) ? QStringLiteral("track and video are marked as different versions")
-                                                           : QStringLiteral("the upload names none of the track's artists"))
+                                                           : QStringLiteral("the upload names none of the track's artists (the producer's channel, another singer)"))
             .arg(qRound(100 * kOwnWaveformOtherVersion));
     }
     return QStringLiteral("only %1% of it is demonstrably the track's waveform (%2% needed)%3")
@@ -1397,8 +1402,8 @@ void ImportManager::runJob(qint64 trackId, const ImportSettings &cfg)
             // track it waits for, YouTube's audio, and the review stream; an
             // accepted one plays its track's audio where that was put in.
             // Whose channel: by its name, by MusicBrainz, or by the user's verdicts.
-            const bool vouchedExisting = c.ownChannel
-                || ArtistChannels::isArtistChannel(*m_db, Matcher::artistNames(track), c.channelId, c.channel);
+            const bool knownExisting = ArtistChannels::isArtistChannel(*m_db, Matcher::artistNames(track), c.channelId, c.channel);
+            const bool vouchedExisting = c.ownChannel || knownExisting;
             const int heard = existing->review ? 1 : 0;
             std::vector<int16_t> pcm;
             if (QFile::exists(existing->path) && AudioAlign::decodeMono(existing->path, &pcm, &m_cancel, &error, heard)) {
@@ -1414,7 +1419,7 @@ void ImportManager::runJob(qint64 trackId, const ImportSettings &cfg)
                     // The second stream of such a file is YouTube's audio.
                     if (AudioAlign::decodeMono(existing->path, &ytPcm, &m_cancel, &ytError, 1)) {
                         const AudioAlign::Result own = AudioAlign::align(trackPcm, ytPcm);
-                        if (audioMatches(own) && ownRecording(own, track, existing->ytTitle, existing->ytChannel, vouchedExisting)
+                        if (audioMatches(own) && ownRecording(own, track, existing->ytTitle, existing->ytChannel, vouchedExisting, knownExisting)
                             && waveformShare(own) >= kTakeoverShare && waveformShare(own) >= waveformShare(ar) + kTakeoverMargin) {
                             // The tracks that hold it, one measurement per recording.
                             QVector<TrackInfo> losing;
@@ -1477,7 +1482,7 @@ void ImportManager::runJob(qint64 trackId, const ImportSettings &cfg)
                     // A track of lesser quality than YouTube's audio has no
                     // audio of its own at stake and shares on the song alone.
                     const bool own = cfg.replaceAudio && libraryIsBetter(track, storedYoutubeQuality(*existing));
-                    const bool recording = ownRecording(ar, track, existing->ytTitle, existing->ytChannel, vouchedExisting);
+                    const bool recording = ownRecording(ar, track, existing->ytTitle, existing->ytChannel, vouchedExisting, knownExisting);
                     if (existing->review && own && recording) {
                         // It waits for a verdict on behalf of a track that is
                         // only the song (a live take, looked up first). This
@@ -1600,9 +1605,10 @@ void ImportManager::runJob(qint64 trackId, const ImportSettings &cfg)
         // taken, for review, when no candidate fits outright. (A lossy file
         // may still be the lesser one next to the account's audio.)
         bool forReview = false;
-        const bool artistChannel = c.ownChannel
-            || ArtistChannels::isArtistChannel(*m_db, Matcher::artistNames(track), c.channelId, c.channel);
-        if (cfg.replaceAudio && libraryIsBetter(track, youtubeQuality(info)) && !ownRecording(ar, track, c.title, c.channel, artistChannel)) {
+        const bool knownChannel = ArtistChannels::isArtistChannel(*m_db, Matcher::artistNames(track), c.channelId, c.channel);
+        const bool artistChannel = c.ownChannel || knownChannel;
+        if (cfg.replaceAudio && libraryIsBetter(track, youtubeQuality(info))
+            && !ownRecording(ar, track, c.title, c.channel, artistChannel, knownChannel)) {
             bool premiumWins = false;
             if (!track.lossless && yt.hasCookies()) {
                 QString premiumFile;
