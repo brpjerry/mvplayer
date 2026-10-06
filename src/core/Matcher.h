@@ -54,6 +54,9 @@ QStringList searchQueries(const TrackInfo &track);
 bool sameVersion(const TrackInfo &track, const QString &videoTitle);
 
 // Scores every candidate against the track and sorts best-first.
-void rank(const TrackInfo &track, QVector<YtCandidate> &candidates);
+// `knownChannel`: whether a candidate's channel is the artist's own by
+// other means than its name (MusicBrainz, the user's approvals).
+void rank(const TrackInfo &track, QVector<YtCandidate> &candidates,
+          const std::function<bool(const YtCandidate &)> &knownChannel = {});
 
 } // namespace Matcher

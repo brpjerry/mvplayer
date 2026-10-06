@@ -117,7 +117,10 @@ For every track without a video (`src/core/ImportManager.cpp`):
 1. **Search** YouTube through `yt-dlp` and rank the results by title, artist,
    channel and duration. Covers, live cuts, instrumentals, auto-generated
    "Topic" uploads and (unless enabled in Settings) unofficial uploads are
-   dropped. Tracks that are themselves instrumentals are skipped. So is
+   dropped — except that on the artist's own channel the title is not held
+   against an upload: the artist's cover of a song is the video of a track
+   that is that cover, and the audio decides. A label's channel that names
+   the artist is examined as well. Tracks that are themselves instrumentals are skipped. So is
    talk between songs — a stage announcement, an interview — when the title
    says so ("MC", "MC06", "Talk 2", "… (Interview)"; the word has to be the
    whole title or a tag) and the track also sounds like it: full of pauses

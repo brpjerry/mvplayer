@@ -101,6 +101,12 @@ rank() { "$BUILD/mvplayer-import" rank-check "$@" | tr -d '\r'; }
 [[ $(rank "Prism" "Clara" "Clara - Prism (Music Video)" "Somebody" verified) == "trusted, names the artist" ]]
 # A tag that holds the name in two scripts: either will do.
 [[ $(rank "Again" "Kizu Ai (キズアイ)" "キズアイ - Again (Official)" "Somebody Records") == "trusted, names the artist" ]]
+# On the artist's own channel the title's version words are not held
+# against the upload; elsewhere they are. A label's channel is examined.
+[[ $(rank "propose" "Lana" "【MV】propose / Lana cover" "Lana") == "the artist's channel, names the artist" ]]
+[[ $(rank "propose" "Lana" "【MV】propose / Lana cover" "Somebody") == "dropped: “cover” version, names the artist" ]]
+[[ $(rank "escalate" "Aimee" "Aimee - escalate MUSIC VIDEO&CROSSFADE" "Aimee Official YouTube Channel") == "the artist's channel, names the artist" ]]
+[[ $(rank "Twins" "Clara" "Clara 『Twins』 MV" "Sunny Music (Japan)") == "trusted, names the artist" ]]
 # A synthesised voice under its other name is the same singer.
 [[ $("$BUILD/mvplayer-import" same-version "Comet" "Comet" "Comet (ft.初音ミク) OFFICIAL MUSIC VIDEO" | tr -d '\r') == different ]]
 [[ $("$BUILD/mvplayer-import" same-version "Comet feat. Hatsune Miku" "Comet" "Comet (ft.初音ミク) OFFICIAL MUSIC VIDEO" | tr -d '\r') == same ]]
