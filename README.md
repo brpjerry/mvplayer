@@ -129,7 +129,9 @@ For every track without a video (`src/core/ImportManager.cpp`):
    change between samples). The track also has to make up at least half of
    the video: a short edit of a song (the cut used as a show's opening, say)
    does not take the video of the full version, only one of about its own
-   length. Nor is a video taken that stops the song and carries on with it
+   length. A video shorter than nine tenths of the track — the opening clip
+   of a show, a "short ver." — is a cut of the song and goes to review.
+   Nor is a video taken that stops the song and carries on with it
    later — a reaction video pausing to talk — however much of it is the
    track: more than 15 seconds of other audio inside the song sends it to
    review. If nothing passes, nothing is imported for that track.

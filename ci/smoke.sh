@@ -326,20 +326,36 @@ REPORT=$(python3 "$(dirname "$0")/../tools/import-report.py" "$WORK/mvlib5")
 echo "$REPORT" | tail -1 | cut -c1-200
 [[ "$REPORT" == *"review → you: reject"* && "$REPORT" == *"46%"* ]]
 
+echo "== a cut of the song"
+# The video is the first four fifths of the track: all of it the track's
+# waveform, and still a cut. It waits for the user rather than standing in
+# for the whole song.
+mkdir -p "$WORK/lib10/Hal" "$WORK/mvlib10"
+ffmpeg -v error -y -f lavfi -i "$(song 410 29 | sed 's/d=20/d=50/')" -metadata title="Seven" -metadata artist=Hal "$WORK/lib10/Hal/seven.flac"
+touch -d "10 seconds ago" "$WORK/lib10/Hal/seven.flac"
+ffmpeg -v error -y -i "$WORK/lib10/Hal/seven.flac" -t 40 -c:a libopus -b:a 96k "$WORK/site-audio.opus"
+echo '{"entries": [{"id": "cut", "ie_key": "Youtube", "title": "Hal - Seven (Official Video)", "channel": "Hal", "duration": 40, "view_count": 1000, "channel_is_verified": true}]}' > "$WORK/site-search.json"
+OUT=$(MVPLAYER_YTDLP="$SITE" timeout 120 "$BUILD/mvplayer-import" --allow-still-images --music-dir "$WORK/lib10" --mv-dir "$WORK/mvlib10" --jobs 1 2>&1)
+echo "$OUT" | grep -E "^\[import\]|^done:" | cut -c1-150
+[[ "$OUT" == *"for your review (1 option)"* && "$OUT" == *"done: 0 videos and 1 for review"* ]]
+grep -q "a cut of the song: 40 s of 50 s" "$WORK/mvlib10/.mvplayer/import-log.jsonl"
+
 echo "== a video changes hands"
 # "Sixth" is the song "Six" with something else over it for one second in
-# four, and longer (another language's version, as it were). Looked up
-# first, it is given the video: three quarters of it are the video's audio.
+# four, and a little longer (another language's version, as it were).
+# Looked up first, it is given the video: three quarters of it are the
+# video's audio.
 # When "Six" itself turns up, it is the video's own audio through and
 # through: the video plays "Six" from then on, and "Sixth" keeps it too.
 mkdir -p "$WORK/lib8/Gil" "$WORK/lib9/Gil" "$WORK/mvlib9"
-ffmpeg -v error -y -f lavfi -i "$(song 350 47 | sed 's/d=20/d=40/')" -metadata title="Six" -metadata artist=Gil "$WORK/lib9/Gil/six.flac"
-ffmpeg -v error -y -i "$WORK/lib9/Gil/six.flac" -f lavfi -i "$(song 520 31 | sed 's/d=20/d=48/')" -filter_complex \
-    "[1]volume='if(lt(mod(t\,4)\,1)\,6\,0)':eval=frame[g];[0]apad=whole_dur=48[p];[p][g]amix=inputs=2:normalize=0:duration=longest,volume=0.25" \
+ffmpeg -v error -y -f lavfi -i "$(song 350 47 | sed 's/d=20/d=50/')" -metadata title="Six" -metadata artist=Gil "$WORK/lib9/Gil/six.flac"
+ffmpeg -v error -y -i "$WORK/lib9/Gil/six.flac" -f lavfi -i "$(song 520 31 | sed 's/d=20/d=55/')" -filter_complex \
+    "[1]volume='if(lt(mod(t\,4)\,1)\,6\,0)':eval=frame[g];[0]apad=whole_dur=55[p];[p][g]amix=inputs=2:normalize=0:duration=longest,volume=0.25" \
     -metadata title="Sixth" -metadata artist=Gil "$WORK/lib8/Gil/sixth.flac"
 touch -d "10 seconds ago" "$WORK/lib8/Gil/sixth.flac" "$WORK/lib9/Gil/six.flac"
 ffmpeg -v error -y -i "$WORK/lib9/Gil/six.flac" -c:a libopus -b:a 96k "$WORK/site-audio.opus"
-echo '{"entries": [{"id": "own", "ie_key": "Youtube", "title": "Gil - Six (Official Video)", "channel": "Gil", "duration": 40, "view_count": 1000, "channel_is_verified": true}]}' > "$WORK/site-search.json"
+ffmpeg -v error -y -i "$WORK/mv.mkv" -map 0:v:0 -c copy -t 50 "$WORK/site-video.mkv"
+echo '{"entries": [{"id": "own", "ie_key": "Youtube", "title": "Gil - Six (Official Video)", "channel": "Gil", "duration": 50, "view_count": 1000, "channel_is_verified": true}]}' > "$WORK/site-search.json"
 OUT=$(MVPLAYER_YTDLP="$SITE" timeout 120 "$BUILD/mvplayer-import" --allow-still-images --music-dir "$WORK/lib8" --mv-dir "$WORK/mvlib9" --jobs 1 2>&1)
 echo "$OUT" | grep -E "^\[import\]|^done:" | cut -c1-150
 [[ "$OUT" == *"done: 1 videos; tracks: done=1"* ]]
