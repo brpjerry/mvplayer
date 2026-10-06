@@ -163,6 +163,17 @@ constexpr double kOwnWaveformOtherVersion = 0.97;
 // at 80%. A track that is all but identical to the video's own audio, where
 // the track holding the video is clearly less so, becomes the audio the
 // video plays. The holder stays linked to the video.
+// A video shorter than the track is a cut of the song: the ninety seconds
+// used as a show's opening, a "short ver.", an edit. Taken outright, such a
+// clip stood in for four-minute tracks. Within a tenth of the track's
+// length is the whole song give or take an intro.
+constexpr double kShortCut = 0.90;
+
+bool shortCut(const AudioAlign::Result &r)
+{
+    return r.trackSec > 0 && r.videoSec < kShortCut * r.trackSec;
+}
+
 constexpr double kTakeoverShare = 0.90;  // of the newcomer, against YouTube's audio
 constexpr double kTakeoverMargin = 0.08; // by which the holder has to fall short of it
 
@@ -205,7 +216,7 @@ QString interruptedReason(const AudioAlign::Result &r)
 bool ownRecording(const AudioAlign::Result &r, const TrackInfo &track, const QString &videoTitle, const QString &channel,
                   bool artistChannel, bool knownChannel = false)
 {
-    if (!audioReplaceable(r) || interrupted(r) || !artistChannel)
+    if (!audioReplaceable(r) || interrupted(r) || shortCut(r) || !artistChannel)
         return false;
     return r.byOffset
         || (Matcher::sameVersion(track, videoTitle) && (knownChannel || Matcher::namesArtist(track, videoTitle, channel)))
@@ -219,6 +230,9 @@ QString unconfirmedReason(const AudioAlign::Result &r, const TrackInfo &track, c
     const int share = qRound(100 * r.goodSec / qMax(1.0, std::min(r.trackSec, r.videoSec)));
     if (audioReplaceable(r) && interrupted(r))
         return QStringLiteral("%1% of it is demonstrably the track's waveform, but %2").arg(share).arg(interruptedReason(r));
+    if (audioReplaceable(r) && shortCut(r))
+        return QStringLiteral("%1% of it is demonstrably the track's waveform, but the video is a cut of the song: %2 s of %3 s")
+            .arg(share).arg(qRound(r.videoSec)).arg(qRound(r.trackSec));
     if (audioReplaceable(r) && !artistChannel)
         return QStringLiteral("%1% of it is demonstrably the track's waveform, but “%2” is not known as the artist's channel")
             .arg(share).arg(channel);
