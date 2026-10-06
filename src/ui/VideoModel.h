@@ -3,6 +3,7 @@
 #include "core/Types.h"
 
 #include <QAbstractListModel>
+#include <QHash>
 #include <QCollator>
 #include <QSortFilterProxyModel>
 
@@ -62,8 +63,16 @@ private:
     static QString buildSearchText(const VideoInfo &v);
     void reviewOptionsChanged();
 
+    // The library is thousands of videos and the review view hundreds of
+    // cards; what a card asks per row must not walk the library.
+    void reindex();
+    static QString foldedTitle(const QString &title);
+    void reviewRowsChanged(const QVector<int> &roles);
+
     QVector<VideoInfo> m_videos;
     QVector<QString> m_search; // folded text of every tag, parallel to m_videos
+    QHash<qint64, QVector<qint64>> m_groups;  // review group -> its options, sorted
+    QHash<QString, QVector<qint64>> m_titles; // folded title -> accepted videos with it
 };
 
 // The grid's view of the library: one sidebar facet + the search box.

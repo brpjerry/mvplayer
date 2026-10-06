@@ -112,31 +112,43 @@ QHash<int, QByteArray> VideoModel::roleNames() const
 
 QVector<qint64> VideoModel::reviewOptions(const VideoInfo &v) const
 {
-    QVector<qint64> ids;
     if (!v.review)
-        return ids;
-    const qint64 group = v.reviewGroup > 0 ? v.reviewGroup : v.id;
-    for (const VideoInfo &o : m_videos) {
-        if (o.review && (o.reviewGroup > 0 ? o.reviewGroup : o.id) == group)
-            ids << o.id;
-    }
-    std::sort(ids.begin(), ids.end());
-    return ids;
+        return {};
+    return m_groups.value(v.reviewGroup > 0 ? v.reviewGroup : v.id);
+}
+
+QString VideoModel::foldedTitle(const QString &title)
+{
+    return title.normalized(QString::NormalizationForm_KC).toCaseFolded().simplified();
 }
 
 const VideoInfo *VideoModel::sameTitle(const VideoInfo &v) const
 {
     if (!v.review)
         return nullptr;
-    const auto folded = [](const QString &t) { return t.normalized(QString::NormalizationForm_KC).toCaseFolded().simplified(); };
-    const QString title = folded(v.title);
-    if (title.isEmpty())
+    const QVector<qint64> ids = m_titles.value(foldedTitle(v.title));
+    if (ids.isEmpty())
         return nullptr;
     for (const VideoInfo &o : m_videos) {
-        if (!o.review && folded(o.title) == title)
+        if (o.id == ids.first())
             return &o;
     }
     return nullptr;
+}
+
+void VideoModel::reindex()
+{
+    m_groups.clear();
+    m_titles.clear();
+    for (const VideoInfo &v : std::as_const(m_videos)) {
+        if (v.review) {
+            m_groups[v.reviewGroup > 0 ? v.reviewGroup : v.id] << v.id;
+        } else if (const QString t = foldedTitle(v.title); !t.isEmpty()) {
+            m_titles[t] << v.id;
+        }
+    }
+    for (QVector<qint64> &ids : m_groups)
+        std::sort(ids.begin(), ids.end());
 }
 
 QVariantMap VideoModel::toMap(int row) const
@@ -169,6 +181,7 @@ void VideoModel::reset(const QVector<VideoInfo> &videos)
     m_search.reserve(videos.size());
     for (const VideoInfo &v : videos)
         m_search << buildSearchText(v);
+    reindex();
     endResetModel();
 }
 
@@ -176,28 +189,41 @@ void VideoModel::upsert(const VideoInfo &video)
 {
     for (int i = 0; i < m_videos.size(); ++i) {
         if (m_videos[i].id == video.id) {
+            const bool wasReview = m_videos[i].review;
             m_videos[i] = video;
             m_search[i] = buildSearchText(video);
+            reindex();
             emit dataChanged(index(i, 0), index(i, 0));
             reviewOptionsChanged();
+            // Accepted now: a card waiting on a video of this title says so.
+            if (wasReview != video.review)
+                reviewRowsChanged({SameTitleRole});
             return;
         }
     }
     beginInsertRows(QModelIndex(), m_videos.size(), m_videos.size());
     m_videos << video;
     m_search << buildSearchText(video);
+    reindex();
     endInsertRows();
-    reviewOptionsChanged();
+    if (video.review)
+        reviewOptionsChanged();
+    else
+        reviewRowsChanged({SameTitleRole});
 }
 
 // A group gained or lost an option: its other cards show a different count,
-// and possibly a different one of them is on show. And any video that came
-// or went may be the one a review card says has its title.
+// and possibly a different one of them is on show.
 void VideoModel::reviewOptionsChanged()
+{
+    reviewRowsChanged({ReviewOptionRole, ReviewOptionsRole});
+}
+
+void VideoModel::reviewRowsChanged(const QVector<int> &roles)
 {
     for (int i = 0; i < m_videos.size(); ++i) {
         if (m_videos[i].review)
-            emit dataChanged(index(i, 0), index(i, 0));
+            emit dataChanged(index(i, 0), index(i, 0), roles);
     }
 }
 
@@ -206,11 +232,16 @@ void VideoModel::remove(qint64 videoId)
     for (int i = 0; i < m_videos.size(); ++i) {
         if (m_videos[i].id != videoId)
             continue;
+        const bool review = m_videos[i].review;
         beginRemoveRows(QModelIndex(), i, i);
         m_videos.removeAt(i);
         m_search.removeAt(i);
+        reindex();
         endRemoveRows();
-        reviewOptionsChanged();
+        if (review)
+            reviewOptionsChanged();
+        else
+            reviewRowsChanged({SameTitleRole});
         return;
     }
 }
