@@ -107,6 +107,11 @@ rank() { "$BUILD/mvplayer-import" rank-check "$@" | tr -d '\r'; }
 [[ $(rank "propose" "Lana" "【MV】propose / Lana cover" "Somebody") == "dropped: “cover” version, names the artist" ]]
 [[ $(rank "escalate" "Aimee" "Aimee - escalate MUSIC VIDEO&CROSSFADE" "Aimee Official YouTube Channel") == "the artist's channel, names the artist" ]]
 [[ $(rank "Twins" "Clara" "Clara 『Twins』 MV" "Sunny Music (Japan)") == "trusted, names the artist" ]]
+# A synthesised voice credited on the artist's own channel is not another version; a human singer is.
+[[ $("$BUILD/mvplayer-import" same-version "Comet" "Comet" "Comet (ft.初音ミク) OFFICIAL MUSIC VIDEO" own | tr -d '\r') == same ]]
+[[ $("$BUILD/mvplayer-import" same-version "Comet" "Comet" "Comet feat. Somebody OFFICIAL MUSIC VIDEO" own | tr -d '\r') == different ]]
+# A rhythm-game replay by its title.
+[[ $(rank "Dance" "Clara" "Player | Clara - Dance [Wild] HDHR 99.34% #1 308pp" "Circle People" verified) == "dropped: game replay, names the artist" ]]
 # A synthesised voice under its other name is the same singer.
 [[ $("$BUILD/mvplayer-import" same-version "Comet" "Comet" "Comet (ft.初音ミク) OFFICIAL MUSIC VIDEO" | tr -d '\r') == different ]]
 [[ $("$BUILD/mvplayer-import" same-version "Comet feat. Hatsune Miku" "Comet" "Comet (ft.初音ミク) OFFICIAL MUSIC VIDEO" | tr -d '\r') == same ]]
@@ -137,7 +142,7 @@ echo "== circuit breaker"
 # untouched, and finish them once requests succeed again.
 mkdir -p "$WORK/lib/A" "$WORK/mvlib"
 # Two different songs: files are told apart by their sound.
-song() { echo "aevalsrc=0.3*sin(2*PI*t*($1+$2*mod(floor(t/1.5)\,7)))+0.2*sin(2*PI*t*($1*1.5+$2*mod(floor(t/2)\,5))):s=48000:d=20"; }
+song() { echo "aevalsrc=0.3*sin(2*PI*t*($1+$2*mod(floor(t/1.5)\,7)))+0.2*sin(2*PI*t*($1*1.5+$2*mod(floor(t/2)\,5))):s=48000:d=40"; }
 ffmpeg -v error -y -f lavfi -i "$(song 220 30)" -metadata title="Song one" -metadata artist=A "$WORK/lib/A/one.flac"
 ffmpeg -v error -y -f lavfi -i "$(song 311 47)" -metadata title="Song two" -metadata artist=A "$WORK/lib/A/two.flac"
 cat > "$WORK/fake-ytdlp" <<FAKE
@@ -337,7 +342,7 @@ echo "== a cut of the song"
 # waveform, and still a cut. It waits for the user rather than standing in
 # for the whole song.
 mkdir -p "$WORK/lib10/Hal" "$WORK/mvlib10"
-ffmpeg -v error -y -f lavfi -i "$(song 410 29 | sed 's/d=20/d=50/')" -metadata title="Seven" -metadata artist=Hal "$WORK/lib10/Hal/seven.flac"
+ffmpeg -v error -y -f lavfi -i "$(song 410 29 | sed 's/d=40/d=50/')" -metadata title="Seven" -metadata artist=Hal "$WORK/lib10/Hal/seven.flac"
 touch -d "10 seconds ago" "$WORK/lib10/Hal/seven.flac"
 ffmpeg -v error -y -i "$WORK/lib10/Hal/seven.flac" -t 40 -c:a libopus -b:a 96k "$WORK/site-audio.opus"
 echo '{"entries": [{"id": "cut", "ie_key": "Youtube", "title": "Hal - Seven (Official Video)", "channel": "Hal", "duration": 40, "view_count": 1000, "channel_is_verified": true}]}' > "$WORK/site-search.json"
@@ -354,8 +359,8 @@ echo "== a video changes hands"
 # When "Six" itself turns up, it is the video's own audio through and
 # through: the video plays "Six" from then on, and "Sixth" keeps it too.
 mkdir -p "$WORK/lib8/Gil" "$WORK/lib9/Gil" "$WORK/mvlib9"
-ffmpeg -v error -y -f lavfi -i "$(song 350 47 | sed 's/d=20/d=50/')" -metadata title="Six" -metadata artist=Gil "$WORK/lib9/Gil/six.flac"
-ffmpeg -v error -y -i "$WORK/lib9/Gil/six.flac" -f lavfi -i "$(song 520 31 | sed 's/d=20/d=55/')" -filter_complex \
+ffmpeg -v error -y -f lavfi -i "$(song 350 47 | sed 's/d=40/d=50/')" -metadata title="Six" -metadata artist=Gil "$WORK/lib9/Gil/six.flac"
+ffmpeg -v error -y -i "$WORK/lib9/Gil/six.flac" -f lavfi -i "$(song 520 31 | sed 's/d=40/d=55/')" -filter_complex \
     "[1]volume='if(lt(mod(t\,4)\,1)\,6\,0)':eval=frame[g];[0]apad=whole_dur=55[p];[p][g]amix=inputs=2:normalize=0:duration=longest,volume=0.25" \
     -metadata title="Sixth" -metadata artist=Gil "$WORK/lib8/Gil/sixth.flac"
 touch -d "10 seconds ago" "$WORK/lib8/Gil/sixth.flac" "$WORK/lib9/Gil/six.flac"

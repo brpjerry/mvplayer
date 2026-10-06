@@ -51,7 +51,9 @@ QStringList searchQueries(const TrackInfo &track);
 
 // False when one of the two is marked as a version the other is not: a live
 // take, a remix, a cover, ... (the track by its title or album).
-bool sameVersion(const TrackInfo &track, const QString &videoTitle);
+// `artistChannel`: the upload is on the artist's own channel, where a
+// synthesised voice credited in the title is not another version.
+bool sameVersion(const TrackInfo &track, const QString &videoTitle, bool artistChannel = false);
 
 // Scores every candidate against the track and sorts best-first.
 // `knownChannel`: whether a candidate's channel is the artist's own by
