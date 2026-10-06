@@ -307,7 +307,8 @@ bool Matcher::namesArtist(const TrackInfo &track, const QString &videoTitle, con
     return false;
 }
 
-void Matcher::rank(const TrackInfo &track, QVector<YtCandidate> &candidates)
+void Matcher::rank(const TrackInfo &track, QVector<YtCandidate> &candidates,
+                   const std::function<bool(const YtCandidate &)> &knownChannel)
 {
     const QString titleTok = tokens(track.title);
     const QString albumTok = tokens(track.album);
@@ -334,10 +335,18 @@ void Matcher::rank(const TrackInfo &track, QVector<YtCandidate> &candidates)
                 continue;
             }
         }
-        for (const QString &term : versionTerms()) {
-            if (hasTerm(ct, term) && !hasTerm(titleTok, term) && !hasTerm(albumTok, term)) {
-                c.rejectReason = QStringLiteral("“%1” version").arg(term);
-                break;
+        // On the artist's own channel the title is not held against the
+        // upload: the artist's cover of a song is a cover by its title, the
+        // video of a track that is that cover; a music video followed by an
+        // album crossfade says "crossfade". The audio decides there, and
+        // what it cannot settle goes to review.
+        c.ownChannel = isOwnChannel(track, c.channel) || (knownChannel && knownChannel(c));
+        if (!c.ownChannel) {
+            for (const QString &term : versionTerms()) {
+                if (hasTerm(ct, term) && !hasTerm(titleTok, term) && !hasTerm(albumTok, term)) {
+                    c.rejectReason = QStringLiteral("“%1” version").arg(term);
+                    break;
+                }
             }
         }
         if (!c.rejectReason.isEmpty())
@@ -365,7 +374,7 @@ void Matcher::rank(const TrackInfo &track, QVector<YtCandidate> &candidates)
             artistInTitle |= ct.contains(nt);
             artistIsChannel |= ch.contains(nt);
         }
-        const bool channelIsOnlyArtist = isOwnChannel(track, c.channel);
+        const bool channelIsOnlyArtist = c.ownChannel;
         if (artistInTitle || artistIsChannel)
             c.score += 20;
         if (artistIsChannel)
@@ -406,8 +415,16 @@ void Matcher::rank(const TrackInfo &track, QVector<YtCandidate> &candidates)
         // re-uploads are verified too.
         // A channel that merely has the artist's name among other words
         // gets that trust only for titles that do not look like a fan's.
-        c.trusted = (artistIsChannel && (!fan || channelIsOnlyArtist)) || ((c.verified || official) && !fan);
-        c.ownChannel = channelIsOnlyArtist;
+        // A label's channel ("Sony Music (Japan)", unverified) is examined
+        // too when the title names the artist: it cannot be accepted
+        // outright, only offered for review.
+        static const QStringList labelTerms = {
+            QStringLiteral("music"), QStringLiteral("records"), QStringLiteral("record"), QStringLiteral("entertainment"),
+            QStringLiteral("label"), QStringLiteral("レコード"), QStringLiteral("ミュージック"), QStringLiteral("エンタテインメント"),
+        };
+        const bool label = artistInTitle && std::any_of(labelTerms.begin(), labelTerms.end(),
+                                                        [&ch](const QString &t) { return hasTerm(ch, t); });
+        c.trusted = channelIsOnlyArtist || (artistIsChannel && !fan) || ((c.verified || official || label) && !fan);
     }
 
     std::stable_sort(candidates.begin(), candidates.end(), [](const YtCandidate &a, const YtCandidate &b) {

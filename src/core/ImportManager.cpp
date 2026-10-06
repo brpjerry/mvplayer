@@ -1290,7 +1290,9 @@ void ImportManager::runJob(qint64 trackId, const ImportSettings &cfg)
                 c.rank += 2; // results of fallback queries rank slightly lower
             candidates.append(c);
         }
-        Matcher::rank(track, candidates);
+        Matcher::rank(track, candidates, [&](const YtCandidate &c) {
+            return ArtistChannels::isArtistChannel(*m_db, Matcher::artistNames(track), c.channelId, c.channel);
+        });
         if (std::any_of(candidates.begin(), candidates.end(), usable))
             break;
     }
