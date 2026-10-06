@@ -1956,8 +1956,21 @@ void ImportManager::runJob(qint64 trackId, const ImportSettings &cfg)
         claimed << picks.first().c.id;
     }
     for (const Pick &pick : std::as_const(picks)) {
-        if (forReview && m_db->videoByYtId(pick.c.id))
-            continue; // another track brought it in meanwhile
+        if (forReview) {
+            // Another track brought it in meanwhile. Waiting for review
+            // through that track, it is one more verdict for this one too.
+            if (const auto there = m_db->videoByYtId(pick.c.id)) {
+                if (there->review && added.isEmpty() && heldVideo <= 0) {
+                    joinedReview = true;
+                    logVideos.append(QJsonObject{{QStringLiteral("videoId"), there->id}, {QStringLiteral("id"), pick.c.id},
+                                                 {QStringLiteral("title"), pick.c.title}, {QStringLiteral("review"), true},
+                                                 {QStringLiteral("summary"), QStringLiteral("with “%1”").arg(there->title)}});
+                    finish(QStringLiteral("done"), there->id, QStringLiteral("for your review, with “%1”").arg(there->title));
+                    return;
+                }
+                continue;
+            }
+        }
         qint64 videoId = 0;
         QString summary;
         const Got got = bringIn(pick, forReview, group, &videoId, &summary);
