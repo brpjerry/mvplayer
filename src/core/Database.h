@@ -68,6 +68,7 @@ public:
     // Videos that no track in the music folders has: their tracks left, with
     // a folder that was removed or files that were deleted.
     QVector<VideoInfo> untrackedVideos();
+    int untrackedVideoCount();
     // Forgets the absent tracks of a video, for when the video is deleted:
     // if their files come back, they are looked up afresh.
     void removeAbsentTracksOf(qint64 videoId);

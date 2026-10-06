@@ -683,7 +683,7 @@ void ImportManager::checkQuality()
 
 int ImportManager::untrackedCount() const
 {
-    return int(m_db->untrackedVideos().size());
+    return m_db->untrackedVideoCount();
 }
 
 int ImportManager::deleteUntracked()

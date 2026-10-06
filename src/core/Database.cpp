@@ -424,24 +424,34 @@ void Database::setTrackAbsent(qint64 id, bool absent)
     run(q);
 }
 
+// Of the options that wait for review for a track, the track is linked to
+// one: the others are its videos as well. Written so that the indexes
+// serve: the linked videos and their review groups are gathered once, not
+// searched for again per video (that took seconds on a large library, on
+// the main thread, every time the importer's activity changed).
+const char *kUntrackedSql =
+    "WITH linked AS (SELECT DISTINCT video_id AS id FROM tracks WHERE absent = 0 AND video_id IS NOT NULL),"
+    " groups AS (SELECT DISTINCT COALESCE(NULLIF(v.review_group, 0), v.id) AS g FROM videos v JOIN linked ON linked.id = v.id WHERE v.review = 1)"
+    " %1 FROM videos WHERE id NOT IN (SELECT id FROM linked)"
+    " AND NOT (review = 1 AND COALESCE(NULLIF(review_group, 0), id) IN (SELECT g FROM groups))";
+
 QVector<VideoInfo> Database::untrackedVideos()
 {
     QVector<VideoInfo> out;
     QSqlQuery q(conn());
-    // Of the options that wait for review for a track, the track is linked
-    // to one: the others are its videos as well.
-    q.prepare(QStringLiteral(
-                  "SELECT %1 FROM videos WHERE NOT EXISTS"
-                  " (SELECT 1 FROM tracks t JOIN videos g ON g.id = t.video_id WHERE t.absent = 0 AND"
-                  "  (g.id = videos.id OR (videos.review = 1 AND g.review = 1 AND"
-                  "   COALESCE(NULLIF(g.review_group, 0), g.id) = COALESCE(NULLIF(videos.review_group, 0), videos.id))))"
-                  " ORDER BY id")
-                  .arg(QLatin1String(kVideoCols)));
+    q.prepare(QString::fromLatin1(kUntrackedSql).arg(QStringLiteral("SELECT ") + QLatin1String(kVideoCols)) + QStringLiteral(" ORDER BY id"));
     if (run(q)) {
         while (q.next())
             out << resolved(readVideo(q));
     }
     return out;
+}
+
+int Database::untrackedVideoCount()
+{
+    QSqlQuery q(conn());
+    q.prepare(QString::fromLatin1(kUntrackedSql).arg(QStringLiteral("SELECT COUNT(*)")));
+    return run(q) && q.next() ? q.value(0).toInt() : 0;
 }
 
 void Database::removeAbsentTracksOf(qint64 videoId)
