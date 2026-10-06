@@ -136,6 +136,12 @@ QStringList Matcher::artistNames(const TrackInfo &t)
 
 bool Matcher::isNonMvTrack(const TrackInfo &track, QString *why)
 {
+    // Nothing this short has a music video: a jingle, a skit, a few words.
+    if (track.duration > 0 && track.duration < 30) {
+        if (why)
+            *why = QStringLiteral("%1-second track").arg(qRound(track.duration));
+        return true;
+    }
     const QString tok = tokens(track.title);
     for (const QString &term : nonMvTrackTerms()) {
         if (hasTerm(tok, term)) {
@@ -182,7 +188,7 @@ QStringList Matcher::searchQueries(const TrackInfo &track)
     };
 }
 
-bool Matcher::sameVersion(const TrackInfo &track, const QString &videoTitle)
+bool Matcher::sameVersion(const TrackInfo &track, const QString &videoTitle, bool artistChannel)
 {
     const QString video = tokens(videoTitle);
     const QString title = tokens(track.title), album = tokens(track.album);
@@ -242,10 +248,20 @@ bool Matcher::sameVersion(const TrackInfo &track, const QString &videoTitle)
         }
         return false;
     };
+    // On the artist's own channel a synthesised voice is simply who sings
+    // the artist's songs, credited or not in the tags. A human singer
+    // credited there is still another version (the producer's channel).
+    const auto synthesised = [](const QString &singer) {
+        for (const QStringList &names : voices) {
+            if (std::any_of(names.begin(), names.end(), [&singer](const QString &n) { return n == singer || n.startsWith(singer + QLatin1Char(' ')); }))
+                return true;
+        }
+        return false;
+    };
     auto it = feat.globalMatch(video);
     while (it.hasNext()) {
         const QString singer = it.next().captured(1);
-        if (singer.size() >= 2 && !whose.contains(singer) && !knownAs(singer))
+        if (singer.size() >= 2 && !whose.contains(singer) && !knownAs(singer) && !(artistChannel && synthesised(singer)))
             return false;
     }
     return true;
@@ -312,8 +328,23 @@ void Matcher::rank(const TrackInfo &track, QVector<YtCandidate> &candidates,
 {
     const QString titleTok = tokens(track.title);
     const QString albumTok = tokens(track.album);
-    const QStringList names = Matcher::artistNames(track);
     const int total = candidates.size();
+
+    // YouTube's own name for the artist: its auto-generated "Artist - Topic"
+    // upload of the song is among the results, in whatever script the
+    // artist goes by there. It serves as another name of the artist for
+    // this lookup — the tag may be romanised and the channel not.
+    TrackInfo known = track;
+    const QString bareTitle = titleTok.trimmed();
+    for (const YtCandidate &c : std::as_const(candidates)) {
+        const QString ch = c.channel.trimmed();
+        if (ch.endsWith(QStringLiteral("- Topic")) && !bareTitle.isEmpty() && tokens(c.title).contains(bareTitle)) {
+            const QString alias = ch.left(ch.size() - 7).trimmed();
+            if (!alias.isEmpty() && !Matcher::artistNames(known).contains(alias))
+                known.artist += QStringLiteral("; ") + alias;
+        }
+    }
+    const QStringList names = Matcher::artistNames(known);
 
     for (YtCandidate &c : candidates) {
         const QString ct = tokens(c.title);
@@ -323,6 +354,13 @@ void Matcher::rank(const TrackInfo &track, QVector<YtCandidate> &candidates,
         c.ownChannel = false;
         c.rejectReason.clear();
 
+        // A rhythm-game replay: mod strings and scores in the title.
+        static const QRegularExpression replay(QStringLiteral(
+            "\\b(?:(?:hd|hr|dt|fl|ez|nc|nf|ht|sd|pf){2,}|\\d+pp|\\d+(?:\\.\\d+)?% ?fc)\\b"));
+        if (replay.match(ct).hasMatch()) {
+            c.rejectReason = QStringLiteral("game replay");
+            continue;
+        }
         // Auto-generated "Artist - Topic" uploads are a still image over the audio.
         if (hasWord(ch, QStringLiteral("topic")) && c.channel.trimmed().endsWith(QStringLiteral("- Topic"))) {
             c.rejectReason = QStringLiteral("auto-generated art track");
@@ -340,7 +378,7 @@ void Matcher::rank(const TrackInfo &track, QVector<YtCandidate> &candidates,
         // video of a track that is that cover; a music video followed by an
         // album crossfade says "crossfade". The audio decides there, and
         // what it cannot settle goes to review.
-        c.ownChannel = isOwnChannel(track, c.channel) || (knownChannel && knownChannel(c));
+        c.ownChannel = isOwnChannel(known, c.channel) || (knownChannel && knownChannel(c));
         if (!c.ownChannel) {
             for (const QString &term : versionTerms()) {
                 if (hasTerm(ct, term) && !hasTerm(titleTok, term) && !hasTerm(albumTok, term)) {
@@ -353,7 +391,6 @@ void Matcher::rank(const TrackInfo &track, QVector<YtCandidate> &candidates,
             continue;
 
         // Title
-        const QString bareTitle = titleTok.trimmed();
         if (!bareTitle.isEmpty() && ct.contains(bareTitle)) {
             c.score += 40;
         } else {

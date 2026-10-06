@@ -120,7 +120,8 @@ For every track without a video (`src/core/ImportManager.cpp`):
    dropped — except that on the artist's own channel the title is not held
    against an upload: the artist's cover of a song is the video of a track
    that is that cover, and the audio decides. A label's channel that names
-   the artist is examined as well. Tracks that are themselves instrumentals are skipped. So is
+   the artist is examined as well. Tracks that are themselves instrumentals are skipped, and so is
+   anything under thirty seconds. So is
    talk between songs — a stage announcement, an interview — when the title
    says so ("MC", "MC06", "Talk 2", "… (Interview)"; the word has to be the
    whole title or a tag) and the track also sounds like it: full of pauses

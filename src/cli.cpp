@@ -68,7 +68,7 @@ int main(int argc, char **argv)
         {QStringLiteral("delete-untracked"), QStringLiteral("After reading the music folders, delete the videos that none of their tracks has.")},
         {QStringLiteral("check-quality"), QStringLiteral("Look at the videos already imported again and rebuild those the account is offered in better quality.")},
     });
-    parser.addPositionalArgument(QStringLiteral("command"), QStringLiteral("Optional: align <track> <video> | mux <track> <video> <out.mkv> | check-video <video> [keyframes] | same-recording <file> <file> | same-version <track title> <album> <video title> | check-cookies [video id] | convert-subs <file.srv3> <out without extension> | talk-check <file>... | rank-check <track title> <artist> <video title> <channel> [verified] | artist-channels <artist>"));
+    parser.addPositionalArgument(QStringLiteral("command"), QStringLiteral("Optional: align <track> <video> | mux <track> <video> <out.mkv> | check-video <video> [keyframes] | same-recording <file> <file> | same-version <track title> <album> <video title> [own] | check-cookies [video id] | convert-subs <file.srv3> <out without extension> | talk-check <file>... | rank-check <track title> <artist> <video title> <channel> [verified] | artist-channels <artist>"));
     parser.process(app);
 
     const QStringList pos = parser.positionalArguments();
@@ -101,12 +101,12 @@ int main(int argc, char **argv)
     }
 
     if (pos.value(0) == QLatin1String("same-version")) {
-        if (pos.size() != 4)
+        if (pos.size() < 4 || pos.size() > 5)
             parser.showHelp(2);
         TrackInfo t;
         t.title = pos[1];
         t.album = pos[2];
-        out << (Matcher::sameVersion(t, pos[3]) ? "same" : "different") << Qt::endl;
+        out << (Matcher::sameVersion(t, pos[3], pos.value(4) == QLatin1String("own")) ? "same" : "different") << Qt::endl;
         return 0;
     }
 

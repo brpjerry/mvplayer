@@ -219,7 +219,7 @@ bool ownRecording(const AudioAlign::Result &r, const TrackInfo &track, const QSt
     if (!audioReplaceable(r) || interrupted(r) || shortCut(r) || !artistChannel)
         return false;
     return r.byOffset
-        || (Matcher::sameVersion(track, videoTitle) && (knownChannel || Matcher::namesArtist(track, videoTitle, channel)))
+        || (Matcher::sameVersion(track, videoTitle, artistChannel) && (knownChannel || Matcher::namesArtist(track, videoTitle, channel)))
         || r.goodSec >= kOwnWaveformOtherVersion * std::min(r.trackSec, r.videoSec);
 }
 
@@ -239,7 +239,7 @@ QString unconfirmedReason(const AudioAlign::Result &r, const TrackInfo &track, c
     if (audioReplaceable(r)) {
         return QStringLiteral("%1% of it is demonstrably the track's waveform, but %2 (%3% needed then)")
             .arg(share)
-            .arg(!Matcher::sameVersion(track, videoTitle) ? QStringLiteral("track and video are marked as different versions")
+            .arg(!Matcher::sameVersion(track, videoTitle, artistChannel) ? QStringLiteral("track and video are marked as different versions")
                                                            : QStringLiteral("the upload names none of the track's artists (the producer's channel, another singer)"))
             .arg(qRound(100 * kOwnWaveformOtherVersion));
     }
@@ -294,7 +294,7 @@ AudioAlign::Result fitted(AudioAlign::Result r, const TrackInfo &track, const QS
     // does somebody's re-upload with other audio under it: this much trust
     // in so little waveform is for the artist's own channel alone.
     if (r.fpMatchedSec < 0.8 * whole || r.goodSec < 0.2 * whole || r.contourCorr < 0.5
-        || !Matcher::sameVersion(track, videoTitle) || !Matcher::isOwnChannel(track, channel))
+        || !Matcher::sameVersion(track, videoTitle, true) || !Matcher::isOwnChannel(track, channel))
         return r;
     bool exact = false;
     const AudioAlign::Result placed = placedWhole(r, &exact);
@@ -1409,8 +1409,44 @@ void ImportManager::runJob(qint64 trackId, const ImportSettings &cfg)
         if (const auto existing = m_db->videoByYtId(c.id)) {
             if (heldGroup > 0 && existing->review
                 && (existing->reviewGroup > 0 ? existing->reviewGroup : existing->id) == heldGroup) {
+                // Already one of this track's options. Judged again by the
+                // rules of the day: what has since become acceptable
+                // outright is taken, and the other options let go.
+                std::vector<int16_t> optPcm;
+                QString optError;
+                const bool known = c.ownChannel || ArtistChannels::isArtistChannel(*m_db, Matcher::artistNames(track), c.channelId, c.channel);
+                if (AudioAlign::decodeMono(existing->path, &optPcm, &m_cancel, &optError, 1)) {
+                    const AudioAlign::Result ar = fitted(AudioAlign::align(trackPcm, optPcm), track, existing->ytTitle, existing->ytChannel);
+                    if (audioMatches(ar) && cfg.replaceAudio && libraryIsBetter(track, storedYoutubeQuality(*existing))
+                        && ownRecording(ar, track, existing->ytTitle, existing->ytChannel, known, known && !c.ownChannel)) {
+                        const qint64 group = heldGroup;
+                        if (putLibraryAudioIn(*existing, track, ar, cfg, &error, false, 1)) {
+                            for (const VideoInfo &other : m_db->reviewOptions(group)) {
+                                if (other.id == existing->id)
+                                    continue;
+                                m_db->relinkTracks(other.id, existing->id);
+                                m_db->removeVideo(other.id);
+                                removeVideoFiles(other);
+                                emit videoRemoved(other.id);
+                            }
+                            checked(c, QStringLiteral("match"),
+                                    QStringLiteral("was one of the track's options for review; it now fits outright: %1% of it is demonstrably the same waveform")
+                                        .arg(qRound(100 * waveformShare(ar))),
+                                    &ar);
+                            heldVideo = 0;
+                            heldGroup = 0;
+                            heldVideoForLog = 0;
+                            finish(QStringLiteral("done"), existing->id, QStringLiteral("%1 (from review)").arg(c.title));
+                            return;
+                        }
+                        if (m_cancel)
+                            return cleanup();
+                    }
+                }
+                if (m_cancel)
+                    return cleanup();
                 checked(c, QStringLiteral("option"), QStringLiteral("already waiting for review as one of the track's options"));
-                continue; // already one of this track's options
+                continue;
             }
             // Already in the MV library through another track (a single and
             // its album cut, say). It still has to be this recording.
@@ -1514,6 +1550,9 @@ void ImportManager::runJob(qint64 trackId, const ImportSettings &cfg)
                                 m_db->relinkTracks(existing->id, left.first().id);
                             } else {
                                 for (const TrackInfo &w : waiting) {
+                                    // One already queued for a new lookup keeps its turn.
+                                    if (w.state == QLatin1String("pending"))
+                                        continue;
                                     m_db->setTrackResult(w.id, QStringLiteral("not_found"), 0,
                                                          QStringLiteral("“%1” is the video of “%2” [%3]").arg(c.title, track.title, track.album));
                                 }
