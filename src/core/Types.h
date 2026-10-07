@@ -44,6 +44,10 @@ struct TrackInfo {
     // with what is known about it, and takes that up again if the file
     // comes back; until then it is in no count and is not looked up.
     bool absent = false;
+    // Asked to be looked up again although it has a video: that video is
+    // judged by today's rules as one candidate among the search results,
+    // and kept, sent to review, replaced or let go as they decide.
+    bool reimport = false;
 };
 
 inline double trackQuality(const TrackInfo &t)

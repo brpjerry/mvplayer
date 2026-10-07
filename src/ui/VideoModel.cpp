@@ -5,6 +5,7 @@
 #include <QUrl>
 
 #include <algorithm>
+#include <utility>
 
 namespace {
 
@@ -76,6 +77,7 @@ QVariant VideoModel::data(const QModelIndex &index, int role) const
         const VideoInfo *o = sameTitle(v);
         return o ? QVariantMap{{QStringLiteral("album"), o->album}, {QStringLiteral("ytTitle"), o->ytTitle}} : QVariantMap();
     }
+    case OrphanRole: return isOrphan(v);
     }
     return {};
 }
@@ -107,6 +109,7 @@ QHash<int, QByteArray> VideoModel::roleNames() const
         {ReviewOptionRole, "reviewOption"},
         {ReviewOptionsRole, "reviewOptions"},
         {SameTitleRole, "sameTitle"},
+        {OrphanRole, "orphan"},
     };
 }
 
@@ -134,6 +137,18 @@ const VideoInfo *VideoModel::sameTitle(const VideoInfo &v) const
             return &o;
     }
     return nullptr;
+}
+
+void VideoModel::setUntracked(const QSet<qint64> &ids)
+{
+    if (ids == m_untracked)
+        return;
+    const QSet<qint64> was = std::exchange(m_untracked, ids);
+    for (int i = 0; i < m_videos.size(); ++i) {
+        const qint64 id = m_videos[i].id;
+        if (was.contains(id) != ids.contains(id))
+            emit dataChanged(index(i, 0), index(i, 0), {OrphanRole});
+    }
 }
 
 void VideoModel::reindex()
@@ -307,6 +322,20 @@ void VideoFilterModel::setFacet(const QString &type, const QString &value)
     emit countChanged();
 }
 
+void VideoFilterModel::showSection(const QString &section)
+{
+    if (section == m_section)
+        return;
+    const QVector<VideoInfo> &videos = m_source->videos();
+    if (std::none_of(videos.begin(), videos.end(), [&](const VideoInfo &v) { return inSection(v, section) && matchesFacet(v); }))
+        setFacet(QStringLiteral("all"));
+    beginFilterEdit();
+    m_section = section;
+    endFilterEdit();
+    emit sectionChanged();
+    emit countChanged();
+}
+
 void VideoFilterModel::setSortMode(const QString &mode)
 {
     if (mode == m_sortMode)
@@ -319,7 +348,7 @@ void VideoFilterModel::setSortMode(const QString &mode)
 bool VideoFilterModel::filterAcceptsRow(int sourceRow, const QModelIndex &) const
 {
     const VideoInfo &v = m_source->at(sourceRow);
-    if (v.review != (m_facetType == QLatin1String("review")))
+    if (!inSection(v, m_section))
         return false;
     if (v.review) {
         // One card per group of options: the one on show, the first by default.
@@ -328,28 +357,48 @@ bool VideoFilterModel::filterAcceptsRow(int sourceRow, const QModelIndex &) cons
         if (v.id != (options.contains(shown) ? shown : options.value(0)))
             return false;
     }
-    if (m_facetType == QLatin1String("albumArtist")) {
-        if (!splitMulti(v.albumArtist).contains(m_facetValue))
-            return false;
-    } else if (m_facetType == QLatin1String("artist")) {
-        if (!splitMulti(v.artist).contains(m_facetValue))
-            return false;
-    } else if (m_facetType == QLatin1String("genre")) {
-        if (!splitMulti(v.genre).contains(m_facetValue))
-            return false;
-    } else if (m_facetType == QLatin1String("album")) {
-        if (v.album != m_facetValue)
-            return false;
-    } else if (m_facetType == QLatin1String("year")) {
-        if (QString::number(v.year) != m_facetValue)
-            return false;
-    }
+    if (!matchesFacet(v))
+        return false;
     const QString &text = m_source->searchText(sourceRow);
     for (const QString &term : m_terms) {
         if (!text.contains(term))
             return false;
     }
     return true;
+}
+
+bool VideoFilterModel::inSection(const VideoInfo &v, const QString &section) const
+{
+    if (section == QLatin1String("review"))
+        return v.review;
+    if (section == QLatin1String("orphans"))
+        return m_source->isOrphan(v);
+    return !v.review;
+}
+
+bool VideoFilterModel::matchesFacet(const VideoInfo &v, const QString &type, const QString &value)
+{
+    if (type == QLatin1String("albumArtist"))
+        return splitMulti(v.albumArtist).contains(value);
+    if (type == QLatin1String("artist"))
+        return splitMulti(v.artist).contains(value);
+    if (type == QLatin1String("genre"))
+        return splitMulti(v.genre).contains(value);
+    if (type == QLatin1String("album"))
+        return v.album == value;
+    if (type == QLatin1String("year"))
+        return QString::number(v.year) == value;
+    return true;
+}
+
+QVector<qint64> VideoFilterModel::videosWithFacet(const QString &type, const QString &value) const
+{
+    QVector<qint64> out;
+    for (const VideoInfo &v : m_source->videos()) {
+        if (inSection(v, m_section) && matchesFacet(v, type, value))
+            out << v.id;
+    }
+    return out;
 }
 
 bool VideoFilterModel::lessThan(const QModelIndex &left, const QModelIndex &right) const

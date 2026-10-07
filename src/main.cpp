@@ -110,6 +110,14 @@ int main(int argc, char **argv)
         std::unique_ptr<IpcServer> ipc;
         if (parser.isSet(QStringLiteral("ipc"))) {
             ipc = std::make_unique<IpcServer>(parser.value(QStringLiteral("ipc")), [root](const QString &line) {
+                // grab-window <file>: the whole window, popups included,
+                // which QML (it grabs items) cannot picture.
+                static const QString grabWindow = QStringLiteral("grab-window ");
+                if (line.startsWith(grabWindow)) {
+                    auto *window = qobject_cast<QQuickWindow *>(root);
+                    return window && window->grabWindow().save(line.mid(grabWindow.size())) ? QStringLiteral("ok")
+                                                                                             : QStringLiteral("failed");
+                }
                 QVariant result;
                 QMetaObject::invokeMethod(root, "ipc", Q_RETURN_ARG(QVariant, result), Q_ARG(QVariant, line));
                 return result.toString();

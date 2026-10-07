@@ -58,6 +58,18 @@ Popup {
         onAccepted: App.mvDir = App.urlToPath(selectedFolder)
     }
 
+    FolderDialog {
+        id: reimportFolderDialog
+        title: "Re-import the music in a folder"
+        currentFolder: App.pathToUrl(App.musicDirs.length > 0 ? App.musicDirs[0] : "")
+        onAccepted: reimport.queued(App.reimportPath(App.urlToPath(selectedFolder)), App.urlToPath(selectedFolder))
+    }
+    FileDialog {
+        id: reimportFileDialog
+        title: "Re-import a music file"
+        currentFolder: App.pathToUrl(App.musicDirs.length > 0 ? App.musicDirs[0] : "")
+        onAccepted: reimport.queued(App.reimportPath(App.urlToPath(selectedFile)), App.urlToPath(selectedFile))
+    }
     FileDialog {
         id: cookiesDialog
         title: "Choose the cookies.txt exported from your browser"
@@ -652,6 +664,63 @@ Popup {
                             text: "Retry tracks without a video"
                             enabled: App.configured && !App.busy
                             onClicked: App.retryUnmatched()
+                        }
+                    }
+
+                    // Tracks looked up again by today's rules, by folder or by file.
+                    Item {
+                        id: reimport
+                        property string note: ""
+                        function queued(n, path) {
+                            note = n > 0 ? n + (n === 1 ? " track" : " tracks") + " queued from " + App.displayPath(path)
+                                         : "No music file of your library is at " + App.displayPath(path)
+                        }
+                        width: parent.width
+                        height: reimportText.implicitHeight + 34
+                        Connections {
+                            target: root
+                            function onClosed() { reimport.note = "" }
+                        }
+
+                        Column {
+                            id: reimportText
+                            anchors.left: parent.left
+                            anchors.right: reimportButtons.left
+                            anchors.rightMargin: 20
+                            anchors.bottom: parent.bottom
+                            anchors.bottomMargin: 6
+                            spacing: 3
+                            Text {
+                                text: "Re-import"
+                                color: Theme.text
+                                font.pixelSize: 14
+                            }
+                            Text {
+                                width: parent.width
+                                text: reimport.note.length > 0 ? reimport.note
+                                    : "Looks the tracks in a folder, or one file, up again by today's rules. A video that still fits is kept without a download; one that no longer does goes to review, or is replaced."
+                                color: reimport.note.length > 0 ? Theme.text : Theme.textDim
+                                font.pixelSize: 12
+                                wrapMode: Text.WordWrap
+                            }
+                        }
+                        Row {
+                            id: reimportButtons
+                            anchors.right: parent.right
+                            anchors.bottom: parent.bottom
+                            anchors.bottomMargin: 10
+                            spacing: 10
+                            FlatButton {
+                                text: "Folder…"
+                                icon: Icons.folder
+                                enabled: App.configured
+                                onClicked: reimportFolderDialog.open()
+                            }
+                            FlatButton {
+                                text: "File…"
+                                enabled: App.configured
+                                onClicked: reimportFileDialog.open()
+                            }
                         }
                     }
 

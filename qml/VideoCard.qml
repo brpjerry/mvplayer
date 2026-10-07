@@ -19,6 +19,12 @@ Item {
     required property int reviewOption   // which of the options for this track is shown, from 1
     required property int reviewOptions
     required property var sameTitle     // a library video with this title, for a video under review
+    required property bool orphan       // no track in the music folders has it
+
+    // Shown among the orphans, an orphan carries the verdict buttons: keep it
+    // or delete it. Deleting waits while the music folders are read.
+    property bool orphanView: false
+    property bool canDelete: true
 
     property bool current: false   // this video is loaded in the player
     property bool playing: false   // ...and not paused
@@ -183,7 +189,7 @@ Item {
     }
 
     ReviewControls {
-        visible: root.review
+        visible: root.review || (root.orphan && root.orphanView)
         x: body.x + thumbItem.x
         y: body.y + thumbItem.y
         width: thumbItem.width
@@ -191,6 +197,8 @@ Item {
         option: root.reviewOption
         options: root.reviewOptions
         sameTitle: root.sameTitle
+        orphan: !root.review
+        canDelete: root.canDelete
         onApproved: root.approved()
         onRejected: root.rejected()
         onStepped: (delta) => root.stepped(delta)

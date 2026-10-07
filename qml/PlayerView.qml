@@ -27,7 +27,7 @@ Item {
     signal togglePauseRequested()
     signal toggleFullscreenRequested()
     // The verdict on, or a step among the options of, the video under review
-    // that is playing in its thumbnail.
+    // (or the orphan, among the orphans) that is playing in its thumbnail.
     signal reviewApproved()
     signal reviewRejected()
     signal reviewStepped(int delta)
@@ -311,7 +311,7 @@ Item {
 
         IconButton {
             id: closeMini
-            visible: box.enabled && root.collapsed && !(root.current !== null && root.current.review === true)
+            visible: box.enabled && root.collapsed && !verdict.judged
             opacity: boxMouse.containsMouse || hovered ? 1 : 0
             anchors.right: parent.right
             anchors.top: parent.top
@@ -332,7 +332,11 @@ Item {
     // ones, on top of it. Over the thumbnail's rectangle, not the video's: a
     // video that is not 16:9 covers only part of it.
     ReviewControls {
-        readonly property bool wanted: root.collapsed && root.current !== null && root.current.review === true
+        id: verdict
+        // Under review, or an orphan shown among the orphans.
+        readonly property bool judged: root.current !== null
+            && (root.current.review === true || (root.current.orphan === true && App.videos.section === "orphans"))
+        readonly property bool wanted: root.collapsed && judged
         visible: wanted && box.enabled
         x: root.restRect.x
         y: root.restRect.y
@@ -341,6 +345,8 @@ Item {
         option: wanted ? root.current.reviewOption : 1
         options: wanted ? root.current.reviewOptions : 1
         sameTitle: wanted ? root.current.sameTitle : ({})
+        orphan: wanted && root.current.review !== true
+        canDelete: !App.scanning
         onApproved: root.reviewApproved()
         onRejected: root.reviewRejected()
         onStepped: (delta) => root.reviewStepped(delta)

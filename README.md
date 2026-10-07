@@ -92,10 +92,16 @@ folder again, by the same path (a parent folder added in place of its
 subfolders) or recognised by its sound at another, the track is back with
 its video and everything found out about it, without a search.
 
-The videos of absent tracks stay in the library and play as before. Settings
-counts them as untracked and offers to delete them: the video, its thumbnail
-and subtitles, and what was remembered of its tracks, so that those are
-looked up afresh should they ever return. Headless: `--delete-untracked`.
+The videos of absent tracks stay in the library and play as before. The
+icon with a struck-through note in the top bar (next to the review one, with
+a count) shows them on their own, and the sidebar narrows them as it does
+the library. Their thumbnails carry the review buttons: ✓ keeps the video
+for good — it is no longer counted as untracked — and ✗ deletes it: the
+video, its thumbnail and subtitles, and what was remembered of its tracks,
+so that those are looked up afresh should they ever return. ✗ waits while
+the music folders are being read. Settings counts the untracked videos and
+offers to delete them all, the kept ones excepted. Headless:
+`--delete-untracked`.
 
 ## Subtitles
 
@@ -186,7 +192,10 @@ mix — is not for the importer to decide. It is taken only when no candidate
 fits outright, and then waits for you:
 
 - The review icon in the top bar (next to the import one, with a count) shows
-  these videos in place of the library. They are in no other view.
+  these videos in place of the library. They are in no other view. While
+  they are shown, the sidebar lists the tags of the videos waiting and
+  narrows them as it does the library; the tag picked stays when you go
+  between the two, unless the other side has nothing under it.
 - Playing one, the sound changes every ten seconds between YouTube's audio
   and your track's, level-matched; the chip in the bottom bar says which.
 - When several uploads could be the track's video, they are options on one
@@ -199,6 +208,55 @@ fits outright, and then waits for you:
 Headless: `--approve <youtube id>` and `--reject <youtube id>`.
 
 Turning off "Use my library's audio" in Settings lifts all of this.
+
+### Re-importing
+
+The rules change, and a video imported under yesterday's may not pass
+today's: an upload from a third party's channel that was once accepted
+outright now waits for review. Re-importing looks a track up again as if
+for the first time, with its video judged by today's rules as one candidate
+among the search results. The upload's audio and picture are in the file
+already, so nothing is downloaded for it:
+
+- Where it still fits outright, it is kept as it is. Where the track's audio
+  was not in it and now belongs there, it is put in.
+- Where it is the song but can no longer be taken outright, it goes to
+  review, its file rebuilt with the review stream, alongside whatever other
+  options the search turns up.
+- Where another upload fits outright and ranks above it, that one is
+  imported in its place, and the old file is deleted unless other tracks
+  hold it.
+- Where today's rules turn it down — a still image, a different recording,
+  a title that marks it as another version — it is deleted likewise, and
+  the track counts as having no video.
+- A lookup that could not finish (YouTube refusing requests, the file
+  unreadable) changes nothing: the track keeps its video.
+
+Tracks without a video are simply looked up again. Re-import one video
+from the Re-import button in the music-file popup (the bottom bar's
+title), every video under a sidebar entry from its right-click menu, or
+the music files in a folder or one file from Settings. Headless:
+`--reimport <file or folder>` (repeatable), and `--reimport-before <time>`
+for every track with a video whose last lookup was before then (ISO 8601:
+`2026-10-05T16:35` or `2026-10-05`). The import log's `lookup` entries
+carry `reimport: true` and, under `prior`, the video the track had and its
+fate: `kept`, `review`, `replaced`, `removed`, `released` (other tracks
+keep it) or `unjudged`.
+
+### Replacing a video
+
+When the importer's pick is not the one you want, Replace… in the
+music-file popup (beside Re-import) puts another upload in its place. The
+dialog searches as an import does and listens to the results, but asks
+nothing about whose channel they are on: up to three uploads that are the
+track by ear are offered with their channel and how much of the waveform
+is the same. You can also paste a YouTube link or id. An upload that does
+not sound like the track asks "Are you sure?" first; taken all the same,
+it keeps its own audio. The chosen upload is downloaded and built like any
+import (your track's audio goes in where it is the same recording), it
+counts as accepted, and the old video goes, with its review options if it
+had any. Headless: there is no equivalent. The import log records a
+`replace` event.
 
 The music folders are watched; added tracks are picked up within a few
 seconds, edited tags on the next periodic rescan. Tracks with no video are
@@ -226,6 +284,9 @@ Everything the importer decides is recorded in
 - `track`: what the scan made of a file new to the library — queued, skipped
   by its title, another file of a known recording, a known track at a new place.
 - `verdict`: a video under review accepted or turned down.
+- `reimport`: tracks queued for a lookup by today's rules (see Re-importing).
+- `untracked-kept` / `untracked-deleted`: a video whose tracks are gone kept,
+  or deleted (one at a time, or all of them from Settings).
 - `paused` / `resumed`: the request circuit breaker.
 
 `tools/import-report.py <MV folder>` turns the log and the database into a
@@ -309,6 +370,10 @@ command.
 - Clicking a video grows its thumbnail into the player. `Esc` (or the back
   arrow) returns to the library with the video still playing inside its own
   thumbnail; click it to bring the player back.
+- In the bottom bar, the playing video's picture switches between the player
+  and the library. Its title shows the music file the video was found for —
+  where it is, its format and every tag in it, with arrows when several files
+  hold the recording — and a link to the video on YouTube.
 - The sidebar lists one tag at a time. The selector above the list switches
   between album artists, artists, genres, albums and years, and the box under
   it filters the listed values. The search box at the top right searches every

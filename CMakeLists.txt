@@ -120,6 +120,8 @@ set(MV_QML_FILES
     qml/WindowControls.qml
     qml/WindowDrag.qml
     qml/ReviewControls.qml
+    qml/SourcePopup.qml
+    qml/ReplaceDialog.qml
 )
 foreach(f ${MV_QML_FILES})
     get_filename_component(fname ${f} NAME)

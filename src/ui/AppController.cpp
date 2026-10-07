@@ -236,7 +236,15 @@ void AppController::openLibrary()
         if (!m_manager->busy())
             m_sessionDone = 0;
         refreshCounts();
+        emit replaceChanged();
     });
+    connect(m_manager.get(), &ImportManager::replaceStageChanged, this, [this](qint64 videoId, const QString &stage) {
+        m_replaceVideoId = stage.isEmpty() ? 0 : videoId;
+        m_replaceStage = stage;
+        emit replaceChanged();
+    });
+    connect(m_manager.get(), &ImportManager::replaceOptions, this, &AppController::replaceOptionsReady);
+    connect(m_manager.get(), &ImportManager::replaceChecked, this, &AppController::replaceCheckDone);
 
     if (configured())
         m_manager->start();
@@ -265,7 +273,9 @@ void AppController::refreshCounts()
         counts.insert(QStringLiteral("total"), total);
     }
     m_trackCounts = counts;
-    m_untrackedCount = m_manager ? m_manager->untrackedCount() : 0;
+    const QSet<qint64> untracked = m_manager ? m_manager->untrackedIds() : QSet<qint64>();
+    m_untrackedCount = int(untracked.size());
+    m_model->setUntracked(untracked);
     emit activityChanged();
 }
 
@@ -283,13 +293,15 @@ void AppController::rebuildFacets()
     collator.setNumericMode(true);
     collator.setCaseSensitivity(Qt::CaseInsensitive);
 
+    // Each section of the grid has its own list: the review queue one card
+    // per group of options, the orphans those of the library's videos.
     QVariantList out;
     for (const Def &def : defs) {
         const QString key = QLatin1String(def.key);
         QHash<QString, int> counts;
+        QHash<QString, QSet<qint64>> reviewGroups;
+        QHash<QString, int> orphanCounts;
         for (const VideoInfo &v : m_model->videos()) {
-            if (v.review)
-                continue;
             QStringList values;
             if (key == QLatin1String("albumArtist"))
                 values = splitMulti(v.albumArtist);
@@ -301,20 +313,37 @@ void AppController::rebuildFacets()
                 values << v.album;
             else if (key == QLatin1String("year") && v.year > 0)
                 values << QString::number(v.year);
-            for (const QString &value : std::as_const(values))
-                ++counts[value];
+            const bool orphan = m_model->isOrphan(v);
+            for (const QString &value : std::as_const(values)) {
+                if (v.review)
+                    reviewGroups[value].insert(v.reviewGroup > 0 ? v.reviewGroup : v.id);
+                else
+                    ++counts[value];
+                if (orphan)
+                    ++orphanCounts[value];
+            }
         }
-        QStringList names = counts.keys();
-        std::sort(names.begin(), names.end(), [&](const QString &a, const QString &b) {
-            return key == QLatin1String("year") ? a > b : collator.compare(a, b) < 0;
-        });
-        QVariantList items;
-        for (const QString &name : std::as_const(names))
-            items << QVariantMap{{QStringLiteral("name"), name}, {QStringLiteral("count"), counts.value(name)}};
+        QHash<QString, int> reviewCounts;
+        for (auto it = reviewGroups.cbegin(); it != reviewGroups.cend(); ++it)
+            reviewCounts.insert(it.key(), int(it.value().size()));
+        auto itemsOf = [&](const QHash<QString, int> &counts) {
+            QStringList names = counts.keys();
+            std::sort(names.begin(), names.end(), [&](const QString &a, const QString &b) {
+                return key == QLatin1String("year") ? a > b : collator.compare(a, b) < 0;
+            });
+            QVariantList items;
+            for (const QString &name : std::as_const(names))
+                items << QVariantMap{{QStringLiteral("name"), name}, {QStringLiteral("count"), counts.value(name)}};
+            return items;
+        };
         out << QVariantMap{
             {QStringLiteral("key"), key},
             {QStringLiteral("title"), QString::fromLatin1(def.title)},
-            {QStringLiteral("items"), items},
+            {QStringLiteral("items"), QVariantMap{
+                {QStringLiteral("library"), itemsOf(counts)},
+                {QStringLiteral("review"), itemsOf(reviewCounts)},
+                {QStringLiteral("orphans"), itemsOf(orphanCounts)},
+            }},
         };
     }
     m_facets = out;
@@ -327,6 +356,8 @@ void AppController::rebuildFacets()
     m_reviewCount = int(groups.size());
     m_reviewVideos = int(std::count_if(m_model->videos().begin(), m_model->videos().end(),
                                        [](const VideoInfo &v) { return v.review; }));
+    m_orphanCount = int(std::count_if(m_model->videos().begin(), m_model->videos().end(),
+                                      [this](const VideoInfo &v) { return m_model->isOrphan(v); }));
     emit facetsChanged();
 }
 
@@ -523,6 +554,20 @@ void AppController::rejectVideo(qint64 videoId)
     if (m_manager)
         m_manager->rejectVideo(videoId);
     refreshCounts();
+}
+
+void AppController::keepOrphan(qint64 videoId)
+{
+    if (m_manager)
+        m_manager->keepUntracked(videoId);
+    refreshCounts();
+}
+
+bool AppController::deleteOrphan(qint64 videoId)
+{
+    const bool deleted = m_manager && m_manager->deleteUntracked(videoId);
+    refreshCounts();
+    return deleted;
 }
 
 bool AppController::checkingQuality() const
@@ -737,6 +782,68 @@ void AppController::retryUnmatched()
     refreshCounts();
 }
 
+int AppController::reimportVideo(qint64 videoId)
+{
+    const int n = m_manager ? m_manager->reimportVideo(videoId) : 0;
+    refreshCounts();
+    return n;
+}
+
+int AppController::reimportFacet(const QString &type, const QString &value)
+{
+    if (!m_manager || !m_db)
+        return 0;
+    QVector<qint64> tracks;
+    for (qint64 videoId : m_filter->videosWithFacet(type, value)) {
+        for (const TrackInfo &t : m_db->tracksForVideo(videoId))
+            tracks << t.id;
+    }
+    const int n = m_manager->reimport(tracks);
+    refreshCounts();
+    return n;
+}
+
+int AppController::reimportPath(const QString &path)
+{
+    const int n = m_manager ? m_manager->reimportPath(path) : 0;
+    refreshCounts();
+    return n;
+}
+
+bool AppController::replaceSearch(qint64 videoId)
+{
+    return m_manager && m_manager->replaceSearch(videoId);
+}
+
+QString AppController::youtubeId(const QString &text)
+{
+    const QString t = text.trimmed();
+    static const QRegularExpression inUrl(QStringLiteral("(?:[?&]v=|youtu\\.be/|/shorts/|/embed/|/live/)([A-Za-z0-9_-]{11})(?![A-Za-z0-9_-])"));
+    static const QRegularExpression bare(QStringLiteral("^[A-Za-z0-9_-]{11}$"));
+    if (const QRegularExpressionMatch m = inUrl.match(t); m.hasMatch())
+        return m.captured(1);
+    if (bare.match(t).hasMatch())
+        return t;
+    return QString();
+}
+
+QString AppController::replaceCheck(qint64 videoId, const QString &text)
+{
+    const QString id = youtubeId(text);
+    if (id.isEmpty())
+        return tr("That is not a YouTube link or video id.");
+    if (const auto v = m_db ? m_db->video(videoId) : std::nullopt; v && v->ytId == id)
+        return tr("That is the video it has now.");
+    if (!m_manager || !m_manager->replaceCheck(videoId, id))
+        return tr("Still busy with the last one; try again in a moment.");
+    return QString();
+}
+
+bool AppController::replaceWith(qint64 videoId, const QString &ytId)
+{
+    return m_manager && m_manager->replaceWith(videoId, youtubeId(ytId));
+}
+
 QVariantList AppController::unmatchedTracks() const
 {
     QVariantList out;
@@ -753,6 +860,78 @@ QVariantList AppController::unmatchedTracks() const
         };
     }
     return out;
+}
+
+QVariantMap AppController::videoSources(qint64 videoId) const
+{
+    if (!m_db)
+        return {};
+    const std::optional<VideoInfo> v = m_db->video(videoId);
+    if (!v)
+        return {};
+    // Several options under review wait for the same tracks, which point at
+    // one of them.
+    QVector<TrackInfo> tracks;
+    if (v->review) {
+        for (const VideoInfo &option : m_db->reviewOptions(v->reviewGroup > 0 ? v->reviewGroup : v->id))
+            tracks += m_db->tracksForVideo(option.id, true);
+    } else {
+        tracks = m_db->tracksForVideo(videoId, true);
+    }
+    std::sort(tracks.begin(), tracks.end(), [](const TrackInfo &a, const TrackInfo &b) {
+        return a.absent != b.absent ? !a.absent : betterSource(a, b);
+    });
+
+    // The tags that say what the recording is come first, as most players
+    // list them; long free text last; the rest in between, by name.
+    static const QStringList first = {
+        QStringLiteral("TITLE"), QStringLiteral("ARTIST"), QStringLiteral("ALBUMARTIST"), QStringLiteral("ALBUM"),
+        QStringLiteral("DATE"), QStringLiteral("ORIGINALDATE"), QStringLiteral("TRACKNUMBER"), QStringLiteral("TRACKTOTAL"),
+        QStringLiteral("DISCNUMBER"), QStringLiteral("DISCTOTAL"), QStringLiteral("GENRE"), QStringLiteral("COMPOSER"),
+        QStringLiteral("LYRICIST"), QStringLiteral("ARRANGER"),
+    };
+    static const QStringList last = {QStringLiteral("COMMENT"), QStringLiteral("DESCRIPTION"), QStringLiteral("LYRICS"),
+                                     QStringLiteral("UNSYNCEDLYRICS")};
+    const auto rank = [](const QString &key) {
+        const int f = int(first.indexOf(key));
+        if (f >= 0)
+            return f;
+        const int l = int(last.indexOf(key));
+        return l >= 0 ? 1000 + l : 500;
+    };
+
+    QVariantList files;
+    for (const TrackInfo &t : std::as_const(tracks)) {
+        QStringList keys = t.tags.keys();
+        std::stable_sort(keys.begin(), keys.end(), [&](const QString &a, const QString &b) { return rank(a) < rank(b); });
+        QVariantList tags;
+        for (const QString &key : std::as_const(keys))
+            tags << QVariantMap{{QStringLiteral("key"), key}, {QStringLiteral("value"), t.tags.value(key).toString()}};
+        QStringList format = {t.codec.toUpper()};
+        if (t.lossless && t.bitsPerSample > 0)
+            format << QStringLiteral("%1-bit").arg(t.bitsPerSample);
+        else if (t.bitrate > 0)
+            format << QStringLiteral("%1 kbit/s").arg(t.bitrate);
+        if (t.sampleRate > 0)
+            format << QStringLiteral("%1 kHz").arg(QLocale::c().toString(t.sampleRate / 1000.0, 'g', 4));
+        if (t.channels > 0)
+            format << (t.channels == 1 ? QStringLiteral("mono") : t.channels == 2 ? QStringLiteral("stereo")
+                                                                                   : QStringLiteral("%1 ch").arg(t.channels));
+        format << formatDuration(t.duration);
+        format.removeAll(QString());
+        files << QVariantMap{
+            {QStringLiteral("path"), displayPath(t.path)},
+            {QStringLiteral("absent"), t.absent},
+            {QStringLiteral("format"), format.join(QStringLiteral(" · "))},
+            {QStringLiteral("tags"), tags},
+        };
+    }
+    return {
+        {QStringLiteral("ytUrl"), QStringLiteral("https://www.youtube.com/watch?v=") + v->ytId},
+        {QStringLiteral("ytTitle"), v->ytTitle},
+        {QStringLiteral("ytChannel"), v->ytChannel},
+        {QStringLiteral("files"), files},
+    };
 }
 
 QString AppController::urlToPath(const QUrl &url) const

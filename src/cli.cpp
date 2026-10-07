@@ -21,6 +21,7 @@
 #include "core/YtDlp.h"
 
 #include <QCommandLineParser>
+#include <QDateTime>
 #include <QCoreApplication>
 #include <QDir>
 #include <QRegularExpression>
@@ -67,6 +68,8 @@ int main(int argc, char **argv)
         {QStringLiteral("fetch-subtitles"), QStringLiteral("Fetch the subtitles that the videos already imported lack (needs --subtitles).")},
         {QStringLiteral("delete-untracked"), QStringLiteral("After reading the music folders, delete the videos that none of their tracks has.")},
         {QStringLiteral("check-quality"), QStringLiteral("Look at the videos already imported again and rebuild those the account is offered in better quality.")},
+        {QStringLiteral("reimport"), QStringLiteral("Look the tracks at this path (a music file, or a folder of them) up again by today's rules: a video that still fits is kept, one that no longer does goes to review or is replaced (repeatable)."), QStringLiteral("path")},
+        {QStringLiteral("reimport-before"), QStringLiteral("Likewise every track with a video whose last lookup was before this time (ISO 8601, e.g. 2026-10-05T16:35 or 2026-10-05)."), QStringLiteral("time")},
     });
     parser.addPositionalArgument(QStringLiteral("command"), QStringLiteral("Optional: align <track> <video> | mux <track> <video> <out.mkv> | check-video <video> [keyframes] | same-recording <file> <file> | same-version <track title> <album> <video title> [own] | check-cookies [video id] | convert-subs <file.srv3> <out without extension> | talk-check <file>... | rank-check <track title> <artist> <video title> <channel> [verified] | artist-channels <artist>"));
     parser.process(app);
@@ -268,6 +271,17 @@ int main(int argc, char **argv)
             return 1;
         }
     }
+    QDateTime reimportBefore;
+    if (parser.isSet(QStringLiteral("reimport-before"))) {
+        const QString given = parser.value(QStringLiteral("reimport-before"));
+        reimportBefore = QDateTime::fromString(given, Qt::ISODate);
+        if (!reimportBefore.isValid())
+            reimportBefore = QDate::fromString(given, Qt::ISODate).startOfDay();
+        if (!reimportBefore.isValid()) {
+            out << "error: --reimport-before wants a time like 2026-10-05T16:35 or 2026-10-05, not " << given << Qt::endl;
+            return 1;
+        }
+    }
     if (parser.isSet(QStringLiteral("check-quality")) && cfg.cookiesFile.isEmpty()) {
         out << "error: --check-quality needs --cookies" << Qt::endl;
         return 1;
@@ -318,6 +332,14 @@ int main(int argc, char **argv)
         mgr.checkQuality();
     if (parser.isSet(QStringLiteral("fetch-subtitles")))
         mgr.fetchSubtitles();
+    for (const QString &path : parser.values(QStringLiteral("reimport"))) {
+        const int n = mgr.reimportPath(QFileInfo(path).absoluteFilePath());
+        out << "re-importing " << n << " tracks at " << path << Qt::endl;
+    }
+    if (reimportBefore.isValid()) {
+        const int n = mgr.reimport(db.trackIdsImportedBefore(reimportBefore.toSecsSinceEpoch()));
+        out << "re-importing " << n << " tracks last looked up before " << reimportBefore.toString(Qt::ISODate) << Qt::endl;
+    }
     for (const QString &id : parser.values(QStringLiteral("approve"))) {
         if (const auto v = db.videoByYtId(id))
             mgr.approveVideo(v->id);

@@ -17,16 +17,22 @@ Item {
 
     implicitHeight: 64
 
+    // Narrowed to one tag's videos, the heading is the tag.
+    readonly property bool tagged: App.videos.facetType !== "all" && App.videos.facetType !== "recent"
     readonly property string browseTitle: {
         const t = App.videos.facetType
+        const section = App.videos.section
+        if (section === "review" && !tagged) return "To Review"
+        if (section === "orphans" && !tagged) return "Orphaned Videos"
         if (t === "all") return "All Videos"
         if (t === "recent") return "Recently Added"
-        if (t === "review") return "To Review"
         return App.videos.facetValue
     }
     readonly property string browseSubtitle: {
         const n = App.videos.count
-        const noun = n === 1 ? " video" : " videos"
+        const section = App.videos.section
+        const noun = section === "orphans" && tagged ? (n === 1 ? " orphaned video" : " orphaned videos")
+                   : (n === 1 ? " video" : " videos") + (section === "review" && tagged ? " to review" : "")
         if (searchField.text.trim().length > 0)
             return n + noun + " matching “" + searchField.text.trim() + "”"
         return n + noun
@@ -179,36 +185,45 @@ Item {
             }
         }
 
-        // Videos that are the song but could not be confirmed as the track's
-        // recording wait here for a verdict.
-        IconButton {
-            id: reviewButton
-            readonly property bool open: App.videos.facetType === "review"
-            anchors.verticalCenter: parent.verticalCenter
-            visible: App.reviewCount > 0 || open
-            icon: Icons.review
-            checked: open
-            tooltip: open ? "Back to the library" : App.reviewCount + (App.reviewCount === 1 ? " video" : " videos") + " to review"
-            tooltipBelow: true
-            onClicked: App.videos.setFacet(open ? "all" : "review")
+        // Sections of the grid that wait for a verdict, each with its count:
+        // videos that are the song but could not be confirmed as the track's
+        // recording, and videos whose tracks were deleted from the music
+        // folders (or whose folder was removed).
+        Repeater {
+            model: [
+                { section: "review", icon: Icons.review, count: App.reviewCount, what: " to review" },
+                { section: "orphans", icon: Icons.musicOff, count: App.orphanCount, what: " whose tracks are gone" }
+            ]
+            IconButton {
+                id: sectionButton
+                required property var modelData
+                readonly property bool open: App.videos.section === modelData.section
+                anchors.verticalCenter: parent.verticalCenter
+                visible: modelData.count > 0 || open
+                icon: modelData.icon
+                checked: open
+                tooltip: open ? "Back to the library" : modelData.count + (modelData.count === 1 ? " video" : " videos") + modelData.what
+                tooltipBelow: true
+                onClicked: App.videos.showSection(open ? "library" : modelData.section)
 
-            Rectangle {
-                visible: App.reviewCount > 0
-                anchors.right: parent.right
-                anchors.top: parent.top
-                anchors.rightMargin: -1
-                anchors.topMargin: 1
-                width: Math.max(16, countLabel.implicitWidth + 8)
-                height: 16
-                radius: 8
-                color: Theme.accent
-                Text {
-                    id: countLabel
-                    anchors.centerIn: parent
-                    text: App.reviewCount
-                    color: Theme.accentInk
-                    font.pixelSize: 10
-                    font.weight: Font.DemiBold
+                Rectangle {
+                    visible: sectionButton.modelData.count > 0
+                    anchors.right: parent.right
+                    anchors.top: parent.top
+                    anchors.rightMargin: -1
+                    anchors.topMargin: 1
+                    width: Math.max(16, countLabel.implicitWidth + 8)
+                    height: 16
+                    radius: 8
+                    color: Theme.accent
+                    Text {
+                        id: countLabel
+                        anchors.centerIn: parent
+                        text: sectionButton.modelData.count
+                        color: Theme.accentInk
+                        font.pixelSize: 10
+                        font.weight: Font.DemiBold
+                    }
                 }
             }
         }
