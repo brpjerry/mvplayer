@@ -3,7 +3,7 @@ import QtQuick
 // What a video that waits for review carries on its picture: accept and
 // reject, and — when several uploads could be the track's video — arrows to
 // step through them. Laid over the thumbnail in the grid, and over the video
-// while it plays there.
+// while it plays there. An orphan carries the same verdict: keep or delete.
 Item {
     id: root
 
@@ -11,6 +11,11 @@ Item {
     property int options: 1
     // A video already in the library with this one's title: {album, ytTitle}.
     property var sameTitle: ({})
+    // An orphan's verdict: keep it, or delete it. Deleting waits while the
+    // music folders are read, which settles whether its tracks are gone.
+    property bool orphan: false
+    property bool canDelete: true
+    readonly property bool canReject: !orphan || canDelete
 
     signal approved()
     signal rejected()
@@ -123,33 +128,40 @@ Item {
         spacing: 6
         Repeater {
             model: [
-                { accept: true, icon: Icons.check, tint: "#3fbf7f", tip: "This is the track's video" },
-                { accept: false, icon: Icons.close, tint: "#ff5d5d", tip: "Not this track's video: delete it" }
+                { accept: true, icon: Icons.check, tint: "#3fbf7f" },
+                { accept: false, icon: Icons.close, tint: "#ff5d5d" }
             ]
             Rectangle {
                 id: verdict
                 required property var modelData
+                readonly property bool usable: modelData.accept || root.canReject
+                opacity: usable ? 1 : 0.45
                 width: 34
                 height: 34
                 radius: 17
-                color: verdictMouse.containsMouse ? modelData.tint : Theme.scrim
+                color: verdictMouse.containsMouse && usable ? modelData.tint : Theme.scrim
                 border.width: 1
                 border.color: modelData.tint
-                scale: verdictMouse.pressed ? 0.92 : 1
+                scale: verdictMouse.pressed && usable ? 0.92 : 1
                 Behavior on color { ColorAnimation { duration: Theme.fast } }
                 Behavior on scale { NumberAnimation { duration: Theme.fast } }
                 Icon {
                     anchors.centerIn: parent
                     path: verdict.modelData.icon
                     size: 20
-                    color: verdictMouse.containsMouse ? "#ffffff" : verdict.modelData.tint
+                    color: verdictMouse.containsMouse && verdict.usable ? "#ffffff" : verdict.modelData.tint
                 }
                 MouseArea {
                     id: verdictMouse
                     anchors.fill: parent
                     hoverEnabled: true
-                    cursorShape: Qt.PointingHandCursor
-                    onClicked: verdict.modelData.accept ? root.approved() : root.rejected()
+                    cursorShape: verdict.usable ? Qt.PointingHandCursor : Qt.ArrowCursor
+                    onClicked: {
+                        if (verdict.modelData.accept)
+                            root.approved()
+                        else if (root.canReject)
+                            root.rejected()
+                    }
                 }
                 Tooltip {
                     // Below: the buttons are at the top of the card, and
@@ -158,7 +170,10 @@ Item {
                     // And ending at the button's right edge, for the last column.
                     anchors.horizontalCenter: undefined
                     x: parent.width - width
-                    text: verdict.modelData.tip
+                    text: verdict.modelData.accept
+                          ? (root.orphan ? "Keep it: its tracks are gone, but it stays" : "This is the track's video")
+                          : (!root.orphan ? "Not this track's video: delete it"
+                             : root.canDelete ? "Delete it" : "Wait until the music folders have been read")
                     shown: verdictMouse.containsMouse
                 }
             }

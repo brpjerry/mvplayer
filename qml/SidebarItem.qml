@@ -10,6 +10,7 @@ Item {
     property bool selected: false
 
     signal clicked()
+    signal rightClicked()
 
     implicitHeight: 34
     width: parent ? parent.width : 0
@@ -83,6 +84,7 @@ Item {
         id: mouse
         anchors.fill: parent
         hoverEnabled: true
-        onClicked: root.clicked()
+        acceptedButtons: Qt.LeftButton | Qt.RightButton
+        onClicked: (event) => event.button === Qt.RightButton ? root.rightClicked() : root.clicked()
     }
 }

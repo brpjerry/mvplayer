@@ -13,7 +13,10 @@ Rectangle {
     property int repeatMode: 0        // 0 off, 1 all, 2 one
     property bool fullscreen: false
     property bool canStep: false
-    readonly property bool hovered: hover.hovered || seek.dragging
+    // Held while its popup is open, so that it stays in fullscreen.
+    readonly property bool hovered: hover.hovered || seek.dragging || sources.visible
+
+    signal replaceRequested(var videoId)
 
     signal playPauseRequested()
     signal nextRequested()
@@ -21,12 +24,20 @@ Rectangle {
     signal shuffleToggled()
     signal repeatCycled()
     signal fullscreenToggled()
-    signal nowPlayingClicked()
+    signal nowPlayingClicked()  // the thumbnail; the title and artist open the popup below
 
     implicitHeight: 96
     color: overlay ? Qt.rgba(Theme.surface.r, Theme.surface.g, Theme.surface.b, 0.92) : Theme.surface
 
     readonly property bool hasMedia: current !== null
+
+    // The playing video's music file and YouTube page, in a popup.
+    function toggleSources() {
+        if (sources.visible)
+            sources.close()
+        else if (hasMedia)
+            sources.open()
+    }
     // What a video under review is playing right now; empty otherwise.
     readonly property string reviewLabel: audioSwitch.reviewing ? chipLabel.text : ""
 
@@ -60,10 +71,18 @@ Rectangle {
             height: 45
             radius: 6
             source: root.current ? root.current.thumb : ""
-            dim: npMouse.containsMouse ? 0.3 : 0
+            dim: artMouse.containsMouse ? 0.3 : 0
             Behavior on dim { NumberAnimation { duration: Theme.fast } }
+            MouseArea {
+                id: artMouse
+                anchors.fill: parent
+                hoverEnabled: true
+                cursorShape: Qt.PointingHandCursor
+                onClicked: root.nowPlayingClicked()
+            }
         }
         Column {
+            id: trackText
             anchors.left: art.right
             anchors.leftMargin: 14
             anchors.right: parent.right
@@ -72,7 +91,7 @@ Rectangle {
             Text {
                 width: parent.width
                 text: root.current ? root.current.title : ""
-                color: npMouse.containsMouse ? Theme.accentHi : Theme.text
+                color: textMouse.containsMouse || sources.visible ? Theme.accentHi : Theme.text
                 font.pixelSize: 14
                 font.weight: Font.DemiBold
                 elide: Text.ElideRight
@@ -87,11 +106,19 @@ Rectangle {
             }
         }
         MouseArea {
-            id: npMouse
-            anchors.fill: parent
+            id: textMouse
+            anchors.fill: trackText
             hoverEnabled: true
             cursorShape: Qt.PointingHandCursor
-            onClicked: root.nowPlayingClicked()
+            onClicked: root.toggleSources()
+        }
+
+        // The music file and the YouTube page behind the video
+        SourcePopup {
+            id: sources
+            y: -height - 30
+            videoId: root.current ? root.current.videoId : -1
+            onReplaceRequested: (videoId) => root.replaceRequested(videoId)
         }
     }
 

@@ -13,6 +13,7 @@
 #include <QSet>
 #include <QThreadPool>
 #include <QTimer>
+#include <QVariant>
 
 #include <atomic>
 
@@ -60,6 +61,27 @@ public:
     void stop(); // cancels running work and waits for it
     void rescan();
     void retryUnmatched();
+    // Looks these tracks up again as if for the first time, the video each
+    // has judged by today's rules as one candidate among the search results:
+    // kept where it still fits outright (and the download skipped), sent to
+    // review where it no longer does, replaced where another fits better,
+    // let go where the rules turn it down. Tracks without a video are simply
+    // looked up. Returns how many recordings were queued.
+    int reimport(const QVector<qint64> &trackIds);
+    int reimportVideo(qint64 videoId);
+    // A file of the music folders, or a folder: every track under it.
+    int reimportPath(const QString &path);
+
+    // Replacing a video by hand. replaceSearch looks for uploads that are
+    // the track by ear — any channel, not only the artist's own — and
+    // answers with up to three (replaceOptions). replaceCheck listens to one
+    // upload the user named (replaceChecked). replaceWith brings that upload
+    // in as the track's video, accepted, in place of the one it has.
+    // One of these runs at a time (replacing()): false when another does.
+    bool replaceSearch(qint64 videoId);
+    bool replaceCheck(qint64 videoId, const QString &ytId);
+    bool replaceWith(qint64 videoId, const QString &ytId);
+    bool replacing() const { return m_replacing; }
 
     // The user's verdict on a video that waits for review: it joins the
     // library, or its tracks have no video and it is deleted.
@@ -77,8 +99,13 @@ public:
     // Videos that no track in the music folders has (see
     // Database::untrackedVideos), and their deletion: files, subtitles and
     // what was remembered of their tracks. Returns how many were deleted.
-    int untrackedCount() const;
+    QSet<qint64> untrackedIds() const;
     int deleteUntracked();
+    // The user's verdict on one of them, outside review: it stays in the
+    // library for good, or it is deleted. Deleting waits for the folders to
+    // be read (false until then): that settles whether its tracks are gone.
+    void keepUntracked(qint64 videoId);
+    bool deleteUntracked(qint64 videoId);
     void fetchSubtitles();
     bool fetchingSubtitles() const { return m_upgrading && m_subtitling; }
 
@@ -92,7 +119,7 @@ public:
     bool scanning() const { return m_scanning; }
     int queuedCount() const { return m_queue.size(); }
     int activeCount() const { return m_active; }
-    bool busy() const { return m_scanning || m_upgrading || m_reviewJobs > 0 || m_blocked || m_active > 0 || !m_queue.isEmpty(); }
+    bool busy() const { return m_scanning || m_upgrading || m_reviewJobs > 0 || m_blocked || m_active > 0 || !m_queue.isEmpty() || m_replacing; }
 
     static QString dataDir(const QString &mvDir);
     // What is remembered about candidate videos between tracks.
@@ -100,6 +127,13 @@ public:
 
 signals:
     void jobChanged(const JobStatus &status);
+    // What a replace job is doing (empty when none runs); its answers.
+    // Each option: {id, title, channel, duration, thumbnail, waveform,
+    // fingerprint, artistChannel, summary}. The check: {id, title, channel,
+    // matches, reason}.
+    void replaceStageChanged(qint64 videoId, const QString &stage);
+    void replaceOptions(qint64 videoId, const QVariantList &options, const QString &error);
+    void replaceChecked(qint64 videoId, const QVariantMap &result);
     void videoAdded(qint64 videoId);
     void videoChanged(qint64 videoId);
     void videoRemoved(qint64 videoId);
@@ -108,6 +142,8 @@ signals:
 
 private:
     void enqueue(qint64 trackId);
+    // Deletes an untracked video with what is kept beside it.
+    void removeUntracked(const VideoInfo &v);
     void pump();
     void onScanFinished(const LibraryScanner::Result &r);
     void onJobFinished(qint64 trackId);
@@ -135,6 +171,13 @@ private:
     QThreadPool m_jobPool;
     QThreadPool m_scanPool;
     QThreadPool m_auditPool;
+    QThreadPool m_replacePool;
+    std::atomic<bool> m_replacing{false};
+    // The track a replace job works for: the best file of the video's.
+    std::optional<TrackInfo> replaceTrack(const VideoInfo &video);
+    void replaceSearchJob(const VideoInfo &video, const TrackInfo &track, const ImportSettings &cfg);
+    void replaceCheckJob(const VideoInfo &video, const TrackInfo &track, const QString &ytId, const ImportSettings &cfg);
+    void replaceWithJob(const VideoInfo &video, const TrackInfo &track, const QString &ytId, const ImportSettings &cfg);
     std::atomic<bool> m_cancel{false};
 
     QQueue<qint64> m_queue;

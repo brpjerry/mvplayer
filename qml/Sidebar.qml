@@ -4,6 +4,8 @@ import MvPlayer.Core
 
 // Library navigation: fixed entries, then the values of one tag at a time.
 // A selector picks which tag is listed and a filter box narrows the list.
+// In the review queue and among the orphans the same entries narrow those,
+// and the tags listed are those of the videos there.
 Rectangle {
     id: root
 
@@ -17,20 +19,107 @@ Rectangle {
         root.navigated()
     }
 
+    // A right click on a row: its videos looked up again by today's rules.
+    function askReimport(item, type, value, count) {
+        const p = item ? item.mapToItem(root, 0, item.height) : Qt.point(0, fixed.y + fixed.height)
+        rowMenu.facetType = type
+        rowMenu.facetValue = value
+        rowMenu.count = count
+        rowMenu.x = Math.min(p.x + 20, root.width - rowMenu.width - 8)
+        rowMenu.y = p.y - 4
+        rowMenu.open()
+    }
+
+    Popup {
+        id: rowMenu
+        property string facetType: "all"
+        property string facetValue: ""
+        property int count: 0
+        width: 232
+        padding: 6
+        closePolicy: Popup.CloseOnEscape | Popup.CloseOnPressOutsideParent
+        transformOrigin: Popup.TopLeft
+        enter: Transition {
+            ParallelAnimation {
+                NumberAnimation { property: "opacity"; from: 0; to: 1; duration: Theme.normal }
+                NumberAnimation { property: "scale"; from: 0.95; to: 1; duration: Theme.slow; easing.type: Easing.BezierSpline; easing.bezierCurve: Theme.emphasized }
+            }
+        }
+        exit: Transition { NumberAnimation { property: "opacity"; to: 0; duration: Theme.fast } }
+        background: Rectangle {
+            radius: Theme.radius
+            color: Theme.raised
+            border.width: 1
+            border.color: Theme.line
+        }
+        contentItem: Column {
+            Item {
+                width: rowMenu.availableWidth
+                height: 34
+                enabled: App.configured && rowMenu.count > 0
+                opacity: enabled ? 1 : 0.4
+                Rectangle {
+                    anchors.fill: parent
+                    radius: Theme.radiusSmall
+                    color: Theme.hover
+                    opacity: reimportMouse.containsMouse ? 1 : 0
+                    Behavior on opacity { NumberAnimation { duration: Theme.fast } }
+                }
+                Icon {
+                    x: 10
+                    anchors.verticalCenter: parent.verticalCenter
+                    path: Icons.refresh
+                    size: 16
+                    color: Theme.textDim
+                }
+                Text {
+                    x: 34
+                    anchors.verticalCenter: parent.verticalCenter
+                    text: "Re-import " + rowMenu.count + (rowMenu.count === 1 ? " video" : " videos")
+                    color: Theme.text
+                    font.pixelSize: 13
+                }
+                MouseArea {
+                    id: reimportMouse
+                    anchors.fill: parent
+                    hoverEnabled: true
+                    cursorShape: Qt.PointingHandCursor
+                    onClicked: {
+                        App.reimportFacet(rowMenu.facetType, rowMenu.facetValue)
+                        rowMenu.close()
+                    }
+                }
+            }
+            Text {
+                width: rowMenu.availableWidth
+                leftPadding: 10
+                rightPadding: 10
+                topPadding: 4
+                bottomPadding: 6
+                text: "Each is looked up again by today's rules: kept, sent to review or replaced as they decide."
+                color: Theme.textFaint
+                font.pixelSize: 11
+                wrapMode: Text.WordWrap
+            }
+        }
+    }
+
     // The tag whose values are listed. Follows App.sidebarFacet, but only
     // switches in the middle of the cross-fade below.
     property string shownKey: App.sidebarFacet
+    // Likewise the section of the grid whose values are listed.
+    property string shownSection: App.videos.section
     readonly property var facet: {
         const all = App.facets
         for (let i = 0; i < all.length; ++i) {
             if (all[i].key === shownKey)
                 return all[i]
         }
-        return all.length > 0 ? all[0] : { key: "", title: "", items: [] }
+        return all.length > 0 ? all[0] : { key: "", title: "", items: {} }
     }
     readonly property var visibleItems: {
         const q = fold(filter.text.trim())
-        const items = facet.items
+        const items = facet.items[shownSection] || []
         if (q.length === 0)
             return items
         return items.filter((item) => fold(item.name).indexOf(q) >= 0)
@@ -51,13 +140,22 @@ Rectangle {
             Qt.callLater(() => { list.contentY = Math.max(0, Math.min(y, list.contentHeight - list.height)) })
         }
     }
+    Connections {
+        target: App.videos
+        function onSectionChanged() {
+            if (App.videos.section !== root.shownSection)
+                swap.restart()
+        }
+    }
     SequentialAnimation {
         id: swap
         NumberAnimation { target: listArea; property: "opacity"; to: 0; duration: 90 }
         ScriptAction {
             script: {
-                filter.clear()
+                if (root.shownKey !== App.sidebarFacet)
+                    filter.clear()
                 root.shownKey = App.sidebarFacet
+                root.shownSection = App.videos.section
                 list.contentY = 0
             }
         }
@@ -109,11 +207,13 @@ Rectangle {
         width: parent.width
 
         SidebarItem {
+            id: allRow
             label: "All Videos"
             icon: Icons.grid
-            count: App.videoCount
+            count: App.videos.section === "review" ? App.reviewCount : App.videos.section === "orphans" ? App.orphanCount : App.videoCount
             selected: App.videos.facetType === "all"
             onClicked: root.select("all", "")
+            onRightClicked: root.askReimport(allRow, "all", "", count)
         }
         SidebarItem {
             label: "Recently Added"
@@ -220,7 +320,7 @@ Rectangle {
                                 anchors.right: parent.right
                                 anchors.rightMargin: 12
                                 anchors.verticalCenter: parent.verticalCenter
-                                text: option.modelData.items.length
+                                text: (option.modelData.items[App.videos.section] || []).length
                                 color: option.current ? Theme.accent : Theme.textFaint
                                 font.pixelSize: 11
                                 font.features: { "tnum": 1 }
@@ -275,11 +375,13 @@ Rectangle {
             bottomMargin: 10
 
             delegate: SidebarItem {
+                id: row
                 required property var modelData
                 label: modelData.name
                 count: modelData.count
                 selected: App.videos.facetType === root.shownKey && App.videos.facetValue === modelData.name
                 onClicked: root.select(root.shownKey, modelData.name)
+                onRightClicked: root.askReimport(row, root.shownKey, modelData.name, modelData.count)
             }
 
             KineticWheel {

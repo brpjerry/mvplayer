@@ -6,6 +6,7 @@ Item {
 
     property string icon
     property real iconSize: 20
+    property real iconRotation: 0
     property real size: 36
     property color color: Theme.textDim
     property color hoverColor: Theme.text
@@ -42,6 +43,7 @@ Item {
         anchors.centerIn: parent
         path: root.icon
         size: root.iconSize
+        rotation: root.iconRotation
         scale: mouse.pressed ? 0.92 : 1
         color: root.filled ? Theme.accentInk
              : root.checked ? Theme.accent

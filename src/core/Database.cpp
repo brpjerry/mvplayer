@@ -47,7 +47,7 @@ QJsonObject jsonObj(const QString &s)
 const char *kTrackCols =
     "id, path, mtime, size, title, artist, album_artist, album, genre, year, track_no, disc_no, "
     "duration, codec, bitrate, sample_rate, bits, channels, lossless, tags_json, state, video_id, "
-    "attempts, last_attempt, message, recording, absent";
+    "attempts, last_attempt, message, recording, absent, reimport";
 
 TrackInfo readTrack(const QSqlQuery &q)
 {
@@ -80,6 +80,7 @@ TrackInfo readTrack(const QSqlQuery &q)
     t.message = q.value(i++).toString();
     t.recording = q.value(i++).toLongLong();
     t.absent = q.value(i++).toBool();
+    t.reimport = q.value(i++).toBool();
     return t;
 }
 
@@ -228,7 +229,8 @@ bool Database::init(QString *error)
             " added_at INTEGER,"
             " yt_abr REAL,"
             " review INTEGER NOT NULL DEFAULT 0, review_start REAL, review_end REAL, review_group INTEGER,"
-            " yt_channel_id TEXT)"),
+            " yt_channel_id TEXT,"
+            " kept INTEGER NOT NULL DEFAULT 0)"),
         QStringLiteral(
             "CREATE TABLE IF NOT EXISTS tracks ("
             " id INTEGER PRIMARY KEY,"
@@ -246,7 +248,8 @@ bool Database::init(QString *error)
             " message TEXT,"
             " recording INTEGER, fingerprint BLOB, fp_size INTEGER,"
             " searched_title TEXT,"
-            " absent INTEGER NOT NULL DEFAULT 0)"),
+            " absent INTEGER NOT NULL DEFAULT 0,"
+            " reimport INTEGER NOT NULL DEFAULT 0)"),
         // Videos turned down for a track: by recording, or by track where
         // the recording is not known.
         QStringLiteral("CREATE TABLE IF NOT EXISTS rejected_videos ("
@@ -294,6 +297,34 @@ bool Database::init(QString *error)
                 has |= q.value(1).toString() == QLatin1String("yt_channel_id");
         }
         if (!has && !q.exec(QStringLiteral("ALTER TABLE videos ADD COLUMN yt_channel_id TEXT"))) {
+            if (error)
+                *error = q.lastError().text();
+            return false;
+        }
+    }
+    // Likewise the mark on untracked videos the user keeps.
+    {
+        QSqlQuery q(db);
+        bool has = false;
+        if (q.exec(QStringLiteral("PRAGMA table_info(videos)"))) {
+            while (q.next())
+                has |= q.value(1).toString() == QLatin1String("kept");
+        }
+        if (!has && !q.exec(QStringLiteral("ALTER TABLE videos ADD COLUMN kept INTEGER NOT NULL DEFAULT 0"))) {
+            if (error)
+                *error = q.lastError().text();
+            return false;
+        }
+    }
+    // And the mark on tracks whose video is to be judged again.
+    {
+        QSqlQuery q(db);
+        bool has = false;
+        if (q.exec(QStringLiteral("PRAGMA table_info(tracks)"))) {
+            while (q.next())
+                has |= q.value(1).toString() == QLatin1String("reimport");
+        }
+        if (!has && !q.exec(QStringLiteral("ALTER TABLE tracks ADD COLUMN reimport INTEGER NOT NULL DEFAULT 0"))) {
             if (error)
                 *error = q.lastError().text();
             return false;
@@ -432,7 +463,7 @@ void Database::setTrackAbsent(qint64 id, bool absent)
 const char *kUntrackedSql =
     "WITH linked AS (SELECT DISTINCT video_id AS id FROM tracks WHERE absent = 0 AND video_id IS NOT NULL),"
     " groups AS (SELECT DISTINCT COALESCE(NULLIF(v.review_group, 0), v.id) AS g FROM videos v JOIN linked ON linked.id = v.id WHERE v.review = 1)"
-    " %1 FROM videos WHERE id NOT IN (SELECT id FROM linked)"
+    " %1 FROM videos WHERE kept = 0 AND id NOT IN (SELECT id FROM linked)"
     " AND NOT (review = 1 AND COALESCE(NULLIF(review_group, 0), id) IN (SELECT g FROM groups))";
 
 QVector<VideoInfo> Database::untrackedVideos()
@@ -447,11 +478,24 @@ QVector<VideoInfo> Database::untrackedVideos()
     return out;
 }
 
-int Database::untrackedVideoCount()
+QSet<qint64> Database::untrackedVideoIds()
+{
+    QSet<qint64> out;
+    QSqlQuery q(conn());
+    q.prepare(QString::fromLatin1(kUntrackedSql).arg(QStringLiteral("SELECT id")));
+    if (run(q)) {
+        while (q.next())
+            out.insert(q.value(0).toLongLong());
+    }
+    return out;
+}
+
+void Database::keepVideo(qint64 videoId)
 {
     QSqlQuery q(conn());
-    q.prepare(QString::fromLatin1(kUntrackedSql).arg(QStringLiteral("SELECT COUNT(*)")));
-    return run(q) && q.next() ? q.value(0).toInt() : 0;
+    q.prepare(QStringLiteral("UPDATE videos SET kept = 1 WHERE id = ?"));
+    q.addBindValue(videoId);
+    run(q);
 }
 
 void Database::removeAbsentTracksOf(qint64 videoId)
@@ -636,11 +680,12 @@ void Database::requeueStale(qint64 failedAfterSecs, qint64 notFoundAfterSecs)
     }
 }
 
-QVector<TrackInfo> Database::tracksForVideo(qint64 videoId)
+QVector<TrackInfo> Database::tracksForVideo(qint64 videoId, bool includeAbsent)
 {
     QVector<TrackInfo> out;
     QSqlQuery q(conn());
-    q.prepare(QStringLiteral("SELECT %1 FROM tracks WHERE video_id = ? AND absent = 0 ORDER BY id").arg(QLatin1String(kTrackCols)));
+    q.prepare(QStringLiteral("SELECT %1 FROM tracks WHERE video_id = ?%2 ORDER BY id")
+                  .arg(QLatin1String(kTrackCols), includeAbsent ? QString() : QStringLiteral(" AND absent = 0")));
     q.addBindValue(videoId);
     if (run(q)) {
         while (q.next())
@@ -859,6 +904,61 @@ void Database::setTrackPending(qint64 trackId)
     q.prepare(QStringLiteral("UPDATE tracks SET state = 'pending' WHERE id = ?"));
     q.addBindValue(trackId);
     run(q);
+}
+
+void Database::setTrackReimport(qint64 trackId)
+{
+    // The whole recording: the lookup runs under its best file, whichever
+    // that is (see pendingRecordings), and that file has to carry the mark.
+    QSqlQuery q(conn());
+    q.prepare(QStringLiteral("UPDATE tracks SET state = 'pending', reimport = 1, message = ''"
+                             " WHERE absent = 0 AND (id = ? OR recording = (SELECT recording FROM tracks WHERE id = ?))"));
+    q.addBindValue(trackId);
+    q.addBindValue(trackId);
+    run(q);
+}
+
+void Database::clearTrackReimport(qint64 trackId)
+{
+    QSqlQuery q(conn());
+    q.prepare(QStringLiteral("UPDATE tracks SET reimport = 0"
+                             " WHERE id = ? OR recording = (SELECT recording FROM tracks WHERE id = ?)"));
+    q.addBindValue(trackId);
+    q.addBindValue(trackId);
+    run(q);
+}
+
+QVector<qint64> Database::trackIdsUnder(const QString &path)
+{
+    QVector<qint64> out;
+    QString dir = QDir::cleanPath(path);
+    while (dir.size() > 1 && dir.endsWith(QLatin1Char('/')))
+        dir.chop(1);
+    QSqlQuery q(conn());
+    // Paths are stored as the scan found them, with "/" between folders.
+    q.prepare(QStringLiteral("SELECT id FROM tracks WHERE absent = 0 AND (path = ? OR substr(path, 1, ?) = ?) ORDER BY path"));
+    q.addBindValue(dir);
+    q.addBindValue(dir.size() + 1);
+    q.addBindValue(dir + QLatin1Char('/'));
+    if (run(q)) {
+        while (q.next())
+            out << q.value(0).toLongLong();
+    }
+    return out;
+}
+
+QVector<qint64> Database::trackIdsImportedBefore(qint64 secs)
+{
+    QVector<qint64> out;
+    QSqlQuery q(conn());
+    q.prepare(QStringLiteral("SELECT id FROM tracks WHERE absent = 0 AND state = 'done' AND video_id IS NOT NULL"
+                             " AND last_attempt < ? ORDER BY path"));
+    q.addBindValue(secs);
+    if (run(q)) {
+        while (q.next())
+            out << q.value(0).toLongLong();
+    }
+    return out;
 }
 
 namespace {

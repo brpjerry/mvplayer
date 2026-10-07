@@ -11,7 +11,8 @@ Item {
 
     // row in App.videos
     signal activated(int row)
-    // the verdict on a video that waits for review
+    // the verdict on a video that waits for review, or on an orphan among
+    // the orphans
     signal approved(var videoId)
     signal rejected(var videoId)
     signal stepped(var videoId, int delta)
@@ -68,6 +69,8 @@ Item {
             height: grid.cellHeight
             current: videoId === root.currentVideoId
             playing: current && root.currentPlaying
+            orphanView: App.videos.section === "orphans"
+            canDelete: !App.scanning
             onActivated: root.activated(index)
             onApproved: root.approved(videoId)
             onRejected: root.rejected(videoId)
@@ -140,7 +143,7 @@ Item {
         visible: opacity > 0
         Behavior on opacity { NumberAnimation { duration: Theme.normal } }
 
-        readonly property bool filtering: root.searchText.trim().length > 0 || App.videos.facetType !== "all"
+        readonly property bool filtering: root.searchText.trim().length > 0 || App.videos.facetType !== "all" || App.videos.section !== "library"
 
         Item {
             anchors.horizontalCenter: parent.horizontalCenter

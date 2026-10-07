@@ -73,18 +73,29 @@ ApplicationWindow {
     }
 
     // An accepted video leaves the review list; it stops rather than play on
-    // out of sight, and its file is tidied up meanwhile.
+    // out of sight, and its file is tidied up meanwhile. Among the orphans
+    // the verdict is on an orphan, and a kept one leaves that list alike.
     function approveVideo(id) {
         if (player.current && player.current.videoId === id)
             player.stop()
-        App.approveVideo(id)
+        if (App.videos.section === "orphans")
+            App.keepOrphan(id)
+        else
+            App.approveVideo(id)
     }
 
-    // A rejected video is deleted: it cannot go on playing.
+    // A rejected video is deleted: it cannot go on playing. An orphan is
+    // not deleted while the music folders are read.
     function rejectVideo(id) {
+        const orphan = App.videos.section === "orphans"
+        if (orphan && App.scanning)
+            return
         if (player.current && player.current.videoId === id)
             player.stop()
-        App.rejectVideo(id)
+        if (orphan)
+            App.deleteOrphan(id)
+        else
+            App.rejectVideo(id)
     }
 
     // ---- Playback queue ----------------------------------------------------
@@ -120,8 +131,9 @@ ApplicationWindow {
             load(row)
             // A video under review plays in its thumbnail, next to the
             // others and with its verdict buttons; a click on it enlarges it.
-            // So does every video when that is how the user wants it.
-            if (list[row].review || !App.autoExpand) {
+            // So do the orphans among themselves, and every video when that
+            // is how the user wants it.
+            if (list[row].review || App.videos.section === "orphans" || !App.autoExpand) {
                 window.view = "grid"
                 playerView.openCollapsed(decodeWidth)
                 return
@@ -308,6 +320,7 @@ ApplicationWindow {
 
         ControlBar {
             id: controlBar
+            onReplaceRequested: (videoId) => replaceDialog.openFor(videoId)
             width: parent.width
             readonly property bool revealed: !window.fullscreen || playerView.pointerActive || hovered || window.mpv.paused
             y: parent.height - height + (revealed ? 0 : height)
@@ -334,6 +347,7 @@ ApplicationWindow {
     }
 
     SettingsPanel { id: settings }
+    ReplaceDialog { id: replaceDialog }
 
     // Frame rate counter (F12)
     Rectangle {
@@ -430,8 +444,10 @@ ApplicationWindow {
             App.videos.setFacet(s < 0 ? arg : arg.slice(0, s), s < 0 ? "" : arg.slice(s + 1))
             return "ok"
         }
+        case "section": App.videos.showSection(arg); return "ok" // library | review | orphans
         case "sort": App.videos.sortMode = arg; return "ok"
         case "fullscreen": setFullscreen(arg !== "off"); return "ok"
+        case "sources": controlBar.toggleSources(); return "ok"
         case "settings": arg === "off" ? settings.close() : settings.open(); return "ok"
         case "retry": App.retryUnmatched(); return "ok"
         case "rescan": App.rescan(); return "ok"
@@ -440,6 +456,28 @@ ApplicationWindow {
         case "check-cookies": App.checkCookies(); return "ok"
         case "fetch-subtitles": App.fetchSubtitles(); return "ok"
         case "delete-untracked": return "" + App.deleteUntracked()
+        case "reimport": return "" + App.reimportVideo(parseInt(arg)) // reimport <video id>
+        case "reimport-facet": { // reimport-facet <type> <value>: the section on show
+            const s = arg.indexOf(" ")
+            return "" + App.reimportFacet(s < 0 ? arg : arg.slice(0, s), s < 0 ? "" : arg.slice(s + 1))
+        }
+        case "reimport-path": return "" + App.reimportPath(arg)
+        case "replace-dialog": replaceDialog.openFor(parseInt(arg)); return "ok" // replace-dialog <video id>
+        case "replace-search": return App.replaceSearch(parseInt(arg)) ? "ok" : "busy"
+        case "replace-check": { // replace-check <video id> <link or id>
+            const s = arg.indexOf(" ")
+            return App.replaceCheck(parseInt(arg.slice(0, s)), arg.slice(s + 1)) || "ok"
+        }
+        case "replace": { // replace <video id> <youtube id>
+            const s = arg.indexOf(" ")
+            return App.replaceWith(parseInt(arg.slice(0, s)), arg.slice(s + 1)) ? "ok" : "busy"
+        }
+        case "reimport-menu": { // reimport-menu <value>: the sidebar's row menu for a listed tag value ("" for All Videos)
+            const f = App.facets.find(x => x.key === App.sidebarFacet)
+            const it = f ? (f.items[App.videos.section] || []).find(i => i.name === arg) : null
+            sidebar.askReimport(null, arg === "" ? "all" : App.sidebarFacet, arg, arg === "" ? App.videoCount : (it ? it.count : 0))
+            return "ok"
+        }
         case "auto-expand": App.autoExpand = arg !== "off"; return "ok"
         case "subtitle-style": { // subtitle-style <outline> <shadow>
             const st = arg.split(" ")
@@ -456,7 +494,7 @@ ApplicationWindow {
         }
         case "approve": window.approveVideo(parseInt(arg)); return "ok"
         case "reject": window.rejectVideo(parseInt(arg)); return "ok"
-        case "grab": // grab <file>: a picture of the settings panel when open, else of the window
+        case "grab": // grab <file>: a picture of the settings panel when open, else of the window (grab-window: with popups)
             (settings.opened ? settings.contentItem : frame).grabToImage(r => r.saveToFile(arg))
             return "ok"
         case "ytdlp-update": YtDlpUpdater.update(); return "ok"
@@ -490,12 +528,14 @@ ApplicationWindow {
                 position: mpv.position, duration: mpv.duration, paused: mpv.paused, active: mpv.active, muted: mpv.muted,
                 hwdec: mpv.hwdec, videoSize: mpv.videoSize.width + "x" + mpv.videoSize.height,
                 audioTrack: mpv.audioTrack, audioTracks: mpv.audioTracks.length,
-                busy: App.busy, status: App.statusText, counts: App.trackCounts,
+                busy: App.busy, scanning: App.scanning, status: App.statusText, counts: App.trackCounts,
                 untracked: App.untrackedCount, autoExpand: App.autoExpand, subtitleOutline: App.subtitleOutline, subtitleShadow: App.subtitleShadow,
                 subtitleLangs: App.subtitleLangs, subtitlesOn: App.subtitlesOn, hasSubtitles: window.mpv.hasSubtitles,
                 fetchingSubtitles: App.fetchingSubtitles, cookies: App.hasCookies, checkingCookies: App.checkingCookies, cookiesState: App.cookiesState,
                 cookiesStatus: App.cookiesStatus, checkingQuality: App.checkingQuality, reviewCount: App.reviewCount,
-                facet: App.videos.facetType, reviewLabel: controlBar.reviewLabel,
+                facet: App.videos.facetType, facetValue: App.videos.facetValue, section: App.videos.section,
+                orphanCount: App.orphanCount, reviewLabel: controlBar.reviewLabel,
+                replacing: App.replacing, replaceStage: App.replaceStage, replaceDialog: replaceDialog.opened, replaceOptions: replaceDialog.options.length, replaceMode: replaceDialog.mode,
                 accent: "" + Theme.accent, accentMode: App.accent, theme: App.themeMode, dark: Theme.dark,
                 systemDark: App.systemDark, bg: "" + Theme.bg, musicDirs: App.musicDirs, frameColor: "" + mpv.frameColor,
                 frameColorValid: mpv.frameColorValid, sidebar: App.sidebarFacet,

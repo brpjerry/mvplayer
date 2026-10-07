@@ -47,6 +47,8 @@ class AppController : public QObject
     Q_PROPERTY(int videoCount READ videoCount NOTIFY facetsChanged)
     // Videos that wait for the user to accept or reject them.
     Q_PROPERTY(int reviewCount READ reviewCount NOTIFY facetsChanged)
+    // Library videos whose tracks are gone, for the user to keep or delete.
+    Q_PROPERTY(int orphanCount READ orphanCount NOTIFY facetsChanged)
 
     Q_PROPERTY(QStringList musicDirs READ musicDirs NOTIFY settingsChanged)
     Q_PROPERTY(QString mvDir READ mvDir WRITE setMvDir NOTIFY settingsChanged)
@@ -77,6 +79,11 @@ class AppController : public QObject
     Q_PROPERTY(QString cookiesState READ cookiesState NOTIFY cookiesCheckChanged)
     Q_PROPERTY(QString cookiesStatus READ cookiesStatus NOTIFY cookiesCheckChanged)
 
+    // Replacing a video by hand: whether a search, check or replacement
+    // runs, what it is doing, and for which video.
+    Q_PROPERTY(bool replacing READ replacing NOTIFY replaceChanged)
+    Q_PROPERTY(QString replaceStage READ replaceStage NOTIFY replaceChanged)
+    Q_PROPERTY(qint64 replaceVideoId READ replaceVideoId NOTIFY replaceChanged)
     Q_PROPERTY(bool busy READ busy NOTIFY activityChanged)
     Q_PROPERTY(bool scanning READ scanning NOTIFY activityChanged)
     Q_PROPERTY(int remaining READ remaining NOTIFY activityChanged)
@@ -115,6 +122,10 @@ public:
     int reviewCount() const { return m_reviewCount; }
     Q_INVOKABLE void approveVideo(qint64 videoId);
     Q_INVOKABLE void rejectVideo(qint64 videoId);
+    int orphanCount() const { return m_orphanCount; }
+    Q_INVOKABLE void keepOrphan(qint64 videoId);
+    // False while the music folders are being read.
+    Q_INVOKABLE bool deleteOrphan(qint64 videoId);
 
     QStringList musicDirs() const { return m_cfg.musicDirs; }
     Q_INVOKABLE void addMusicDir(const QString &dir);
@@ -183,7 +194,28 @@ public:
 
     Q_INVOKABLE void rescan();
     Q_INVOKABLE void retryUnmatched();
+    // Looks tracks up again, their videos judged by today's rules (see
+    // ImportManager::reimport): those of one video, of every video of the
+    // section on show with a tag, or of the music files at a path (a file
+    // or a folder). Each returns how many lookups were queued.
+    Q_INVOKABLE int reimportVideo(qint64 videoId);
+    Q_INVOKABLE int reimportFacet(const QString &type, const QString &value);
+    Q_INVOKABLE int reimportPath(const QString &path);
+    // Replacing a video by hand (ImportManager::replaceSearch and friends).
+    // replaceCheck takes a YouTube link or id; it returns what is wrong with
+    // it, or nothing and the answer comes as replaceCheckDone.
+    bool replacing() const { return m_manager && m_manager->replacing(); }
+    QString replaceStage() const { return m_replaceStage; }
+    qint64 replaceVideoId() const { return m_replaceVideoId; }
+    Q_INVOKABLE bool replaceSearch(qint64 videoId);
+    Q_INVOKABLE QString replaceCheck(qint64 videoId, const QString &text);
+    Q_INVOKABLE bool replaceWith(qint64 videoId, const QString &ytId);
+    static QString youtubeId(const QString &text);
     Q_INVOKABLE QVariantList unmatchedTracks() const;
+    // What a video stands for: {ytUrl, ytTitle, ytChannel, files}. files:
+    // the music files that have it, the one whose tags it carries first,
+    // each {path, absent, format, tags: [{key, value}]}.
+    Q_INVOKABLE QVariantMap videoSources(qint64 videoId) const;
     Q_INVOKABLE QString urlToPath(const QUrl &url) const;
     Q_INVOKABLE QUrl pathToUrl(const QString &path) const;
     Q_INVOKABLE QString displayPath(const QString &path) const;
@@ -199,6 +231,11 @@ signals:
     void appearanceChanged();
     void systemDarkChanged();
     void videoImported(const QVariantMap &video);
+    void replaceChanged();
+    // Up to three uploads that are the track by ear, or why there are none.
+    void replaceOptionsReady(qint64 videoId, const QVariantList &options, const QString &error);
+    // {id, title, channel, duration, thumbnail, matches, reason, error?}
+    void replaceCheckDone(qint64 videoId, const QVariantMap &result);
 
 private:
     void openLibrary();
@@ -228,6 +265,7 @@ private:
     int m_sessionDone = 0;
     int m_reviewCount = 0;  // tracks with videos waiting for review
     int m_reviewVideos = 0; // those videos, counting every option
+    int m_orphanCount = 0;
     QString m_accent = QStringLiteral("auto");
     QString m_sidebarFacet = QStringLiteral("albumArtist");
     SystemTheme m_systemTheme;
@@ -242,4 +280,6 @@ private:
     double m_subtitleShadow = 0;
     bool m_autoExpand = true;
     int m_untrackedCount = 0;
+    QString m_replaceStage;
+    qint64 m_replaceVideoId = 0;
 };

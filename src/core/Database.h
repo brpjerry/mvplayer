@@ -3,6 +3,7 @@
 #include "core/Types.h"
 
 #include <QHash>
+#include <QSet>
 #include <QSqlDatabase>
 #include <QVector>
 
@@ -63,12 +64,16 @@ public:
     // Makes failed / not-found tracks pending again once their last attempt
     // is old enough. The wait for failed tracks doubles with every attempt.
     void requeueStale(qint64 failedAfterSecs, qint64 notFoundAfterSecs);
-    // The tracks in the music folders that have this video.
-    QVector<TrackInfo> tracksForVideo(qint64 videoId);
+    // The tracks in the music folders that have this video; with
+    // `includeAbsent`, also those whose files have left them.
+    QVector<TrackInfo> tracksForVideo(qint64 videoId, bool includeAbsent = false);
     // Videos that no track in the music folders has: their tracks left, with
-    // a folder that was removed or files that were deleted.
+    // a folder that was removed or files that were deleted. Not those the
+    // user said to keep all the same.
     QVector<VideoInfo> untrackedVideos();
-    int untrackedVideoCount();
+    QSet<qint64> untrackedVideoIds();
+    // The user keeps an untracked video: it is not untracked any more.
+    void keepVideo(qint64 videoId);
     // Forgets the absent tracks of a video, for when the video is deleted:
     // if their files come back, they are looked up afresh.
     void removeAbsentTracksOf(qint64 videoId);
@@ -88,6 +93,16 @@ public:
     void relinkTracks(qint64 fromVideoId, qint64 toVideoId);
     // Makes a track look for (more) videos again; what it has stays with it.
     void setTrackPending(qint64 trackId);
+    // Makes the track's recording pending for a re-import (TrackInfo::reimport),
+    // or ends one. Absent tracks are left alone.
+    void setTrackReimport(qint64 trackId);
+    void clearTrackReimport(qint64 trackId);
+    // The tracks in the music folders at `path`: that file, or every file
+    // under that folder.
+    QVector<qint64> trackIdsUnder(const QString &path);
+    // The tracks in the music folders that have a video and were last looked
+    // up before `secs` (Unix time).
+    QVector<qint64> trackIdsImportedBefore(qint64 secs);
 
     // An artist's YouTube channels, by id (or by name, for videos from
     // before ids were kept): from MusicBrainz, or vouched for by the user.
