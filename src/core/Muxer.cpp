@@ -343,8 +343,7 @@ bool mux(const Plan &plan, const std::atomic<bool> *cancel, QString *audioDetail
             *error = QStringLiteral("ffmpeg mux: ") + r.errorText();
         return false;
     }
-    QFile::remove(plan.outFile);
-    if (!QFile::rename(partFile, plan.outFile)) {
+    if (!replaceFile(partFile, plan.outFile)) {
         QFile::remove(partFile);
         if (error)
             *error = QStringLiteral("cannot move video into the library");
@@ -373,8 +372,7 @@ bool dropReviewStream(const QString &file, const std::atomic<bool> *cancel, QStr
             *error = QStringLiteral("ffmpeg: ") + r.errorText();
         return false;
     }
-    QFile::remove(file);
-    if (!QFile::rename(partFile, file)) {
+    if (!replaceFile(partFile, file)) {
         QFile::remove(partFile);
         if (error)
             *error = QStringLiteral("cannot replace the video");

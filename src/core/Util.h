@@ -49,6 +49,11 @@ QString toolPath(const QString &name);
 // Runs a child process to completion on the calling thread (no event loop needed).
 ProcResult runProcess(const QString &program, const QStringList &args, const ProcOptions &opts = {});
 
+// Puts `from` in the place of `to` (which may exist) once `from`'s data is on
+// disk, so a crash leaves the old file or the new one, never an empty one.
+// Both must be on the same file system.
+bool replaceFile(const QString &from, const QString &to);
+
 // Makes a string safe to use as a single path component on Linux, Windows and macOS.
 QString sanitizeFileName(const QString &name, int maxLen = 120);
 

@@ -231,6 +231,10 @@ already, so nothing is downloaded for it:
   the track counts as having no video.
 - A lookup that could not finish (YouTube refusing requests, the file
   unreadable) changes nothing: the track keeps its video.
+- A video whose file is empty or missing — a machine that goes down while
+  a video is being written can leave it empty — is deleted first, whether it
+  is the track's video or one of the options waiting for review. Its upload
+  is then found and downloaded again like any other.
 
 Tracks without a video are simply looked up again. Re-import one video
 from the Re-import button in the music-file popup (the bottom bar's
@@ -285,6 +289,8 @@ Everything the importer decides is recorded in
   by its title, another file of a known recording, a known track at a new place.
 - `verdict`: a video under review accepted or turned down.
 - `reimport`: tracks queued for a lookup by today's rules (see Re-importing).
+- `broken-video`: a video deleted at a re-import because its file was empty
+  or missing.
 - `untracked-kept` / `untracked-deleted`: a video whose tracks are gone kept,
   or deleted (one at a time, or all of them from Settings).
 - `paused` / `resumed`: the request circuit breaker.

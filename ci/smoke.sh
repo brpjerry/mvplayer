@@ -341,6 +341,20 @@ REPORT=$(python3 "$(dirname "$0")/../tools/import-report.py" "$WORK/mvlib5")
 echo "$REPORT" | tail -1 | cut -c1-200
 [[ "$REPORT" == *"review → you: reject"* && "$REPORT" == *"46%"* ]]
 
+echo "== an empty video file"
+# A machine that goes down while a video is being written can leave its file
+# empty. Looked up again, the track lets that video go and brings the upload
+# in anew.
+OUT=$(MVPLAYER_YTDLP="$SITE" timeout 120 "$BUILD/mvplayer-import" --allow-still-images --music-dir "$WORK/lib5" --mv-dir "$WORK/mvlib11" 2>&1)
+[[ "$OUT" == *"done: 0 videos and 1 for review; tracks: done=1"* ]]
+: > "$WORK/mvlib11/Dee/Five [liv].mkv"
+OUT=$(MVPLAYER_YTDLP="$SITE" timeout 120 "$BUILD/mvplayer-import" --allow-still-images --music-dir "$WORK/lib5" --mv-dir "$WORK/mvlib11" \
+    --reimport "$WORK/lib5/Dee/five.flac" 2>&1)
+echo "$OUT" | grep -E "^\[import\]|^done:"
+[[ "$OUT" == *"deleted “Dee - Five”, whose file is empty"* && "$OUT" == *"done: 0 videos and 1 for review; tracks: done=1"* ]]
+[[ -s "$WORK/mvlib11/Dee/Five [liv].mkv" ]]
+grep -q '"event":"broken-video"' "$WORK/mvlib11/.mvplayer/import-log.jsonl"
+
 echo "== a cut of the song"
 # The video is the first four fifths of the track: all of it the track's
 # waveform, and still a cut. It waits for the user rather than standing in
