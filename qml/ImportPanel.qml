@@ -8,19 +8,36 @@ Popup {
 
     width: 420
     // Tall enough for its content, up to most of the window.
-    height: Math.min(Math.max(240, Overlay.overlay ? Overlay.overlay.height - 190 : 560), content.height + 2)
+    height: Math.min(Math.max(240, Overlay.overlay ? Overlay.overlay.height - 190 : 560), list.contentHeight + 2)
     padding: 1
     closePolicy: Popup.CloseOnEscape | Popup.CloseOnPressOutsideParent
 
+    // Tracks without a video: thousands in a large library. The list makes
+    // rows only for what is on screen, and while open is read again only when
+    // their number changes (the importer reports activity many times a track),
+    // keeping the reader's place.
     property var unmatched: []
-    function refresh() {
-        unmatched = App.unmatchedTracks()
+    property string unmatchedKey: ""
+    function countsKey() {
+        const c = App.trackCounts
+        return [c.not_found || 0, c.failed || 0, c.skipped || 0].join("/")
     }
-    onAboutToShow: refresh()
+    function refresh() {
+        unmatchedKey = countsKey()
+        unmatched = App.unmatchedTracks()
+        list.returnToBounds()
+    }
+    onAboutToShow: {
+        refresh()
+        list.contentY = list.originY // each opening starts at the top
+    }
     Connections {
         target: App
         enabled: root.visible
-        function onActivityChanged() { root.refresh() }
+        function onActivityChanged() {
+            if (root.countsKey() !== root.unmatchedKey)
+                root.refresh()
+        }
     }
 
     enter: Transition {
@@ -44,24 +61,28 @@ Popup {
         border.color: Theme.line
     }
 
-    contentItem: Flickable {
-        id: flick
+    contentItem: ListView {
+        id: list
         clip: true
-        contentHeight: content.height
         boundsBehavior: Flickable.StopAtBounds
+        model: root.unmatched
+
+        // The header grows upwards as jobs come and go: if its top was in
+        // view, it stays in view.
+        property bool atTop: true
+        onContentYChanged: atTop = contentY <= originY + 1
+        onOriginYChanged: if (atTop) contentY = originY
 
         KineticWheel {
-            view: flick
+            view: list
             touchpadGain: App.touchpadGain
             wheelStep: App.wheelStep * 0.6
             deceleration: App.flickDeceleration
         }
 
-        Column {
-            id: content
-            width: flick.width
+        header: Column {
+            width: list.width
             topPadding: 16
-            bottomPadding: 14
 
             // Header
             Item {
@@ -167,7 +188,7 @@ Popup {
                     required property bool finished
                     required property string outcome
                     required property string detail
-                    width: content.width
+                    width: list.width
                     height: 50
 
                     Item {
@@ -265,36 +286,36 @@ Popup {
                     onClicked: App.retryUnmatched()
                 }
             }
-            Repeater {
-                model: root.unmatched
-                Item {
-                    id: row
-                    required property var modelData
-                    width: content.width
-                    height: 42
-                    Column {
-                        x: 18
-                        width: parent.width - 36
-                        anchors.verticalCenter: parent.verticalCenter
-                        spacing: 2
-                        Text {
-                            width: parent.width
-                            text: row.modelData.title + (row.modelData.artist ? "  ·  " + row.modelData.artist : "")
-                            color: Theme.textDim
-                            font.pixelSize: 13
-                            elide: Text.ElideRight
-                        }
-                        Text {
-                            width: parent.width
-                            text: (row.modelData.state === "skipped" ? "Skipped: " : row.modelData.state === "failed" ? "Failed: " : "")
-                                  + (row.modelData.message || "no matching video")
-                            color: Theme.textFaint
-                            font.pixelSize: 11
-                            elide: Text.ElideRight
-                        }
-                    }
+        }
+
+        delegate: Item {
+            id: row
+            required property var modelData
+            width: list.width
+            height: 42
+            Column {
+                x: 18
+                width: parent.width - 36
+                anchors.verticalCenter: parent.verticalCenter
+                spacing: 2
+                Text {
+                    width: parent.width
+                    text: row.modelData.title + (row.modelData.artist ? "  ·  " + row.modelData.artist : "")
+                    color: Theme.textDim
+                    font.pixelSize: 13
+                    elide: Text.ElideRight
+                }
+                Text {
+                    width: parent.width
+                    text: (row.modelData.state === "skipped" ? "Skipped: " : row.modelData.state === "failed" ? "Failed: " : "")
+                          + (row.modelData.message || "no matching video")
+                    color: Theme.textFaint
+                    font.pixelSize: 11
+                    elide: Text.ElideRight
                 }
             }
         }
+
+        footer: Item { width: 1; height: 14 }
     }
 }

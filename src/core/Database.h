@@ -27,6 +27,10 @@ public:
     // Tracks (the audio library mirror)
     QHash<QString, TrackInfo> tracksByPath();
     QVector<TrackInfo> tracksInState(const QStringList &states);
+    // The same tracks with only what a list of them shows filled in: title,
+    // artist, album artist, state and message. Several times quicker (no tags
+    // to read).
+    QVector<TrackInfo> trackSummariesInState(const QStringList &states);
     std::optional<TrackInfo> track(qint64 id);
     bool upsertTrack(TrackInfo &t);
     // The track's file is now at `path` (it was moved, or the library is on

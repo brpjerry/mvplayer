@@ -9,11 +9,13 @@ Item {
     property bool playerView: false
     property var current: null        // video shown in the player, if any
     property alias searchText: searchField.text
+    property alias importPanel: importPanel
 
     function focusSearch() {
         searchField.focusInput()
     }
     signal backRequested()
+    signal sectionRequested(string section) // library | review | orphans
 
     implicitHeight: 64
 
@@ -204,7 +206,7 @@ Item {
                 checked: open
                 tooltip: open ? "Back to the library" : modelData.count + (modelData.count === 1 ? " video" : " videos") + modelData.what
                 tooltipBelow: true
-                onClicked: App.videos.showSection(open ? "library" : modelData.section)
+                onClicked: root.sectionRequested(open ? "library" : modelData.section)
 
                 Rectangle {
                     visible: sectionButton.modelData.count > 0

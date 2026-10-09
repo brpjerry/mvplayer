@@ -98,6 +98,16 @@ ApplicationWindow {
             App.rejectVideo(id)
     }
 
+    // Another section of the grid. The playing video was chosen from the
+    // one on show, so it stops, and the grid comes forward.
+    function showSection(section) {
+        if (section === App.videos.section)
+            return
+        if (player.current)
+            player.stop()
+        App.videos.showSection(section)
+    }
+
     // ---- Playback queue ----------------------------------------------------
     QtObject {
         id: player
@@ -288,6 +298,7 @@ ApplicationWindow {
                 playerView: window.view === "player"
                 current: player.current
                 onBackRequested: window.showGrid()
+                onSectionRequested: (section) => window.showSection(section)
                 onSearchTextChanged: {
                     App.videos.searchText = searchText
                     if (searchText.length > 0 && window.view === "player")
@@ -470,10 +481,15 @@ ApplicationWindow {
             App.videos.setFacet(s < 0 ? arg : arg.slice(0, s), s < 0 ? "" : arg.slice(s + 1))
             return "ok"
         }
-        case "section": App.videos.showSection(arg); return "ok" // library | review | orphans
+        case "section": showSection(arg); return "ok" // library | review | orphans
         case "sort": App.videos.sortMode = arg; return "ok"
         case "fullscreen": setFullscreen(arg !== "off"); return "ok"
         case "sources": controlBar.toggleSources(); return "ok"
+        case "imports": { // imports on|off: the import panel; answers how long opening or closing took, in ms
+            const t0 = Date.now()
+            arg === "off" ? topBar.importPanel.close() : topBar.importPanel.open()
+            return "" + (Date.now() - t0)
+        }
         case "settings": arg === "off" ? settings.close() : settings.open(); return "ok"
         case "retry": App.retryUnmatched(); return "ok"
         case "rescan": App.rescan(); return "ok"

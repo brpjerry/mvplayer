@@ -365,6 +365,29 @@ QVector<TrackInfo> Database::tracksInState(const QStringList &states)
     return out;
 }
 
+QVector<TrackInfo> Database::trackSummariesInState(const QStringList &states)
+{
+    QVector<TrackInfo> out;
+    QSqlQuery q(conn());
+    q.prepare(QStringLiteral("SELECT title, artist, album_artist, state, message FROM tracks "
+                             "WHERE state IN (%1) AND absent = 0 ORDER BY path")
+                  .arg(QStringList(states.size(), QStringLiteral("?")).join(QLatin1Char(','))));
+    for (const QString &s : states)
+        q.addBindValue(s);
+    if (run(q)) {
+        while (q.next()) {
+            TrackInfo t;
+            t.title = q.value(0).toString();
+            t.artist = q.value(1).toString();
+            t.albumArtist = q.value(2).toString();
+            t.state = q.value(3).toString();
+            t.message = q.value(4).toString();
+            out << t;
+        }
+    }
+    return out;
+}
+
 std::optional<TrackInfo> Database::track(qint64 id)
 {
     QSqlQuery q(conn());
