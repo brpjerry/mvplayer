@@ -100,6 +100,7 @@ signals:
     void frameColorChanged();
     void firstFrame();  // the newly loaded file is now on screen
     void endReached();  // playback ran to the end of the file
+    void seeked();      // playback resumed somewhere new: after a seek, or a file's start
     void loadFailed(const QString &reason);
 
 private:

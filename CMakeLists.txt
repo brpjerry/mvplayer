@@ -81,6 +81,7 @@ qt_add_executable(mvplayer
     src/ui/AppController.h src/ui/AppController.cpp
     src/ui/FrameStats.h src/ui/FrameStats.cpp
     src/ui/IdleInhibitor.h src/ui/IdleInhibitor.cpp
+    src/ui/MediaSession.h src/ui/MediaSession.cpp
     src/ui/IpcServer.h src/ui/IpcServer.cpp
     src/ui/YtDlpUpdater.h src/ui/YtDlpUpdater.cpp
     src/ui/WindowFrame.h src/ui/WindowFrame.cpp
@@ -150,6 +151,7 @@ if(WIN32)
     target_link_libraries(mvplayer PRIVATE dwmapi)
 endif()
 if(Qt6DBus_FOUND)
+    target_sources(mvplayer PRIVATE src/ui/Mpris.h src/ui/Mpris.cpp)
     target_link_libraries(mvplayer PRIVATE Qt6::DBus)
     target_compile_definitions(mvplayer PRIVATE MV_HAVE_DBUS)
 endif()

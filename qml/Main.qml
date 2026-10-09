@@ -202,6 +202,7 @@ ApplicationWindow {
             if (!player.next(true))
                 player.stop()
         }
+        function onSeeked() { MediaSession.seeked() }
     }
 
     Binding { target: window.mpv; property: "volume"; value: App.volume }
@@ -212,6 +213,31 @@ ApplicationWindow {
     Binding { target: window.mpv; property: "subtitleOutline"; value: App.subtitleOutline }
     Binding { target: window.mpv; property: "subtitleShadow"; value: App.subtitleShadow }
     Binding { target: IdleInhibitor; property: "active"; value: window.playingNow }
+
+    // ---- Desktop media controls (media keys, panels) ----------------------
+    Binding { target: MediaSession; property: "track"; value: player.current ?? ({}) }
+    Binding { target: MediaSession; property: "playing"; value: window.playingNow }
+    Binding { target: MediaSession; property: "position"; value: window.mpv.position }
+    Binding { target: MediaSession; property: "volume"; value: App.volume }
+    Binding { target: MediaSession; property: "shuffle"; value: player.shuffle }
+    Binding { target: MediaSession; property: "repeatMode"; value: player.repeatMode }
+    Binding { target: MediaSession; property: "canStep"; value: player.queue.length > 1 }
+    Binding { target: MediaSession; property: "fullscreen"; value: window.fullscreen }
+    Connections {
+        target: MediaSession
+        function onPlayRequested() { if (window.mpv.paused) window.togglePause() }
+        function onPauseRequested() { if (!window.mpv.paused) window.togglePause() }
+        function onPlayPauseRequested() { window.togglePause() }
+        function onStopRequested() { player.stop() }
+        function onNextRequested() { player.next(false) }
+        function onPreviousRequested() { player.previous() }
+        function onSeekRequested(seconds) { window.mpv.seek(seconds, true) }
+        function onVolumeRequested(volume) { App.volume = volume }
+        function onShuffleRequested(shuffle) { player.shuffle = shuffle }
+        function onRepeatModeRequested(mode) { player.repeatMode = mode }
+        function onFullscreenRequested(fullscreen) { window.setFullscreen(fullscreen) }
+        function onRaiseRequested() { window.raise(); window.requestActivate() }
+    }
 
     // ---- Accent colour -----------------------------------------------------
     // Either the colour chosen in Settings, or ("auto") one that follows the

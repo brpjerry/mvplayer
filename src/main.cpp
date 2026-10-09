@@ -2,6 +2,7 @@
 #include "ui/FrameStats.h"
 #include "ui/IdleInhibitor.h"
 #include "ui/IpcServer.h"
+#include "ui/MediaSession.h"
 #include "ui/MpvItem.h"
 #include "ui/PointerPacer.h"
 #include "ui/WindowFrame.h"
@@ -77,6 +78,7 @@ int main(int argc, char **argv)
     FrameStats frameStats;
     frameStats.setVisible(parser.isSet(QStringLiteral("fps")));
     IdleInhibitor idleInhibitor;
+    MediaSession mediaSession;
     YtDlpUpdater ytDlpUpdater;
     WindowFrame windowFrame;
     PointerPacer pointerPacer;
@@ -86,6 +88,7 @@ int main(int argc, char **argv)
     qmlRegisterSingletonInstance(uri, 1, 0, "App", &controller);
     qmlRegisterSingletonInstance(uri, 1, 0, "FrameStats", &frameStats);
     qmlRegisterSingletonInstance(uri, 1, 0, "IdleInhibitor", &idleInhibitor);
+    qmlRegisterSingletonInstance(uri, 1, 0, "MediaSession", &mediaSession);
     qmlRegisterSingletonInstance(uri, 1, 0, "YtDlpUpdater", &ytDlpUpdater);
     qmlRegisterSingletonInstance(uri, 1, 0, "WindowFrame", &windowFrame);
     qmlRegisterAnonymousType<VideoFilterModel>(uri, 1);
