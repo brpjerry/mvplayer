@@ -702,6 +702,64 @@ void ImportManager::removeUntracked(const VideoInfo &v)
     emit videoRemoved(v.id);
 }
 
+bool ImportManager::dropBrokenVideos(const TrackInfo &track)
+{
+    // A machine that goes down before a new file's data is written out can
+    // leave the file empty. Such a video has nothing a re-import could judge
+    // and nothing to watch: it leaves the library, and its upload is found
+    // and brought in again like any other.
+    const std::optional<VideoInfo> own = track.videoId > 0 ? m_db->video(track.videoId) : std::nullopt;
+    if (!own)
+        return false;
+    const QVector<VideoInfo> videos = own->review ? m_db->reviewOptions(own->reviewGroup > 0 ? own->reviewGroup : own->id)
+                                                  : QVector<VideoInfo>{*own};
+    QVector<VideoInfo> intact, broken;
+    for (const VideoInfo &v : videos)
+        (QFileInfo(v.path).size() > 0 ? intact : broken).append(v);
+    QVector<qint64> orphaned;
+    bool dropped = false;
+    for (const VideoInfo &v : std::as_const(broken)) {
+        if (!claimVideo(v.ytId))
+            break; // cancelled
+        const bool missing = !QFile::exists(v.path);
+        const QVector<TrackInfo> holders = m_db->tracksForVideo(v.id);
+        // Its tracks keep the options that are left; with none left they
+        // have no video (the database unlinks them).
+        if (!intact.isEmpty())
+            m_db->relinkTracks(v.id, intact.first().id);
+        m_db->removeVideo(v.id);
+        removeVideoFiles(v);
+        releaseVideo(v.ytId);
+        dropped = true;
+        if (intact.isEmpty()) {
+            for (const TrackInfo &t : holders) {
+                if (t.id != track.id && (track.recording <= 0 || t.recording != track.recording))
+                    orphaned << t.id;
+            }
+        }
+        qInfo().noquote() << QStringLiteral("[import] “%1” [%2]: deleted “%3”, whose file is %4")
+                                 .arg(track.title, track.album, v.ytTitle, missing ? QStringLiteral("missing") : QStringLiteral("empty"));
+        appendLog({{QStringLiteral("event"), QStringLiteral("broken-video")}, {QStringLiteral("videoId"), v.id},
+                   {QStringLiteral("id"), v.ytId}, {QStringLiteral("title"), v.ytTitle}, {QStringLiteral("review"), v.review},
+                   {QStringLiteral("file"), missing ? QStringLiteral("missing") : QStringLiteral("empty")},
+                   {QStringLiteral("trackId"), track.id}, {QStringLiteral("track"), track.title}});
+        emit videoRemoved(v.id);
+    }
+    if (!orphaned.isEmpty()) {
+        // Other tracks that had only this video look for one again.
+        for (qint64 id : std::as_const(orphaned))
+            m_db->setTrackReimport(id);
+        QMetaObject::invokeMethod(this, [this] {
+            if (!m_started)
+                return;
+            for (const TrackInfo &t : m_db->pendingRecordings())
+                enqueue(t.id);
+            pump();
+        }, Qt::QueuedConnection);
+    }
+    return dropped;
+}
+
 int ImportManager::deleteUntracked()
 {
     // Not while tracks are being looked up or the folders are being read:
@@ -1670,12 +1728,17 @@ void ImportManager::releaseVideo(const QString &ytId)
 
 void ImportManager::runJob(qint64 trackId, const ImportSettings &cfg)
 {
-    const std::optional<TrackInfo> maybe = m_db->track(trackId);
+    std::optional<TrackInfo> maybe = m_db->track(trackId);
     if (!maybe || maybe->state != QLatin1String("pending") || maybe->absent)
         return;
-    const TrackInfo track = *maybe;
     if (m_blocked)
         return; // stays pending; picked up again when the pause ends
+    if (maybe->reimport && dropBrokenVideos(*maybe)) {
+        maybe = m_db->track(trackId);
+        if (!maybe)
+            return;
+    }
+    const TrackInfo track = *maybe;
 
     QElapsedTimer clock;
     clock.start();

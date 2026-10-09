@@ -4,6 +4,7 @@
 #include <QDir>
 #include <QElapsedTimer>
 #include <QFile>
+#include <QFileInfo>
 #include <QProcess>
 #include <QSocketNotifier>
 #include <QStandardPaths>
@@ -228,6 +229,40 @@ ProcResult runProcess(const QString &program, const QStringList &args, const Pro
         opts.onLine(lineBuf);
     res.exitCode = p.exitStatus() == QProcess::NormalExit ? p.exitCode() : -1;
     return res;
+}
+
+bool replaceFile(const QString &from, const QString &to)
+{
+    // Removing `to` first and renaming afterwards loses both files when the
+    // machine goes down before the new data is written out (with laptop
+    // power settings that can be a minute or two): the removal is on disk,
+    // the new file's contents are not, and what remains is an empty file.
+#ifdef Q_OS_WIN
+    const std::wstring src = QDir::toNativeSeparators(from).toStdWString();
+    const std::wstring dst = QDir::toNativeSeparators(to).toStdWString();
+    const HANDLE h = ::CreateFileW(src.c_str(), GENERIC_WRITE, 0, nullptr, OPEN_EXISTING, FILE_ATTRIBUTE_NORMAL, nullptr);
+    if (h == INVALID_HANDLE_VALUE)
+        return false;
+    const bool flushed = ::FlushFileBuffers(h);
+    ::CloseHandle(h);
+    return flushed && ::MoveFileExW(src.c_str(), dst.c_str(), MOVEFILE_REPLACE_EXISTING | MOVEFILE_WRITE_THROUGH);
+#else
+    const QByteArray src = QFile::encodeName(from);
+    const int fd = ::open(src.constData(), O_RDONLY | O_CLOEXEC);
+    if (fd < 0)
+        return false;
+    const bool synced = ::fsync(fd) == 0;
+    ::close(fd);
+    if (!synced || ::rename(src.constData(), QFile::encodeName(to).constData()) != 0)
+        return false;
+    // And the rename itself.
+    const int dir = ::open(QFile::encodeName(QFileInfo(to).absolutePath()).constData(), O_RDONLY | O_DIRECTORY | O_CLOEXEC);
+    if (dir >= 0) {
+        ::fsync(dir);
+        ::close(dir);
+    }
+    return true;
+#endif
 }
 
 QString sanitizeFileName(const QString &name, int maxLen)

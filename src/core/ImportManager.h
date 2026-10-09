@@ -144,6 +144,9 @@ private:
     void enqueue(qint64 trackId);
     // Deletes an untracked video with what is kept beside it.
     void removeUntracked(const VideoInfo &v);
+    // Re-import: deletes the track's videos (its own, or the options it has
+    // waiting) whose file is empty or missing. True when there were any.
+    bool dropBrokenVideos(const TrackInfo &track);
     void pump();
     void onScanFinished(const LibraryScanner::Result &r);
     void onJobFinished(qint64 trackId);
