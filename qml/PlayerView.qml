@@ -123,7 +123,9 @@ Item {
     property bool posterShown: false
     property int posterHint: 0
     property string pendingPath: ""
-    readonly property bool loading: pendingPath !== ""
+    property bool awaitingFrame: false // opened, its first frame not up yet
+    // Until then the frozen previous video is no pause to anyone outside.
+    readonly property bool loading: pendingPath !== "" || awaitingFrame
     readonly property bool settling: motion.running || posterFade.running
 
     function beginLoad(path) {
@@ -138,11 +140,13 @@ Item {
         if (pendingPath === "" || settling)
             return
         const path = pendingPath
+        awaitingFrame = true
         pendingPath = ""
         mpvItem.load(path)
     }
     function cancelLoad() {
         pendingPath = ""
+        awaitingFrame = false
     }
     onSettlingChanged: flushLoad()
 
@@ -153,7 +157,10 @@ Item {
     }
     Connections {
         target: mpvItem
-        function onFirstFrame() { reveal.restart() }
+        function onFirstFrame() {
+            root.awaitingFrame = false
+            reveal.restart()
+        }
     }
 
     // ---- Pointer activity (fullscreen auto-hide) ---------------------------

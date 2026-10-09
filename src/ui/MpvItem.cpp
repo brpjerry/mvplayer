@@ -556,7 +556,14 @@ void MpvItem::drainEvents()
         case MPV_EVENT_FILE_LOADED:
             refreshTracks();
             break;
-        case MPV_EVENT_PLAYBACK_RESTART:
+        case MPV_EVENT_PLAYBACK_RESTART: {
+            // The new time-pos may still be queued behind this event; listeners
+            // of seeked() want it now.
+            double pos = 0;
+            if (mpv_get_property(m_core->mpv, "time-pos", MPV_FORMAT_DOUBLE, &pos) >= 0 && pos != m_position) {
+                m_position = pos;
+                emit positionChanged();
+            }
             if (m_awaitingFirstFrame) {
                 m_awaitingFirstFrame = false;
                 emit firstFrame();
@@ -564,7 +571,9 @@ void MpvItem::drainEvents()
                 // After a seek the picture is somewhere else entirely.
                 QTimer::singleShot(150, this, &MpvItem::requestSample);
             }
+            emit seeked();
             break;
+        }
         case MPV_EVENT_END_FILE: {
             const auto *ef = static_cast<const mpv_event_end_file *>(e->data);
             if (ef->reason == MPV_END_FILE_REASON_ERROR) {

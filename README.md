@@ -392,6 +392,11 @@ command.
   between colours, so cuts do not make the interface flicker. Black, white
   and grey frames give a neutral accent (light grey to white on dark, dark
   grey to black on light).
+- On Linux the playing video is offered to the desktop's media controls
+  (MPRIS): media keys, `playerctl`, panel and lock-screen widgets show it and
+  can play, pause, skip, seek and change the volume, shuffle and repeat. The
+  app shows up there only while a video is loaded, so when idle it leaves the
+  media keys to other players.
 
 ## Keys
 
@@ -436,6 +441,8 @@ Platform-specific code is confined to:
   Ctrl+C and logout, console output, and where the helper programs are found.
 - `src/ui/IdleInhibitor.cpp`: keeping the screen awake (D-Bus on Linux,
   `SetThreadExecutionState` on Windows).
+- `src/ui/MediaSession.cpp`: the desktop's media controls, MPRIS on Linux
+  (`src/ui/Mpris.cpp`); Windows would need System Media Transport Controls.
 - `src/ui/SystemTheme.cpp`: the desktop portal's dark/light preference, with
   Qt's own as the fallback.
 - `src/ui/MpvItem.cpp`: the native-display hand-off to mpv.
