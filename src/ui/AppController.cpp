@@ -849,7 +849,7 @@ QVariantList AppController::unmatchedTracks() const
     QVariantList out;
     if (!m_db)
         return out;
-    const QVector<TrackInfo> tracks = m_db->tracksInState(
+    const QVector<TrackInfo> tracks = m_db->trackSummariesInState(
         {QStringLiteral("not_found"), QStringLiteral("failed"), QStringLiteral("skipped")});
     for (const TrackInfo &t : tracks) {
         out << QVariantMap{
