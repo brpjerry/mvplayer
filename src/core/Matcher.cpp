@@ -334,6 +334,20 @@ bool Matcher::isOwnChannel(const TrackInfo &track, const QString &channel)
     return rest.trimmed().isEmpty();
 }
 
+bool Matcher::namesTitle(const TrackInfo &track, const QString &videoTitle)
+{
+    // What an upload says in brackets is about the title, not the title:
+    // "Twelve (「十二」English Ver.)" is the upload of "Twelve", and mentions
+    // the song it is the English version of.
+    static const QRegularExpression aside(QStringLiteral("[(（][^()（）]*[)）]"));
+    QString named = videoTitle;
+    named.remove(aside).remove(aside);
+    // Both run from space to space: whole words, and whole runs of a script
+    // written without spaces.
+    const QString title = tokens(track.title);
+    return title.trimmed().size() >= 2 && tokens(named).contains(title);
+}
+
 bool Matcher::namesArtist(const TrackInfo &track, const QString &videoTitle, const QString &channel)
 {
     const QString ct = tokens(videoTitle), ch = tokens(channel);

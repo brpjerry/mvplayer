@@ -41,6 +41,11 @@ public:
     void setTrackAbsent(qint64 id, bool absent);
     // Records the outcome of a lookup, for every file of the track's recording.
     void setTrackResult(qint64 id, const QString &state, qint64 videoId, const QString &message);
+    // The track's recording has no video any more and waits for a lookup:
+    // it let go of one it had, or waited on, without a verdict of its own.
+    void unlinkTrack(qint64 id);
+    // The track's recording waits on, or has, this video; its state stays.
+    void linkTrack(qint64 id, qint64 videoId);
     // Starts a recording of its own for the track.
     void setRecording(qint64 trackId, qint64 recording);
     // Makes the track one more file of the recording `memberId` belongs to.

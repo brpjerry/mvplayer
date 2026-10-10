@@ -435,6 +435,7 @@ ApplicationWindow {
     Shortcut { sequence: "Up"; enabled: !window.typing; onActivated: App.volume = Math.min(1, App.volume + 0.05) }
     Shortcut { sequence: "Down"; enabled: !window.typing; onActivated: App.volume = Math.max(0, App.volume - 0.05) }
     Shortcut { sequence: "M"; enabled: !window.typing; onActivated: App.muted = !App.muted }
+    Shortcut { sequence: controlBar.audioKey; enabled: !window.typing; onActivated: controlBar.switchAudio() }
     Shortcut { sequence: "F"; enabled: !window.typing; onActivated: window.setFullscreen(!window.fullscreen) }
     Shortcut { sequence: "N"; enabled: !window.typing; onActivated: player.next(false) }
     Shortcut { sequence: "P"; enabled: !window.typing; onActivated: player.previous() }
@@ -475,6 +476,7 @@ ApplicationWindow {
         case "stop": player.stop(); return "ok"
         case "seek": mpv.seek(parseFloat(arg), true); return "ok"
         case "audio": mpv.audioTrack = parseInt(arg); return "ok"
+        case "switch-audio": controlBar.switchAudio(); return "ok" // as the key on the chip does
         case "search": topBar.searchText = arg; return "ok"
         case "facet": {
             const s = arg.indexOf(" ")

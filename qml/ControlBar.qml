@@ -40,6 +40,13 @@ Rectangle {
     }
     // What a video under review is playing right now; empty otherwise.
     readonly property string reviewLabel: audioSwitch.reviewing ? chipLabel.text : ""
+    // The key that changes between the library's audio and YouTube's, as the
+    // chip shows it; the window binds it.
+    readonly property string audioKey: "A"
+    function switchAudio() {
+        if (audioSwitch.available)
+            mpv.audioTrack = audioSwitch.library ? 2 : 1
+    }
     // How long the track of a video under review is: the seek bar has the
     // video's length, and a video much shorter than its track is a cut.
     readonly property string trackLength: current !== null && current.review === true ? App.trackLength(current.videoId) : ""
@@ -237,21 +244,18 @@ Rectangle {
         anchors.verticalCenter: parent.verticalCenter
         spacing: 6
 
-        // Videos with library audio muxed in keep YouTube's track as well.
+        // Videos with library audio muxed in keep YouTube's track as well:
+        // the chip says which of the two plays, and a click or the key on
+        // it changes over. That is how a video under review is judged: the
+        // track's audio against the upload's own, at the same place.
         Item {
             id: audioSwitch
             anchors.verticalCenter: parent.verticalCenter
             readonly property bool available: root.hasMedia && root.mpv.audioTracks.length > 1
-            // A video under review plays a third stream that changes source
-            // every ten seconds: YouTube's audio first, then the library's,
-            // wherever the track reaches.
-            readonly property bool reviewing: root.mpv.audioTracks.length > 2 && root.mpv.audioTrack === 3
-                                              && root.current !== null && root.current.review === true
-            readonly property bool reviewLibrary: reviewing && Math.floor(root.mpv.position / 10) % 2 === 1
-                                                  && root.mpv.position >= root.current.reviewStart
-                                                  && root.mpv.position < root.current.reviewEnd
-            readonly property bool library: reviewing ? reviewLibrary : root.mpv.audioTrack <= 1
-            width: available ? chipLabel.implicitWidth + 22 : 0
+            readonly property bool reviewing: available && root.current !== null && root.current.review === true
+            readonly property bool library: root.mpv.audioTrack <= 1
+            readonly property color ink: library ? Theme.accentHi : Theme.textDim
+            width: available ? chipRow.implicitWidth + 20 : 0
             height: 26
             opacity: available ? 1 : 0
             visible: opacity > 0
@@ -270,16 +274,40 @@ Rectangle {
                     Behavior on color { ColorAnimation { duration: Theme.normal } }
                     Behavior on border.color { ColorAnimation { duration: Theme.fast } }
                 }
-                Text {
-                    id: chipLabel
+                Row {
+                    id: chipRow
                     anchors.centerIn: parent
-                    text: audioSwitch.reviewing ? (audioSwitch.reviewLibrary ? "Library audio (FLAC)" : "YouTube audio")
-                        : audioSwitch.library ? (root.current && root.current.audioDetail ? root.current.audioDetail : "Library audio")
-                                              : "YouTube audio"
-                    color: audioSwitch.library ? Theme.accentHi : Theme.textDim
-                    font.pixelSize: 11
-                    font.weight: Font.DemiBold
-                    font.letterSpacing: 0.2
+                    spacing: 7
+                    Text {
+                        id: chipLabel
+                        anchors.verticalCenter: parent.verticalCenter
+                        readonly property string detail: root.current && root.current.audioDetail ? root.current.audioDetail : ""
+                        text: !audioSwitch.library ? "YouTube audio"
+                            : audioSwitch.reviewing ? "Library audio" + (detail ? " (" + detail + ")" : "")
+                            : detail ? detail : "Library audio"
+                        color: audioSwitch.ink
+                        font.pixelSize: 11
+                        font.weight: Font.DemiBold
+                        font.letterSpacing: 0.2
+                    }
+                    // The key that changes over
+                    Rectangle {
+                        anchors.verticalCenter: parent.verticalCenter
+                        width: Math.max(16, keyLabel.implicitWidth + 8)
+                        height: 16
+                        radius: 4
+                        color: "transparent"
+                        border.width: 1
+                        border.color: Qt.rgba(audioSwitch.ink.r, audioSwitch.ink.g, audioSwitch.ink.b, 0.55)
+                        Text {
+                            id: keyLabel
+                            anchors.centerIn: parent
+                            text: root.audioKey
+                            color: audioSwitch.ink
+                            font.pixelSize: 10
+                            font.weight: Font.DemiBold
+                        }
+                    }
                 }
             }
             MouseArea {
@@ -287,16 +315,11 @@ Rectangle {
                 anchors.fill: parent
                 hoverEnabled: true
                 cursorShape: Qt.PointingHandCursor
-                onClicked: {
-                    if (root.mpv.audioTracks.length > 2)
-                        root.mpv.audioTrack = root.mpv.audioTrack % 3 + 1 // review stream, library, YouTube
-                    else
-                        root.mpv.audioTrack = audioSwitch.library ? 2 : 1
-                }
+                onClicked: root.switchAudio()
             }
             Tooltip {
-                text: audioSwitch.reviewing ? "Alternating every 10 s between YouTube's audio and your library's · click for one of them"
-                    : audioSwitch.library ? "Your library's audio · click for YouTube's" : "YouTube's audio · click for your library's"
+                text: audioSwitch.library ? "Your library's audio · click or press " + root.audioKey + " for YouTube's"
+                                          : "YouTube's audio · click or press " + root.audioKey + " for your library's"
                 shown: chipMouse.containsMouse
             }
         }

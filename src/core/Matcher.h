@@ -39,6 +39,12 @@ bool isTalkTitle(const QString &title);
 // is, an upload that names none of them is not taken for the track's.
 bool namesArtist(const TrackInfo &track, const QString &videoTitle, const QString &channel);
 
+// Whether an upload's title carries the track's title, word for word and
+// outside brackets. The same song under two titles (the original and its
+// English version) has an upload for each, and the title is what tells them
+// apart.
+bool namesTitle(const TrackInfo &track, const QString &videoTitle);
+
 // Whether a channel is the artist's own: the artist's name and nothing else
 // but "official", "channel" and the like. "Artist Latino" and "We love
 // Artist" are somebody else's.

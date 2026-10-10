@@ -1,0 +1,791 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>MV Player import rules</title>
+<style>
+/* Layout: one column of decision trees, one per stage of a lookup, read top to
+   bottom; every rule has an id (A1, D3.2 …) to point at. Colours are the
+   app's own (qml/Theme.qml), so an outcome here looks like it does there. */
+:root {
+  --bg: #f5f6f8; --surface: #eceef2; --raised: #ffffff; --line: #d9dce3; --rail: #b9bec9;
+  --text: #15171b; --dim: #555c69; --faint: #878e9b;
+  --accent: #5a49d6; --accent-soft: #e6e2fb;
+  --good: #167a55; --good-soft: #d9f1e7;
+  --warn: #8a5a08; --warn-soft: #f8ebcf;
+  --bad: #b83232; --bad-soft: #f8dede;
+  --none: #555c69; --none-soft: #e2e5eb;
+  --sans: ui-sans-serif, system-ui, "Segoe UI", "Noto Sans", "Noto Sans CJK JP", "Hiragino Sans", sans-serif;
+  --mono: ui-monospace, "JetBrains Mono", "Cascadia Code", "SF Mono", Menlo, Consolas, monospace;
+  color-scheme: light;
+}
+@media (prefers-color-scheme: dark) {
+  :root:not([data-theme="light"]) {
+    --bg: #0c0d10; --surface: #121419; --raised: #191c22; --line: #262a33; --rail: #3a404d;
+    --text: #eef0f4; --dim: #9ba2af; --faint: #6f7684;
+    --accent: #a99eff; --accent-soft: #25213f;
+    --good: #4fd6a2; --good-soft: #12362a;
+    --warn: #f2b866; --warn-soft: #3a2c12;
+    --bad: #ff8a8a; --bad-soft: #401b1b;
+    --none: #9ba2af; --none-soft: #1f232b;
+    color-scheme: dark;
+  }
+}
+:root[data-theme="dark"] {
+  --bg: #0c0d10; --surface: #121419; --raised: #191c22; --line: #262a33; --rail: #3a404d;
+  --text: #eef0f4; --dim: #9ba2af; --faint: #6f7684;
+  --accent: #a99eff; --accent-soft: #25213f;
+  --good: #4fd6a2; --good-soft: #12362a;
+  --warn: #f2b866; --warn-soft: #3a2c12;
+  --bad: #ff8a8a; --bad-soft: #401b1b;
+  --none: #9ba2af; --none-soft: #1f232b;
+  color-scheme: dark;
+}
+
+* { box-sizing: border-box; }
+html { scroll-behavior: smooth; }
+body {
+  margin: 0; padding-block: 2.5rem 5rem; padding-inline: 1.25rem;
+  background: var(--bg); color: var(--text);
+  font: 15px/1.5 var(--sans);
+}
+main { max-width: 68rem; margin-inline: auto; display: flex; flex-direction: column; gap: 3rem; }
+a { color: var(--accent); text-decoration-thickness: 1px; text-underline-offset: 2px; }
+a:focus-visible, summary:focus-visible { outline: 2px solid var(--accent); outline-offset: 2px; border-radius: 3px; }
+code, .num, .id { font-family: var(--mono); }
+code { font-size: .86em; color: var(--dim); }
+
+/* ---- page head ---- */
+.head { display: flex; flex-direction: column; gap: .9rem; }
+.head h1 { margin: 0; font-size: 2rem; line-height: 1.15; letter-spacing: -.01em; text-wrap: balance; }
+.head p { margin: 0; max-width: 65ch; color: var(--dim); }
+.stamp { font: 12px/1.4 var(--mono); color: var(--faint); }
+
+.legend { display: flex; flex-wrap: wrap; gap: .5rem 1.1rem; align-items: center; font-size: 13px; color: var(--dim); }
+.legend span { display: inline-flex; align-items: center; gap: .4rem; }
+
+/* ---- the stages, in order ---- */
+.flow { display: flex; flex-wrap: wrap; gap: .5rem; padding: 0; margin: 0; list-style: none; counter-reset: none; }
+.flow li { display: flex; align-items: center; gap: .5rem; }
+.flow li + li::before { content: "→"; color: var(--faint); }
+.flow.aside { margin-top: .5rem; }
+.flow.aside li + li::before { content: none; }   /* beside the lookup, not steps of it */
+.flow a {
+  display: flex; gap: .5rem; align-items: baseline; padding: .4rem .7rem;
+  background: var(--raised); border: 1px solid var(--line); border-radius: 6px;
+  color: var(--text); text-decoration: none; font-size: 13.5px;
+}
+.flow a:hover { border-color: var(--accent); }
+.flow b { font-family: var(--mono); color: var(--accent); font-weight: 600; }
+
+/* ---- a stage ---- */
+section { display: flex; flex-direction: column; gap: 1rem; scroll-margin-top: 1rem; }
+section > header { display: flex; flex-direction: column; gap: .35rem; border-top: 1px solid var(--line); padding-top: 1.25rem; }
+section h2 { margin: 0; font-size: 1.3rem; line-height: 1.25; display: flex; gap: .6rem; align-items: baseline; text-wrap: balance; }
+section h2 .tag { font-family: var(--mono); color: var(--accent); font-weight: 600; }
+section h3 { margin: .75rem 0 0; font-size: 1rem; }
+section > header p, .lede { margin: 0; max-width: 70ch; color: var(--dim); }
+.where { font: 12px/1.4 var(--mono); color: var(--faint); }
+
+/* ---- the trees ----
+   ul.tree: a node's children hang from a rail on the left. Each child is a
+   row: [id] [when …] → [what happens] [why]. A child that asks a further
+   question carries its own ul. */
+.scroll { overflow-x: auto; }
+.tree, .tree ul { list-style: none; margin: 0; padding: 0; }
+.tree { min-width: 30rem; }
+.tree ul { margin-left: .55rem; padding-left: 1.35rem; }
+.tree li { position: relative; padding: .28rem 0; scroll-margin-top: 1rem; }
+.tree ul > li::before {            /* the elbow into this row */
+  content: ""; position: absolute; left: -1.35rem; top: 1.02rem; width: 1.05rem;
+  border-top: 1.5px solid var(--rail);
+}
+.tree ul > li::after {             /* the rail past this row */
+  content: ""; position: absolute; left: -1.35rem; top: -.28rem; bottom: 0;
+  border-left: 1.5px solid var(--rail);
+}
+.tree ul > li:last-child::after { bottom: auto; height: 1.3rem; }
+.tree li:target > .row { outline: 2px solid var(--accent); outline-offset: 3px; border-radius: 4px; }
+
+.row { display: flex; flex-wrap: wrap; align-items: baseline; gap: .3rem .5rem; min-height: 1.5rem; }
+.id { font-size: 11.5px; color: var(--faint); min-width: 2.3rem; text-decoration: none; }
+a.id:hover { color: var(--accent); }
+.when { color: var(--text); }
+.when::after { content: "→"; color: var(--faint); margin-left: .5rem; }
+.when.last::after { content: none; }
+/* the reason, always on its own line under the row, at a readable width */
+.why { color: var(--dim); font-size: 13.5px; flex: 0 0 100%; padding-right: max(0px, calc(100% - 44rem)); }
+.row:has(> .id) > .why { padding-left: 2.8rem; padding-right: max(0px, calc(100% - 46.8rem)); }
+.num { font-size: .86em; font-weight: 600; background: var(--surface); border: 1px solid var(--line); border-radius: 4px; padding: 0 .3em; white-space: nowrap; }
+
+/* what a row comes to */
+.q, .out { display: inline-block; padding: .08rem .55rem; border-radius: 5px; font-weight: 600; font-size: 13.5px; line-height: 1.45; }
+.q { background: var(--raised); border: 1.5px solid var(--text); border-radius: 2px; }
+.q.order::after { content: " — first that applies"; font-weight: 400; color: var(--dim); }
+.out { border: 1.5px solid transparent; }
+.out.ok { background: var(--good-soft); color: var(--good); border-color: var(--good); }
+.out.review { background: var(--warn-soft); color: var(--warn); border-color: var(--warn); }
+.out.no { background: var(--bad-soft); color: var(--bad); border-color: var(--bad); }
+.out.none { background: var(--none-soft); color: var(--none); border-color: var(--rail); }
+.out.later { background: var(--accent-soft); color: var(--accent); border-color: var(--accent); }
+.out.go { background: transparent; color: var(--text); border: 1.5px dashed var(--rail); font-weight: 500; }
+.out.go a { color: inherit; }
+
+/* a definition several trees lean on */
+.defs { display: grid; grid-template-columns: repeat(auto-fit, minmax(19rem, 1fr)); gap: 1rem; }
+.def { background: var(--raised); border: 1px solid var(--line); border-radius: 8px; padding: .9rem 1rem; min-width: 0; scroll-margin-top: 1rem; }
+.def:target { border-color: var(--accent); }
+.def h3 { margin: 0 0 .4rem; font-size: .95rem; display: flex; gap: .5rem; align-items: baseline; }
+.def h3 .id { color: var(--accent); min-width: 0; font-size: 12.5px; }
+.def p { margin: 0 0 .4rem; color: var(--dim); font-size: 13.5px; }
+.def ul { margin: 0; padding-left: 1.1rem; font-size: 13.5px; display: flex; flex-direction: column; gap: .2rem; }
+
+table { border-collapse: collapse; width: 100%; font-size: 13.5px; }
+th, td { text-align: left; padding: .4rem .7rem .4rem 0; border-bottom: 1px solid var(--line); vertical-align: top; }
+th { color: var(--faint); font-weight: 600; font-size: 12px; text-transform: uppercase; letter-spacing: .05em; }
+td.n { font-family: var(--mono); font-variant-numeric: tabular-nums; white-space: nowrap; font-weight: 600; }
+td code { white-space: nowrap; }
+.words { color: var(--dim); font-size: 13px; line-height: 1.7; max-width: 100ch; }
+.words b { color: var(--text); font-weight: 600; }
+
+/* ---- a proposed change, drawn like a diff ----
+   Only ever in docs/import-rules.proposed.html (see CLAUDE.md): additions in
+   green, removals in red and left in place. The report itself carries none. */
+[hidden] { display: none !important; }
+.proposal { margin: 0; padding: .6rem .8rem; border: 1.5px solid var(--accent); border-radius: 6px; background: var(--accent-soft); color: var(--text); max-width: none; }
+ins, del { border-radius: 3px; padding: 0 .2em; }
+ins { background: var(--good-soft); color: var(--good); text-decoration: none; }
+del { background: var(--bad-soft); color: var(--bad); text-decoration: line-through; }
+.tree li.added .row, .def.added, tr.added > td { background: var(--good-soft); }
+.tree li.removed .row, .def.removed, tr.removed > td { background: var(--bad-soft); text-decoration: line-through; text-decoration-color: var(--bad); }
+.tree li.added .row, .tree li.removed .row { border-radius: 4px; padding-inline: .3rem; }
+.def.added { border-color: var(--good); }
+.def.removed { border-color: var(--bad); }
+
+@media (max-width: 40rem) {
+  body { font-size: 14px; }
+  .row:has(> .id) > .why { padding-left: 0; }
+  .id { min-width: 0; }
+}
+@media (prefers-reduced-motion: reduce) { html { scroll-behavior: auto; } }
+@media print { body { background: #fff; } .tree li { break-inside: avoid; } }
+</style>
+</head>
+<body>
+<main>
+
+<div class="head">
+  <h1>MV Player import rules</h1>
+  <p>How a track in the music folders comes to have a music video, to wait for your verdict on one, or to have none. One decision tree per stage of a lookup. This page is the reference, and a rule changes here first. A change is proposed in a copy of this page, additions in green and removals in red; once it is approved the marks come off, it becomes this page, and the code in <code>src/core</code> follows. Where the two disagree, that is a bug in one of them.</p>
+  <p class="proposal" hidden>Proposed changes to the rules: <ins>additions</ins> and <del>removals</del>. Not approved yet; the code has not changed.</p>
+  <div class="stamp">Transcribed from the code on 2026-10-10 · every rule names where it lives · ids (A2, D5.4) are stable, for pointing at</div>
+  <div class="legend" aria-label="Legend">
+    <span><span class="q">A question</span> its answers hang below</span>
+    <span><span class="out ok">has its video</span></span>
+    <span><span class="out review">waits for your verdict</span></span>
+    <span><span class="out no">this upload is out</span></span>
+    <span><span class="out none">the track has no video</span></span>
+    <span><span class="out later">decided later</span></span>
+    <span><span class="out go">goes on to …</span></span>
+  </div>
+</div>
+
+<nav aria-label="Stages of a lookup">
+  <ol class="flow">
+    <li><a href="#A"><b>A</b> Is the track looked up?</a></li>
+    <li><a href="#B"><b>B</b> Search</a></li>
+    <li><a href="#C"><b>C</b> On sight</a></li>
+    <li><a href="#D"><b>D</b> Listening</a></li>
+    <li><a href="#E"><b>E</b> What the track gets</a></li>
+    <li><a href="#F"><b>F</b> Bringing it in</a></li>
+    <li><a href="#G"><b>G</b> Your verdict</a></li>
+  </ol>
+  <ul class="flow aside">
+    <li><a href="#R"><b>R</b> Definitions</a></li>
+    <li><a href="#H"><b>H</b> Re-import</a></li>
+    <li><a href="#I"><b>I</b> Requests and pauses</a></li>
+    <li><a href="#J"><b>J</b> Replacing by hand</a></li>
+    <li><a href="#N"><b>N</b> Numbers and word lists</a></li>
+  </ul>
+</nav>
+
+<!-- ===================================================================== A -->
+<section id="A">
+  <header>
+    <h2><span class="tag">A</span> Is the track looked up at all?</h2>
+    <p>Asked of every file found in the music folders, and again when a lookup starts.</p>
+    <div class="where">LibraryScanner::scan · AudioPrint::sameRecording · Matcher::isNonMvTrack · Matcher::isTalkTitle · TalkCheck::measure</div>
+  </header>
+  <div class="scroll">
+  <ul class="tree">
+    <li><div class="row"><span class="q order">A file in the music folders</span></div>
+      <ul>
+        <li id="A1"><div class="row"><a class="id" href="#A1">A1</a><span class="when">It sounds like a recording already known</span><span class="out go">one more file of that recording</span>
+          <span class="why">Fingerprints differ in under <span class="num">12%</span> of their bits and the lengths are within <span class="num">5 s</span>. The files share one lookup and one video; the best of them (lossless, then bitrate, then the one known longest) is the one listened to and the one whose tags the video carries. A file at a new place with the same content keeps what was known about it.</span></div></li>
+        <li id="A2"><div class="row"><a class="id" href="#A2">A2</a><span class="when">Shorter than <span class="num">1:20</span></span><span class="out none">skipped</span>
+          <span class="why">A jingle, a skit, an interlude. A show's opening cut of a song ("TV size", about 1:30) stays in.</span></div></li>
+        <li id="A3"><div class="row"><a class="id" href="#A3">A3</a><span class="when">Its title marks an audio-only variant</span><span class="out none">skipped</span>
+          <span class="why">instrumental, inst, off vocal, offvocal, karaoke, カラオケ, backing track. "TV size" is not one of them.</span></div></li>
+        <li id="A4"><div class="row"><a class="id" href="#A4">A4</a><span class="when">Its title says talk <em>and</em> it sounds like talk</span><span class="out none">skipped</span>
+          <span class="why">Title: MC, talk, interview, commentary, voice drama and the like, as the whole title ("MC06", "Talk 2") or a tag at its end ("… (MC)"). Sound: at least <span class="num">40%</span> of moments far quieter than its average, and a pulse of at most <span class="num">0.26</span>. Either alone is not enough.</span></div></li>
+        <li id="A5"><div class="row"><a class="id" href="#A5">A5</a><span class="when">Otherwise</span><span class="out go"><a href="#B">searched for: B</a></span></div></li>
+      </ul>
+    </li>
+  </ul>
+  </div>
+
+  <h3>When it is looked up again</h3>
+  <div class="scroll">
+  <ul class="tree">
+    <li><div class="row"><span class="q">How the last lookup ended</span></div>
+      <ul>
+        <li id="A6"><div class="row"><a class="id" href="#A6">A6</a><span class="when">No video found</span><span class="out later">again after 14 days</span>
+          <span class="why">Or at once with "Retry tracks without a video". A recording whose files carry several titles (original script and romanised) is searched under each title that has not been tried.</span></div></li>
+        <li id="A7"><div class="row"><a class="id" href="#A7">A7</a><span class="when">Could not finish (failed)</span><span class="out later">again after 30 minutes</span>
+          <span class="why">Doubling with every attempt, 14 days at most. A lookup that could not finish is never taken for "no video".</span></div></li>
+        <li id="A8"><div class="row"><a class="id" href="#A8">A8</a><span class="when">Postponed by a pause</span><span class="out later">when the pause ends</span><span class="why">The track is put back untouched: see <a href="#I">I</a>.</span></div></li>
+        <li id="A9"><div class="row"><a class="id" href="#A9">A9</a><span class="when">Skipped, and the rule that skipped it has gone</span><span class="out later">at the next scan</span></div></li>
+        <li id="A10"><div class="row"><a class="id" href="#A10">A10</a><span class="when">Title, artist or album changed, and it has no video</span><span class="out later">at once</span><span class="why">A track that has its video keeps it; the video takes the new tags.</span></div></li>
+        <li id="A11"><div class="row"><a class="id" href="#A11">A11</a><span class="when">You ask for a re-import</span><span class="out go"><a href="#H">at once, by H</a></span></div></li>
+      </ul>
+    </li>
+  </ul>
+  </div>
+</section>
+
+<!-- ===================================================================== B -->
+<section id="B">
+  <header>
+    <h2><span class="tag">B</span> Search</h2>
+    <p>Four queries, tried in order, ten results each: <code>artist title</code>, then with <code>MV</code>, <code>music video</code>, <code>official video</code> added. The artist is the first album artist. Results are remembered for a day.</p>
+    <div class="where">Matcher::searchQueries · YtDlp::search · ImportManager::runJob</div>
+  </header>
+  <div class="scroll">
+  <ul class="tree">
+    <li><div class="row"><span class="q order">After each query, the results so far are judged on sight (C)</span></div>
+      <ul>
+        <li id="B1"><div class="row"><a class="id" href="#B1">B1</a><span class="when">A result is usable</span><span class="out go"><a href="#C9">no further query; shortlist: C9</a></span>
+          <span class="why">Usable: not dropped on sight, and it looks official (C7). Results of a later query rank two places below where YouTube put them.</span></div></li>
+        <li id="B2"><div class="row"><a class="id" href="#B2">B2</a><span class="when">YouTube refuses the query</span><span class="out later">pause: I5</span></div></li>
+        <li id="B3"><div class="row"><a class="id" href="#B3">B3</a><span class="when">All four asked, none could be answered</span><span class="out later">failed: A7</span></div></li>
+        <li id="B4"><div class="row"><a class="id" href="#B4">B4</a><span class="when">All four asked, nothing usable</span><span class="out none">no video: A6</span>
+          <span class="why">"None of N search results looked like an official video."</span></div></li>
+      </ul>
+    </li>
+  </ul>
+  </div>
+  <p class="lede">On a re-import the track's own video is a candidate whether or not the search returns it (<a href="#H4">H4</a>).</p>
+</section>
+
+<!-- ===================================================================== C -->
+<section id="C">
+  <header>
+    <h2><span class="tag">C</span> On sight: is a search result worth listening to?</h2>
+    <p>By its title, channel and length alone. Nothing is downloaded here.</p>
+    <div class="where">Matcher::rank · Matcher::lengthMismatch · Matcher::isOwnChannel · ArtistChannels::isArtistChannel</div>
+  </header>
+  <div class="scroll">
+  <ul class="tree">
+    <li><div class="row"><span class="q order">A search result</span></div>
+      <ul>
+        <li id="C1"><div class="row"><a class="id" href="#C1">C1</a><span class="when">Its title has the marks of a rhythm-game replay</span><span class="out no">dropped: game replay</span>
+          <span class="why">Mod strings (HDHR, HDDT), a pp score, an FC percentage.</span></div></li>
+        <li id="C2"><div class="row"><a class="id" href="#C2">C2</a><span class="when">Its channel is "<i>Artist</i> - Topic"</span><span class="out no">dropped: auto-generated art track</span>
+          <span class="why">A still image over the audio. Where its title carries the track's, the channel's name is one more name of the artist for this lookup (the tag may be romanised and YouTube's name not).</span></div></li>
+        <li id="C3"><div class="row"><a class="id" href="#C3">C3</a><span class="when">Shorter than <span class="num">half</span> the track</span><span class="out no">dropped: under half the track's length</span>
+          <span class="why">The ninety seconds used as a show's opening, against the whole song. That is the video of the "TV size" track, which is looked up in its own right (A2).</span></div></li>
+        <li id="C4"><div class="row"><a class="id" href="#C4">C4</a><span class="when">Longer than <span class="num">3×</span> the track, or by more than <span class="num">15 min</span></span><span class="out no">dropped: duration mismatch</span></div></li>
+        <li id="C5"><div class="row"><a class="id" href="#C5">C5</a><span class="q">Is the channel the artist's own?</span> <span class="why">See <a href="#R5">R5</a>: by its name, by MusicBrainz, or by a video of it you accepted.</span></div>
+          <ul>
+            <li><div class="row"><span class="when">Yes</span><span class="out go">the title is not held against it; trusted (C7)</span>
+              <span class="why">The artist's cover of a song is a cover by its title, and the video of the track that is that cover. The audio decides.</span></div></li>
+            <li id="C6"><div class="row"><a class="id" href="#C6">C6</a><span class="when">No, and its title has a version word the track's title and album lack</span><span class="out no">dropped: "<i>word</i>" version</span>
+              <span class="why">cover, live, remix, piano, acoustic, karaoke, reaction, crossfade, teaser, 歌ってみた … the full list is under <a href="#N">N</a>.</span></div></li>
+            <li><div class="row"><span class="when">No, and no such word</span><span class="out go">C7</span></div></li>
+          </ul>
+        </li>
+        <li id="C7"><div class="row"><a class="id" href="#C7">C7</a><span class="q">Does it look official?</span></div>
+          <ul>
+            <li><div class="row"><span class="when">The channel is the artist's own</span><span class="out go">usable</span></div></li>
+            <li><div class="row"><span class="when">The channel's name has the artist's name in it, and the title has no fan word</span><span class="out go">usable</span></div></li>
+            <li><div class="row"><span class="when">Verified channel, or official words in the title, or a label's channel with the artist named in the title; and no fan word</span><span class="out go">usable</span>
+              <span class="why">Official words: MV, music video, official, PV, 公式. Label: music, records, entertainment, label in the channel's name. Fan words: lyrics, romaji, sub, 歌詞, 和訳, fanmade … (<a href="#N">N</a>). Such an upload can be offered for review, never taken outright (R1).</span></div></li>
+            <li id="C8"><div class="row"><a class="id" href="#C8">C8</a><span class="when">None of these</span><span class="out no">not examined</span>
+              <span class="why">Unless "Allow unofficial uploads" is switched on.</span></div></li>
+          </ul>
+        </li>
+      </ul>
+    </li>
+    <li id="C9"><div class="row"><a class="id" href="#C9">C9</a><span class="q">The shortlist</span>
+      <span class="why">The usable results by score, the best <span class="num">4</span>. On a re-import the track's own video as well. Those of at least <span class="num">60%</span> of the track's length are listened to first: a cut of the song is its video only for want of a full one.</span></div>
+      <ul><li><div class="row"><span class="when last"></span><span class="out go"><a href="#D">each is listened to, in that order: D</a></span></div></li></ul>
+    </li>
+  </ul>
+  </div>
+
+  <h3>Score</h3>
+  <table>
+    <tr><th>Points</th><th>For</th></tr>
+    <tr><td class="n">+40</td><td>the track's title in the upload's title, whole (else up to +30 for the share of its words found)</td></tr>
+    <tr><td class="n">+20</td><td>an artist's name in the title or in the channel's name; <b>+15</b> more when it is in the channel's name</td></tr>
+    <tr><td class="n">+25</td><td>a verified channel</td></tr>
+    <tr><td class="n">+10</td><td>an official word in the title</td></tr>
+    <tr><td class="n">−25</td><td>a fan word in the title</td></tr>
+    <tr><td class="n">−15</td><td>"short ver" or "short version" in the title</td></tr>
+    <tr><td class="n">+15 / +8 / −5</td><td>within 6 s of the track's length / within 30 s / more than 2 min off</td></tr>
+    <tr><td class="n">+N − rank</td><td>YouTube's own order, as the tie-breaker</td></tr>
+  </table>
+</section>
+
+<!-- ===================================================================== D -->
+<section id="D">
+  <header>
+    <h2><span class="tag">D</span> Listening: is this upload the track's video?</h2>
+    <p>Each upload on the shortlist, best first. The first that fits outright ends it; the others are judged until then. What "the track's own recording" and "the same recording" mean is defined under <a href="#R">R</a>.</p>
+    <div class="where">ImportManager::runJob · AudioAlign::align · Muxer::checkStill</div>
+  </header>
+  <div class="scroll">
+  <ul class="tree">
+    <li><div class="row"><span class="q order">An upload on the shortlist</span></div>
+      <ul>
+        <li id="D0"><div class="row"><a class="id" href="#D0">D0</a><span class="when">You turned it down for this track</span><span class="out no">not offered again</span></div></li>
+        <li><div class="row"><span class="when">It is not in the library</span><span class="out go"><a href="#D1">D1: a new upload</a></span></div></li>
+        <li><div class="row"><span class="when">It is the video the track has (re-import)</span><span class="out go"><a href="#D2">D2</a></span></div></li>
+        <li><div class="row"><span class="when">It is one of the options the track waits on</span><span class="out go"><a href="#D3">D3</a></span></div></li>
+        <li><div class="row"><span class="when">Another track has it</span><span class="out go"><a href="#D4">D4</a></span></div></li>
+        <li><div class="row"><span class="when">It waits for review through another track</span><span class="out go"><a href="#D5">D5</a></span></div></li>
+      </ul>
+    </li>
+  </ul>
+  </div>
+
+  <h3 id="D1">D1 · A new upload</h3>
+  <div class="scroll">
+  <ul class="tree">
+    <li><div class="row"><span class="q order">Its audio is downloaded and laid against the track</span></div>
+      <ul>
+        <li id="D1.1"><div class="row"><a class="id" href="#D1.1">D1.1</a><span class="when">The video is gone, private, or not available here</span><span class="out no">not a candidate</span></div></li>
+        <li id="D1.2"><div class="row"><a class="id" href="#D1.2">D1.2</a><span class="when">YouTube refuses</span><span class="out later">pause, track postponed: I5</span></div></li>
+        <li id="D1.3"><div class="row"><a class="id" href="#D1.3">D1.3</a><span class="when">It cannot be downloaded for another reason</span><span class="out later">undecided: counts at E6</span>
+          <span class="why">Tried once more first (I3). Audio that arrives and cannot be decoded is passed over.</span></div></li>
+        <li id="D1.4"><div class="row"><a class="id" href="#D1.4">D1.4</a><span class="when">It is not the song (<a href="#R0">R0</a>)</span><span class="out no">different</span>
+          <span class="why">Not this song; or the track is only part of this video; or only part of the track is in it.</span></div></li>
+        <li id="D1.5"><div class="row"><a class="id" href="#D1.5">D1.5</a><span class="q">Is the library's audio at stake? (<a href="#R6">R6</a>)</span></div>
+          <ul>
+            <li><div class="row"><span class="when">No: YouTube's audio is as good, or "Use my library's audio" is off</span><span class="q">Is the song interrupted in it?</span></div>
+              <ul>
+                <li id="D1.6"><div class="row"><a class="id" href="#D1.6">D1.6</a><span class="when">More than <span class="num">15 s</span> of other audio inside the song</span><span class="out no">dropped: interrupts the song</span></div></li>
+                <li><div class="row"><span class="when">No</span><span class="out go">fits, with YouTube's audio: picture check, D1.9</span></div></li>
+              </ul>
+            </li>
+            <li><div class="row"><span class="when">Yes</span><span class="q">Is it the track's own recording? (<a href="#R1">R1</a>)</span></div>
+              <ul>
+                <li><div class="row"><span class="when">Yes</span><span class="out go">fits, with the track's audio: picture check, D1.9</span></div></li>
+                <li id="D1.7"><div class="row"><a class="id" href="#D1.7">D1.7</a><span class="when">No; the track is lossy, there is an account, and its Premium audio is as good as the track</span><span class="out go">nothing at stake after all: as "No" above</span></div></li>
+                <li id="D1.8"><div class="row"><a class="id" href="#D1.8">D1.8</a><span class="when">No</span><span class="out go">a candidate for review: picture check, D1.9</span>
+                  <span class="why">The reason is kept: not the artist's channel; a cut of the song; the song is interrupted; track and video are marked as different versions; the upload names none of the artists; or too little of the waveform.</span></div></li>
+              </ul>
+            </li>
+          </ul>
+        </li>
+        <li id="D1.9"><div class="row"><a class="id" href="#D1.9">D1.9</a><span class="q">Is the picture a still image?</span> <span class="why">Asked when "Skip still-image videos" is on, of YouTube's smallest stream; the answer is remembered per upload.</span></div>
+          <ul>
+            <li><div class="row"><span class="when">Fewer than <span class="num">10%</span> of the sampled frame pairs change</span><span class="out no">dropped: a still image</span>
+              <span class="why">Frames at least 2 s apart; a pair counts as changed when <span class="num">0.4%</span> of its pixels move by more than 16 grey levels.</span></div></li>
+            <li><div class="row"><span class="when">The picture cannot be fetched or analysed</span><span class="out later">undecided: counts at E6</span><span class="why">A video whose picture was not looked at is never taken.</span></div></li>
+            <li id="D1.10"><div class="row"><a class="id" href="#D1.10">D1.10</a><span class="when">It moves, and it fits</span><span class="out ok">fits outright: listening ends, E1</span></div></li>
+            <li id="D1.11"><div class="row"><a class="id" href="#D1.11">D1.11</a><span class="when">It moves, and it is a candidate for review</span><span class="out review">kept as a candidate; the next upload is listened to</span></div></li>
+          </ul>
+        </li>
+      </ul>
+    </li>
+  </ul>
+  </div>
+
+  <h3 id="D2">D2 · The video the track has (re-import)</h3>
+  <p class="lede">Judged like a candidate just found, on the upload's own audio and picture, which are in its file. Nothing is downloaded for it.</p>
+  <div class="scroll">
+  <ul class="tree">
+    <li><div class="row"><span class="q order">The track's own video</span></div>
+      <ul>
+        <li id="D2.1"><div class="row"><a class="id" href="#D2.1">D2.1</a><span class="when">Today's rules drop it on sight (C)</span><span class="out no">turned down</span></div></li>
+        <li id="D2.2"><div class="row"><a class="id" href="#D2.2">D2.2</a><span class="when">Its file cannot be read</span><span class="out later">undecided</span></div></li>
+        <li id="D2.3"><div class="row"><a class="id" href="#D2.3">D2.3</a><span class="when">It is not the song (R0)</span><span class="out no">turned down</span></div></li>
+        <li id="D2.4"><div class="row"><a class="id" href="#D2.4">D2.4</a><span class="q">The audio is at stake and it is not the track's own recording (R1): it would go to review. Do other tracks have this video too?</span></div>
+          <ul>
+            <li><div class="row"><span class="when">Yes, and the track is the same recording (<a href="#R4">R4</a>)</span><span class="out ok">stays as it is: theirs and this track's</span></div></li>
+            <li><div class="row"><span class="when">Yes, and it is only the same song</span><span class="out no">the track lets go; the video stays theirs</span>
+              <span class="why">It is not made over for review on this track's account.</span></div></li>
+            <li><div class="row"><span class="when">No</span><span class="out review">a candidate for review, first among them</span></div></li>
+          </ul>
+        </li>
+        <li id="D2.5"><div class="row"><a class="id" href="#D2.5">D2.5</a><span class="when">Nothing at stake, and the song is interrupted in it</span><span class="out no">turned down</span></div></li>
+        <li id="D2.6"><div class="row"><a class="id" href="#D2.6">D2.6</a><span class="when">Its picture is a still image</span><span class="out no">turned down</span><span class="why">Read from the file by its keyframes, unless remembered.</span></div></li>
+        <li id="D2.7"><div class="row"><a class="id" href="#D2.7">D2.7</a><span class="when">Otherwise</span><span class="out ok">fits outright: kept, listening ends</span>
+          <span class="why">The track's audio is put in if it belongs there (F3) and was not.</span></div></li>
+      </ul>
+    </li>
+  </ul>
+  </div>
+
+  <h3 id="D3">D3 · One of the options the track already waits on</h3>
+  <div class="scroll">
+  <ul class="tree">
+    <li><div class="row"><span class="q">Has it become the track's own recording (R1), with the audio at stake?</span></div>
+      <ul>
+        <li id="D3.1"><div class="row"><a class="id" href="#D3.1">D3.1</a><span class="when">Yes</span><span class="out ok">accepted, out of review: listening ends</span>
+          <span class="why">A track that waited on these options and is the same recording (R4) has the video too. The others keep the options that are left; with none left, it was not their video. Options nobody waits on any more are deleted.</span></div></li>
+        <li id="D3.2"><div class="row"><a class="id" href="#D3.2">D3.2</a><span class="when">No</span><span class="out review">stays an option</span></div></li>
+      </ul>
+    </li>
+  </ul>
+  </div>
+
+  <h3 id="D4">D4 · A video another track has</h3>
+  <p class="lede">Measured against the audio the video plays: that other track's, where a track's audio was put in.</p>
+  <div class="scroll">
+  <ul class="tree">
+    <li><div class="row"><span class="q order">A video in the library, through another track</span></div>
+      <ul>
+        <li id="D4.1"><div class="row"><a class="id" href="#D4.1">D4.1</a><span class="when">This track is the video's own audio, and the track it plays is clearly less so</span><span class="out ok">shares it; the video now plays this track</span>
+          <span class="why">Against YouTube's audio in the file this track is its own recording (R1) at <span class="num">90%</span> or more, at least <span class="num">8</span> points above what it shows against the audio now played; and a track that holds the video falls at least 8 points short of it. The holders keep the video. (The English version looked up first had kept the Japanese video.)</span></div></li>
+        <li id="D4.2"><div class="row"><a class="id" href="#D4.2">D4.2</a><span class="when">It is not the song (R0)</span><span class="out no">different</span></div></li>
+        <li id="D4.3"><div class="row"><a class="id" href="#D4.3">D4.3</a><span class="when">The track's audio is not at stake (R6)</span><span class="out ok">shares the video, on the song alone</span></div></li>
+        <li id="D4.4"><div class="row"><a class="id" href="#D4.4">D4.4</a><span class="when">It is the track's own recording (R1)</span><span class="out ok">shares the video</span>
+          <span class="why">A single and its album cut. The track's audio is put in where the video still had YouTube's.</span></div></li>
+        <li id="D4.5"><div class="row"><a class="id" href="#D4.5">D4.5</a><span class="when">Otherwise</span><span class="out no">different recording: not this track's</span>
+          <span class="why">Being the same song is not enough. A live take does not get the studio video.</span></div></li>
+      </ul>
+    </li>
+  </ul>
+  </div>
+
+  <h3 id="D5">D5 · A video that waits for review through another track</h3>
+  <p class="lede">Measured against YouTube's audio in its file.</p>
+  <div class="scroll">
+  <ul class="tree">
+    <li><div class="row"><span class="q order">A video under review, for another track</span></div>
+      <ul>
+        <li id="D5.1"><div class="row"><a class="id" href="#D5.1">D5.1</a><span class="when">It is not the song (R0)</span><span class="out no">different</span></div></li>
+        <li id="D5.2"><div class="row"><a class="id" href="#D5.2">D5.2</a><span class="when">It is this track's own recording (R1), with the audio at stake</span><span class="out ok">taken out of review: this track's, listening ends</span>
+          <span class="why">It was waiting on behalf of a track that is only the song. Those tracks keep their other options; with none left, it was not their video.</span></div></li>
+        <li id="D5.3"><div class="row"><a class="id" href="#D5.3">D5.3</a><span class="when">The track is the same recording (<a href="#R4">R4</a>)</span><span class="out later">may wait on it too: decided at E5</span>
+          <span class="why">One verdict for both, but only when the search has nothing for this track alone.</span></div></li>
+        <li id="D5.4"><div class="row"><a class="id" href="#D5.4">D5.4</a><span class="when">The upload is titled after this track and not after theirs (<a href="#R7">R7</a>)</span><span class="out later">this track's to wait on: decided at E2</span>
+          <span class="why">The same song under two titles, the original and its English version, and the first to be looked up got the other one's video.</span></div></li>
+        <li id="D5.5"><div class="row"><a class="id" href="#D5.5">D5.5</a><span class="when">Otherwise</span><span class="out no">different recording: not this track's to wait on</span>
+          <span class="why">The same song as another recording has no part in that verdict, and looks for a video of its own.</span></div></li>
+      </ul>
+    </li>
+  </ul>
+  </div>
+</section>
+
+<!-- ===================================================================== R -->
+<section id="R">
+  <header>
+    <h2><span class="tag">R</span> Definitions the trees lean on</h2>
+    <p>Two measures come from laying the track against an upload's audio. <b>Fingerprints</b> say how much of the two is recognisably the same song. The <b>waveform</b> says how much is demonstrably the same recording, as a share of the shorter of the two.</p>
+    <div class="where">ImportManager.cpp: audioMatches · audioReplaceable · fitted · ownRecording · sameRecordingAs · libraryIsBetter</div>
+  </header>
+  <div class="defs">
+    <div class="def" id="R0"><h3><span class="id">R0</span>The song</h3>
+      <p>The upload's soundtrack contains the track:</p>
+      <ul>
+        <li>fingerprints match at least <span class="num">50%</span> of the video, and</li>
+        <li>at least <span class="num">50%</span> of the track, or <span class="num">80%</span> of the video and <span class="num">45 s</span>.</li>
+      </ul>
+      <p style="margin-top:.4rem">A short edit of a song does not take the video of the full version, only one of about its own length.</p></div>
+
+    <div class="def" id="R1"><h3><span class="id">R1</span>The track's own recording</h3>
+      <p>What lets an upload be taken outright with the track's audio. All of:</p>
+      <ul>
+        <li>the upload is on the artist's channel (R5);</li>
+        <li>it is not a cut: at least <span class="num">90%</span> of the track's length;</li>
+        <li>the song is not interrupted: at most <span class="num">15 s</span> of other audio inside it;</li>
+        <li>at least <span class="num">72%</span> the same waveform, and <span class="num">60%</span> of what the fingerprints matched; or it is placed by offset (R2);</li>
+        <li>and one of: placed by offset; the same version (R3) on a vouched channel or with an artist named in the title or channel; or <span class="num">97%</span> the same waveform.</li>
+      </ul>
+      <p style="margin-top:.4rem">Measured: another master of a recording shows 77% and more; another singer over the same backing 67%; a remix 59%; live takes and covers 25–51%; a version made over the original 90%.</p></div>
+
+    <div class="def" id="R2"><h3><span class="id">R2</span>Placed by offset</h3>
+      <p>The same performance in another mix has the track's waveform only here and there. It is taken for the recording, and the track laid whole at one offset, when all of:</p>
+      <ul>
+        <li>the channel is the artist's by its name;</li>
+        <li>fingerprints cover <span class="num">80%</span>, the waveform <span class="num">20%</span>;</li>
+        <li>the loudness of the two rises and falls together (correlation <span class="num">0.5</span>);</li>
+        <li>the same version (R3);</li>
+        <li>a stretch of matching waveform sits at the offset the loudness gives.</li>
+      </ul></div>
+
+    <div class="def" id="R3"><h3><span class="id">R3</span>The same version</h3>
+      <p>By what the two are called. Not the same version when:</p>
+      <ul>
+        <li>a version word (live, remix, cover, acoustic …) is in the upload's title and not in the track's title or album, or the other way round;</li>
+        <li>one names a version the other does not: "(English Ver.)", "Rap version". "Full ver." does not count, and a version only the album is named after need not be in the upload's title;</li>
+        <li>the upload credits a singer the track does not have: feat., CV, Vo. A synthesised voice is known by both its names, and on the artist's own channel is not another version.</li>
+      </ul></div>
+
+    <div class="def" id="R4"><h3><span class="id">R4</span>The same recording as another track's</h3>
+      <p>What lets a track share a video with other tracks, or wait on one with them. Either:</p>
+      <ul>
+        <li>it is the recording in the upload: R1 without the conditions on the channel and on cuts; or</li>
+        <li>laid against a track that has the video or waits on it, <span class="num">90%</span> the same waveform.</li>
+      </ul>
+      <p style="margin-top:.4rem">Measured track against track: one recording on two releases 95–100%; the same song in another language 63–88%; a live take against the studio one 68%; another singer 0%.</p></div>
+
+    <div class="def" id="R5"><h3><span class="id">R5</span>The artist's channel</h3>
+      <ul>
+        <li><b>By its name:</b> a name of the artist and nothing else but official, channel, music, YouTube, VEVO, TV, records, 公式, チャンネル. A channel named twice over ("A / B") counts by either name. "Producer feat. Singer": the producer's channel.</li>
+        <li><b>By MusicBrainz:</b> its artist record links to the channel. Asked once per artist; only a sure match counts.</li>
+        <li><b>By you:</b> accepting a video in review vouches for its channel, for every artist of the tracks that waited on it.</li>
+      </ul>
+      <p style="margin-top:.4rem">The last two are "vouched": as good as the artist's name on the upload.</p></div>
+
+    <div class="def" id="R6"><h3><span class="id">R6</span>The library's audio is at stake</h3>
+      <p>"Use my library's audio" is on, and the track is the better audio: its quality exceeds YouTube's by more than <span class="num">15%</span>.</p>
+      <ul>
+        <li>A lossless track beats everything.</li>
+        <li>Otherwise bitrate × 1.5 for Opus, × 1.2 for AAC and Vorbis.</li>
+        <li>YouTube's audio the same way; 130 kbit/s Opus where unknown.</li>
+      </ul>
+      <p style="margin-top:.4rem">YouTube's audio is only ever a video's main audio when the track is the lesser of the two.</p></div>
+
+    <div class="def" id="R7"><h3><span class="id">R7</span>Titled after this track</h3>
+      <p>Decides whose a video under review is when the waveform cannot. All of:</p>
+      <ul>
+        <li>the upload's title carries this track's title, word for word, outside brackets;</li>
+        <li>it carries none of the titles of the tracks waiting on it;</li>
+        <li>none of those tracks is the upload's waveform (<span class="num">72%</span>);</li>
+        <li>the upload is not marked as a version one of them is and this track is not;</li>
+        <li>this track's audio is at stake (R6).</li>
+      </ul></div>
+  </div>
+</section>
+
+<!-- ===================================================================== E -->
+<section id="E">
+  <header>
+    <h2><span class="tag">E</span> What the track gets</h2>
+    <p>Once the shortlist has been listened to. The track's own video, kept or found, comes before anything it could share with another track.</p>
+    <div class="where">ImportManager::runJob, from "picks" to finish()</div>
+  </header>
+  <div class="scroll">
+  <ul class="tree">
+    <li><div class="row"><span class="q order">At the end of listening</span></div>
+      <ul>
+        <li id="E1"><div class="row"><a class="id" href="#E1">E1</a><span class="when">An upload fits outright</span><span class="out ok">it is the track's video: brought in (F)</span>
+          <span class="why">The options the track was waiting on are not needed by it: other tracks that wait on them keep them, otherwise they are deleted. On a re-import the old video goes (H4), unless the upload that fits is the old video.</span></div></li>
+        <li id="E2"><div class="row"><a class="id" href="#E2">E2</a><span class="when">A video is titled after this track (D5.4)</span><span class="out review">made over for this track, which waits on it</span>
+          <span class="why">Its audio is put to the video in place of the other track's, and the video is listed under this track, as a group of its own or with the options it holds. The track it waited for keeps its other options; with none, it goes back to the queue. Then E3 and E4 as well.</span></div></li>
+        <li id="E3"><div class="row"><a class="id" href="#E3">E3</a><span class="when">There are candidates for review</span><span class="out review">all brought in, as options on one card</span>
+          <span class="why">The track's own video first, then the others, beside any options it already holds. One that another track brought in meanwhile is joined if the track is the same recording (R4) and has nothing else, and left out otherwise.</span></div></li>
+        <li id="E4"><div class="row"><a class="id" href="#E4">E4</a><span class="when">Nothing new, and the track holds options</span><span class="out review">it keeps them</span></div></li>
+        <li id="E5"><div class="row"><a class="id" href="#E5">E5</a><span class="when">Nothing of its own, and it may wait on another track's video (D5.3)</span><span class="out review">waits on it with that track: one verdict for both</span></div></li>
+        <li id="E6"><div class="row"><a class="id" href="#E6">E6</a><span class="when">An upload could not be examined, or none was</span><span class="out later">failed: A7</span></div></li>
+        <li id="E7"><div class="row"><a class="id" href="#E7">E7</a><span class="when">Otherwise</span><span class="out none">no video: A6</span></div></li>
+      </ul>
+    </li>
+  </ul>
+  </div>
+  <p class="lede">A lookup takes minutes, and another one may settle the options a track holds in the meantime. What the track holds is read again before anything is put beside it and before its result is written: a video that is no longer under review is not an option of its any more.</p>
+</section>
+
+<!-- ===================================================================== F -->
+<section id="F">
+  <header>
+    <h2><span class="tag">F</span> Bringing a video in</h2>
+    <div class="where">ImportManager::runJob bringIn · Muxer::mux · YtDlp::downloadVideo</div>
+  </header>
+  <div class="scroll">
+  <ul class="tree">
+    <li id="F1"><div class="row"><a class="id" href="#F1">F1</a><span class="q">The picture</span>
+      <span class="why">The best video stream and YouTube's thumbnail (a frame a quarter of the way in where there is none). Stored as <code>&lt;MV folder&gt;/&lt;album artist&gt;/&lt;title&gt; [&lt;id&gt;].mkv</code>.</span></div></li>
+    <li id="F2"><div class="row"><a class="id" href="#F2">F2</a><span class="q">YouTube's audio</span>
+      <span class="why">With an account, the Premium audio is fetched and used where it is the better one. It is always kept in the file.</span></div></li>
+    <li id="F3"><div class="row"><a class="id" href="#F3">F3</a><span class="q">Which audio does the video play?</span></div>
+      <ul>
+        <li><div class="row"><span class="when">It waits for review</span><span class="out review">the track's, laid whole at the offset where the loudness agrees</span>
+          <span class="why">YouTube's is the second stream; <kbd>A</kbd> changes between them.</span></div></li>
+        <li><div class="row"><span class="when">Accepted; the audio is at stake (R6, against the Premium audio too) and at least <span class="num">72%</span> is the same waveform, or it is placed by offset</span><span class="out ok">the track's</span>
+          <span class="why">Its samples are copied bit for bit into the matching regions; the video's own audio fills the gaps at the track's level, with 20 ms crossfades. YouTube's stays as the second stream.</span></div></li>
+        <li><div class="row"><span class="when">Accepted otherwise</span><span class="out ok">YouTube's</span></div></li>
+        <li><div class="row"><span class="when">The track's audio belongs there and cannot be put in</span><span class="out later">failed: A7</span><span class="why">There is no falling back to YouTube's audio.</span></div></li>
+      </ul>
+    </li>
+    <li id="F4"><div class="row"><a class="id" href="#F4">F4</a><span class="q">Subtitles</span>
+      <span class="why">The uploader's own, in the languages wanted, where there are some. Their absence is no reason not to have the video.</span></div></li>
+  </ul>
+  </div>
+</section>
+
+<!-- ===================================================================== G -->
+<section id="G">
+  <header>
+    <h2><span class="tag">G</span> Your verdict on a video under review</h2>
+    <p>A card holds the options of one group. Every track that waits on the group gets the verdict: the track the options were brought in for, and any that joined it as the same recording (E5).</p>
+    <div class="where">ImportManager::approveVideo · ImportManager::rejectVideo</div>
+  </header>
+  <div class="scroll">
+  <ul class="tree">
+    <li><div class="row"><span class="q">Your verdict</span></div>
+      <ul>
+        <li id="G1"><div class="row"><a class="id" href="#G1">G1</a><span class="when">Accept</span><span class="out ok">the video of every track waiting on the group</span>
+          <span class="why">It joins the library with the track's audio. Its channel is recorded as the artist's (R5). The group's other options are deleted.</span></div></li>
+        <li id="G2"><div class="row"><a class="id" href="#G2">G2</a><span class="when">Reject</span><span class="q">Are other options left on the card?</span></div>
+          <ul>
+            <li><div class="row"><span class="when">Yes</span><span class="out review">the tracks wait on those</span></div></li>
+            <li><div class="row"><span class="when">No</span><span class="out none">the tracks have no video: A6</span></div></li>
+          </ul>
+          <div class="row"><span class="why">Either way the video is deleted, and that upload is not offered to those tracks again (D0).</span></div>
+        </li>
+      </ul>
+    </li>
+  </ul>
+  </div>
+</section>
+
+<!-- ===================================================================== H -->
+<section id="H">
+  <header>
+    <h2><span class="tag">H</span> Re-import: a track looked up again by today's rules</h2>
+    <p>From the Re-import button, a sidebar entry's menu, a file or folder in Settings, or <code>--reimport</code>. The first three steps need no request to YouTube, and H1 and H2 are done the moment the re-import is asked for, pause or not.</p>
+    <div class="where">ImportManager::reimport · dropBrokenVideos · dropOutdatedOptions · runJob</div>
+  </header>
+  <div class="scroll">
+  <ul class="tree">
+    <li><div class="row"><span class="q order">A track that is looked up again</span></div>
+      <ul>
+        <li id="H1"><div class="row"><a class="id" href="#H1">H1</a><span class="when">A video of it has an empty or missing file</span><span class="out no">that video is deleted</span>
+          <span class="why">A machine that goes down while a video is written can leave it empty. The upload is found and brought in again like any other.</span></div></li>
+        <li id="H2"><div class="row"><a class="id" href="#H2">H2</a><span class="when">An option it waits on is ruled out by its length (C3, C4) for every track waiting on it</span><span class="out no">that option is deleted</span>
+          <span class="why">The tracks keep the options that are left; with none they look for a video again.</span></div></li>
+        <li id="H3"><div class="row"><a class="id" href="#H3">H3</a><span class="when">It waits on options together with other tracks, and is not the same recording (R4) as any of them</span><span class="out no">it lets go of them</span>
+          <span class="why">The options stay for the other tracks. The track is looked up as one without any.</span></div></li>
+        <li id="H4"><div class="row"><a class="id" href="#H4">H4</a><span class="when">It has a video</span><span class="q">What becomes of that video (D2, then E)</span></div>
+          <ul>
+            <li><div class="row"><span class="when">It still fits outright</span><span class="out ok">kept</span></div></li>
+            <li><div class="row"><span class="when">It is the song but can no longer be taken outright</span><span class="out review">review: its file is made over, beside whatever else is found</span></div></li>
+            <li><div class="row"><span class="when">Another upload fits outright, or today's rules turn it down</span><span class="out no">removed; or released, where other tracks have it</span></div></li>
+            <li><div class="row"><span class="when">The lookup could not finish</span><span class="out later">unjudged: the track keeps its video</span></div></li>
+          </ul>
+        </li>
+        <li id="H5"><div class="row"><a class="id" href="#H5">H5</a><span class="when">It is a track that is skipped today (A2–A4)</span><span class="out none">skipped; its video goes as in H4</span></div></li>
+        <li id="H6"><div class="row"><a class="id" href="#H6">H6</a><span class="when">It has no video</span><span class="out go"><a href="#B">looked up like any track: B</a></span></div></li>
+      </ul>
+    </li>
+  </ul>
+  </div>
+</section>
+
+<!-- ===================================================================== I -->
+<section id="I">
+  <header>
+    <h2><span class="tag">I</span> Requests and pauses</h2>
+    <div class="where">YtDlp::run · ImportManager::noteFailure · tripBreaker · resumeNow</div>
+  </header>
+  <div class="scroll">
+  <ul class="tree">
+    <li><div class="row"><span class="q">A request to YouTube</span></div>
+      <ul>
+        <li id="I1"><div class="row"><a class="id" href="#I1">I1</a><span class="when">A search</span><span class="out go">always as a guest</span></div></li>
+        <li id="I2"><div class="row"><a class="id" href="#I2">I2</a><span class="when">Premium audio, or a quality check of the library</span><span class="out go">always with the account</span></div></li>
+        <li id="I3"><div class="row"><a class="id" href="#I3">I3</a><span class="when">Any other download</span><span class="q order">As a guest first. It fails:</span></div>
+          <ul>
+            <li><div class="row"><span class="when">The video wants a sign-in (age-restricted, members-only, private)</span><span class="out go">again with the account</span></div></li>
+            <li id="I4"><div class="row"><a class="id" href="#I4">I4</a><span class="when">"Sign in to confirm you're not a bot", and you switched on signing in for it</span><span class="out go">again with the account</span>
+              <span class="why">For the next <span class="num">30 min</span> downloads go to the account straight away; then a guest tries again. YouTube refuses a connection's guests every video, whatever the client and with PO tokens too; there is nothing to solve. Off until you say so: an account that downloads a great deal is one YouTube may restrict.</span></div></li>
+            <li><div class="row"><span class="when">The video is gone or withheld</span><span class="out no">not a candidate; not a failure</span></div></li>
+            <li><div class="row"><span class="when">It comes at a trickle: under 3 MB in each of two minutes</span><span class="out go">given up and asked again</span></div></li>
+            <li><div class="row"><span class="when">Anything else</span><span class="out go">once more after 3 s, unless it was a refusal</span></div></li>
+          </ul>
+        </li>
+      </ul>
+    </li>
+    <li id="I5"><div class="row"><a class="id" href="#I5">I5</a><span class="q">When does the queue pause?</span></div>
+      <ul>
+        <li><div class="row"><span class="when">YouTube refuses: HTTP 429, too many requests, rate limit, the bot check</span><span class="out later">paused</span></div></li>
+        <li><div class="row"><span class="when"><span class="num">8</span> downloads in a row fail</span><span class="out later">paused</span></div></li>
+      </ul>
+      <div class="row"><span class="why"><span class="num">10 min</span> at first, doubling up to <span class="num">2 h</span> while it lasts. Lookups under way are postponed untouched. Afterwards one job tests the water; the rest follow when a request gets through as a guest (not from the cache, and not through the account). Where the bot check stands and there is no account whose cookies work, the pause says so, and replacing the cookies resumes it.</span></div>
+    </li>
+  </ul>
+  </div>
+</section>
+
+<!-- ===================================================================== J -->
+<section id="J">
+  <header>
+    <h2><span class="tag">J</span> Replacing a video by hand</h2>
+    <p>Replace… in the music-file popup. It asks nothing about whose channel an upload is on.</p>
+    <div class="where">ImportManager::replaceSearchJob · replaceCheckJob · replaceWithJob</div>
+  </header>
+  <div class="scroll">
+  <ul class="tree">
+    <li><div class="row"><span class="q">Where the upload comes from</span></div>
+      <ul>
+        <li id="J1"><div class="row"><a class="id" href="#J1">J1</a><span class="when">The dialog's search</span><span class="out go">up to 3 uploads that are the track by ear</span>
+          <span class="why">Searched as in B. Of the results not dropped on sight (C1–C6), the best <span class="num">8</span> are listened to: the song (R0), not interrupted, not a still image. Not the video it has now, and not one you turned down.</span></div></li>
+        <li id="J2"><div class="row"><a class="id" href="#J2">J2</a><span class="when">A link or id you paste</span><span class="out go">judged the same way</span>
+          <span class="why">One that does not sound like the track asks "Are you sure?"; taken all the same, it keeps its own audio.</span></div></li>
+      </ul>
+    </li>
+    <li id="J3"><div class="row"><a class="id" href="#J3">J3</a><span class="q">The upload you choose</span></div>
+      <ul><li><div class="row"><span class="when last"></span><span class="out ok">built like any import (F), and it counts as accepted</span>
+        <span class="why">The old video goes, with its review options if it had any.</span></div></li></ul>
+    </li>
+  </ul>
+  </div>
+</section>
+
+<!-- ===================================================================== N -->
+<section id="N">
+  <header>
+    <h2><span class="tag">N</span> Numbers and word lists</h2>
+    <p>Every figure in the trees, with the name it has in the code.</p>
+  </header>
+  <div class="scroll">
+  <table>
+    <tr><th>Value</th><th>What it decides</th><th>Rule</th><th>In the code</th></tr>
+    <tr><td class="n">12%</td><td>fingerprint bits that may differ between two files of one recording</td><td>A1</td><td><code>AudioPrint kSameRecording</code></td></tr>
+    <tr><td class="n">1:20</td><td>shortest track that is looked up</td><td>A2</td><td><code>Matcher minTrackSecs</code></td></tr>
+    <tr><td class="n">40% · 0.26</td><td>pauses and pulse that make a track talk</td><td>A4</td><td><code>TalkCheck::measure</code></td></tr>
+    <tr><td class="n">14 days</td><td>before a track without a video is searched for again</td><td>A6</td><td><code>retryNotFoundDays</code></td></tr>
+    <tr><td class="n">30 min ×2</td><td>before a failed lookup is tried again</td><td>A7</td><td><code>requeueStale</code></td></tr>
+    <tr><td class="n">10</td><td>results asked of each query</td><td>B</td><td><code>YtDlp::search</code></td></tr>
+    <tr><td class="n">0.5 · 3 · 15 min</td><td>an upload's length against the track's</td><td>C3, C4</td><td><code>Matcher::lengthMismatch</code></td></tr>
+    <tr><td class="n">4 · 60%</td><td>uploads listened to; length of those listened to first</td><td>C9</td><td><code>runJob shortlist</code></td></tr>
+    <tr><td class="n">50% · 80% · 45 s</td><td>fingerprints that make it the song</td><td>R0</td><td><code>audioMatches</code></td></tr>
+    <tr><td class="n">72% · 60%</td><td>waveform that makes it the recording</td><td>R1</td><td><code>kOwnWaveform · audioReplaceable</code></td></tr>
+    <tr><td class="n">97%</td><td>waveform that outweighs a difference in names</td><td>R1</td><td><code>kOwnWaveformOtherVersion</code></td></tr>
+    <tr><td class="n">90%</td><td>of the track's length, below which a video is a cut</td><td>R1</td><td><code>kShortCut</code></td></tr>
+    <tr><td class="n">15 s</td><td>other audio inside the song before it counts as interrupted</td><td>R1, D1.6</td><td><code>kMaxInterruptedSec</code></td></tr>
+    <tr><td class="n">80% · 20% · 0.5</td><td>fingerprints, waveform and loudness agreement for placing by offset</td><td>R2</td><td><code>fitted</code></td></tr>
+    <tr><td class="n">90%</td><td>waveform, track against track, that makes two tracks one recording</td><td>R4</td><td><code>kSameTrack</code></td></tr>
+    <tr><td class="n">15%</td><td>by which the track's quality must exceed YouTube's</td><td>R6</td><td><code>libraryIsBetter</code></td></tr>
+    <tr><td class="n">90% · 8 pts</td><td>for a video to change the track it plays</td><td>D4.1</td><td><code>kTakeoverShare · kTakeoverMargin</code></td></tr>
+    <tr><td class="n">10% · 0.4% · 16</td><td>moving frame pairs; changed pixels; grey levels</td><td>D1.9</td><td><code>Muxer::checkStill</code></td></tr>
+    <tr><td class="n">30 min</td><td>downloads go straight to the account after a bot check</td><td>I4</td><td><code>YtDlp::run</code></td></tr>
+    <tr><td class="n">8 · 10 min · 2 h</td><td>failures that pause the queue; first pause; longest pause</td><td>I5</td><td><code>kFailStreakLimit · pauseBaseSecs · kMaxPauseSecs</code></td></tr>
+  </table>
+  </div>
+
+  <h3>Version words <span class="where">C6, R3 · Matcher versionTerms</span></h3>
+  <p class="words">cover, covered, piano, guitar, drum, drums, remix, nightcore, sped, slowed, reverb, 8d, reaction, reacts, react, reacting, karaoke, instrumental, inst, off vocal, offvocal, acoustic, live, teaser, trailer, preview, 1 hour, 1hour, loop, amv, mmd, sync, tutorial, mashup, medley, crossfade, xfd, full album, dance practice, behind the scenes, fancam, concert, shorts, 歌ってみた, 弾いてみた, 叩いてみた, 踊ってみた, カラオケ, ライブ, カバー, ピアノ, リアクション, 反応, 歌いました, 演奏してみた, 歌わせて, beat saber, project diva, full combo, perfect combo, expertplus, osu, gameplay, ハニプレ, プレイ動画, 譜面, フルコンボ, 耐久, メイキング, 予告, ティザー, クロスフェード, 試聴</p>
+
+  <h3>Fan words <span class="where">C7 · Matcher fanTerms</span></h3>
+  <p class="words">lyrics, lyric, romaji, sub, subs, subtitle, subtitles, unofficial, 非公式, vietsub, engsub, español, 歌詞, 翻译, 翻譯, 翻訳, 中日, 中字, 字幕, 和訳, 高音質, 가사, 자막, 해석, 발음, 번역, 한글, ซับไทย, つけてみた, 付けてみた, 描いてみた, pv 風, 手描き, 創作, 自制, 自製, compiled, fanmade, fan made, fan mv</p>
+
+  <h3>Other lists</h3>
+  <p class="words"><b>Official words</b> (C7): mv, m v, music video, official video, official music video, official, pv, 公式, ミュージックビデオ.<br>
+  <b>Label words</b> in a channel's name (C7): music, records, record, entertainment, label, レコード, ミュージック, エンタテインメント.<br>
+  <b>Audio-only variants</b> (A3): instrumental, inst, off vocal, offvocal, karaoke, カラオケ, backing track.<br>
+  <b>Talk titles</b> (A4): mc, talk, トーク, banter, stage banter, speech, interview, インタビュー, commentary, audio commentary, コメンタリー, voice drama, ボイスドラマ, メンバー紹介, band introduction(s), encore call, applause, 挨拶, ごあいさつ.<br>
+  <b>Synthesised voices</b> (R3), each by all its names: 初音ミク / Hatsune Miku, 鏡音リン, 鏡音レン, 巡音ルカ, GUMI, 可不 / KAFU, 重音テト, 裏命 / RIME, 星界, 狐子, 羽累, 結月ゆかり, 歌愛ユキ, ずんだもん, flower.<br>
+  <b>Refusals that pause</b> (I5): "HTTP Error 429", "too many requests", "not a bot", "rate-limited", "try again later".</p>
+</section>
+
+</main>
+</body>
+</html>
