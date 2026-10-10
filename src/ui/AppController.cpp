@@ -126,6 +126,7 @@ AppController::AppController(const AppOptions &options, QObject *parent)
     m_cfg.ytdlpArgs = m_settings->value(QStringLiteral("import/ytdlpArgs")).toStringList();
     if (YtDlp::looksLikeCookies(cookiesPath()))
         m_cfg.cookiesFile = cookiesPath();
+    m_cfg.accountOnBotCheck = m_settings->value(QStringLiteral("import/accountOnBotCheck"), false).toBool();
     m_cfg.pauseBaseSecs = m_settings->value(QStringLiteral("import/pauseSeconds"), m_cfg.pauseBaseSecs).toInt();
     if (qEnvironmentVariableIsSet("MVPLAYER_PAUSE_SECS"))
         m_cfg.pauseBaseSecs = qEnvironmentVariableIntValue("MVPLAYER_PAUSE_SECS");
@@ -371,6 +372,7 @@ void AppController::saveSettings()
     m_settings->setValue(QStringLiteral("import/replaceAudio"), m_cfg.replaceAudio);
     m_settings->setValue(QStringLiteral("import/allowUnofficial"), m_cfg.allowUnofficial);
     m_settings->setValue(QStringLiteral("import/skipStillImages"), m_cfg.skipStillImages);
+    m_settings->setValue(QStringLiteral("import/accountOnBotCheck"), m_cfg.accountOnBotCheck);
     m_settings->setValue(QStringLiteral("player/volume"), m_volume);
     m_settings->setValue(QStringLiteral("player/muted"), m_muted);
     m_settings->setValue(QStringLiteral("import/subtitleLangs"), m_cfg.subtitleLangs);
@@ -473,12 +475,32 @@ QString AppController::importCookies(const QString &file)
     out.setPermissions(QFileDevice::ReadOwner | QFileDevice::WriteOwner);
     if (out.write(source.readAll()) < 0 || !out.commit())
         return tr("Could not store the cookies.");
+    // What the pause wanted, where YouTube asked for a sign-in.
+    const bool wanted = pauseKind() == QLatin1String("cookies");
     m_cfg.cookiesFile = target;
     if (m_manager)
         m_manager->setSettings(m_cfg);
     setCookiesCheck({}, {});
     emit settingsChanged();
+    emit activityChanged();
+    if (wanted && m_cfg.accountOnBotCheck)
+        resumeImport();
     return {};
+}
+
+void AppController::setAccountOnBotCheck(bool v)
+{
+    if (v == m_cfg.accountOnBotCheck)
+        return;
+    const bool wanted = v && pauseKind() == QLatin1String("signin");
+    m_cfg.accountOnBotCheck = v;
+    saveSettings();
+    if (m_manager)
+        m_manager->setSettings(m_cfg);
+    emit settingsChanged();
+    emit activityChanged();
+    if (wanted)
+        resumeImport();
 }
 
 void AppController::setCookiesCheck(const QString &state, const QString &status)
@@ -541,6 +563,7 @@ void AppController::removeCookies()
         m_manager->setSettings(m_cfg);
     setCookiesCheck({}, {});
     emit settingsChanged();
+    emit activityChanged();
 }
 
 void AppController::approveVideo(qint64 videoId)
@@ -763,6 +786,18 @@ QString AppController::pauseReason() const
     return m_manager ? m_manager->pauseReason() : QString();
 }
 
+QString AppController::pauseKind() const
+{
+    const QString reason = pauseReason();
+    if (!importPaused() || !YtDlp::looksBotCheck(reason))
+        return {};
+    // No account, or one YouTube no longer takes: by this pause's own
+    // answer, or by the last check of the cookies.
+    if (!hasCookies() || YtDlp::cookiesExpired(reason) || m_cookiesState == QLatin1String("expired"))
+        return QStringLiteral("cookies");
+    return m_cfg.accountOnBotCheck ? QString() : QStringLiteral("signin");
+}
+
 void AppController::resumeImport()
 {
     if (m_manager)
@@ -862,6 +897,32 @@ QVariantList AppController::unmatchedTracks() const
     return out;
 }
 
+QVector<TrackInfo> AppController::sourceTracks(const VideoInfo &v) const
+{
+    // Several options under review wait for the same tracks, which point at
+    // one of them.
+    QVector<TrackInfo> tracks;
+    if (v.review) {
+        for (const VideoInfo &option : m_db->reviewOptions(v.reviewGroup > 0 ? v.reviewGroup : v.id))
+            tracks += m_db->tracksForVideo(option.id, true);
+    } else {
+        tracks = m_db->tracksForVideo(v.id, true);
+    }
+    std::sort(tracks.begin(), tracks.end(), [](const TrackInfo &a, const TrackInfo &b) {
+        return a.absent != b.absent ? !a.absent : betterSource(a, b);
+    });
+    return tracks;
+}
+
+QString AppController::trackLength(qint64 videoId) const
+{
+    const std::optional<VideoInfo> v = m_db ? m_db->video(videoId) : std::nullopt;
+    if (!v)
+        return {};
+    const QVector<TrackInfo> tracks = sourceTracks(*v);
+    return tracks.isEmpty() || tracks.first().duration <= 0 ? QString() : formatDuration(tracks.first().duration);
+}
+
 QVariantMap AppController::videoSources(qint64 videoId) const
 {
     if (!m_db)
@@ -869,18 +930,7 @@ QVariantMap AppController::videoSources(qint64 videoId) const
     const std::optional<VideoInfo> v = m_db->video(videoId);
     if (!v)
         return {};
-    // Several options under review wait for the same tracks, which point at
-    // one of them.
-    QVector<TrackInfo> tracks;
-    if (v->review) {
-        for (const VideoInfo &option : m_db->reviewOptions(v->reviewGroup > 0 ? v->reviewGroup : v->id))
-            tracks += m_db->tracksForVideo(option.id, true);
-    } else {
-        tracks = m_db->tracksForVideo(videoId, true);
-    }
-    std::sort(tracks.begin(), tracks.end(), [](const TrackInfo &a, const TrackInfo &b) {
-        return a.absent != b.absent ? !a.absent : betterSource(a, b);
-    });
+    const QVector<TrackInfo> tracks = sourceTracks(*v);
 
     // The tags that say what the recording is come first, as most players
     // list them; long free text last; the rest in between, by name.
@@ -917,11 +967,11 @@ QVariantMap AppController::videoSources(qint64 videoId) const
         if (t.channels > 0)
             format << (t.channels == 1 ? QStringLiteral("mono") : t.channels == 2 ? QStringLiteral("stereo")
                                                                                    : QStringLiteral("%1 ch").arg(t.channels));
-        format << formatDuration(t.duration);
         format.removeAll(QString());
         files << QVariantMap{
             {QStringLiteral("path"), displayPath(t.path)},
             {QStringLiteral("absent"), t.absent},
+            {QStringLiteral("length"), t.duration > 0 ? formatDuration(t.duration) : QString()},
             {QStringLiteral("format"), format.join(QStringLiteral(" · "))},
             {QStringLiteral("tags"), tags},
         };
@@ -930,6 +980,7 @@ QVariantMap AppController::videoSources(qint64 videoId) const
         {QStringLiteral("ytUrl"), QStringLiteral("https://www.youtube.com/watch?v=") + v->ytId},
         {QStringLiteral("ytTitle"), v->ytTitle},
         {QStringLiteral("ytChannel"), v->ytChannel},
+        {QStringLiteral("videoLength"), v->duration > 0 ? formatDuration(v->duration) : QString()},
         {QStringLiteral("files"), files},
     };
 }

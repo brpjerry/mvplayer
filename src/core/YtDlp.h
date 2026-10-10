@@ -20,11 +20,19 @@ class QTemporaryFile;
 // in, and for nothing else: searching and ordinary downloads stay anonymous,
 // which also keeps the "1080p Premium" picture that signed-in clients are
 // not offered.
+//
+// YouTube can refuse a connection's guests altogether ("Sign in to confirm
+// you're not a bot"): every client, every video, for days. There is nothing
+// to solve; what it asks for is the sign-in. With `accountOnBotCheck` a
+// request refused that way is made again with the account, and while guests
+// are refused the downloads go to the account straight away. That is for
+// the user to switch on: an account that downloads a great deal is one
+// YouTube may restrict.
 class YtDlp
 {
 public:
     YtDlp(const QString &program, const QStringList &extraArgs, const QString &cookiesFile,
-          const std::atomic<bool> *cancel);
+          const std::atomic<bool> *cancel, bool accountOnBotCheck = false);
     ~YtDlp();
 
     bool hasCookies() const { return !m_cookiesFile.isEmpty(); }
@@ -89,6 +97,8 @@ public:
     // True when an error message means YouTube is refusing this client
     // altogether (rate limit, bot check) rather than one video failing.
     static bool looksBlocked(const QString &error);
+    // ... and when what it wants of this client is a sign-in.
+    static bool looksBotCheck(const QString &error);
     // True when an error message says the video itself is gone or withheld
     // (removed, private, not available here): asking again will not help.
     static bool looksUnavailable(const QString &error);
@@ -102,6 +112,7 @@ private:
     // Runs yt-dlp anonymously, and once more with the account when the
     // failure says that signing in is what is missing.
     ProcResult run(const QStringList &args, const ProcOptions &opts);
+    ProcResult runWithAccount(const QStringList &account, const QStringList &args, const ProcOptions &opts);
     static QString url(const QString &id);
     QString cacheEntry(const QString &id) const; // the video's folder in the cache, or empty
     // The video's description from the cache, while its addresses are good.
@@ -113,6 +124,7 @@ private:
     QString m_program;
     QStringList m_extraArgs;
     QString m_cookiesFile;
+    bool m_accountOnBotCheck = false;
     // yt-dlp writes refreshed cookies back to the file it is given, and
     // several run at once: each wrapper works on a copy of its own.
     std::unique_ptr<QTemporaryFile> m_cookiesCopy;

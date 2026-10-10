@@ -491,11 +491,14 @@ ApplicationWindow {
             return "" + (Date.now() - t0)
         }
         case "settings": arg === "off" ? settings.close() : settings.open(); return "ok"
+        case "settings-scroll": settings.scrollTo(parseInt(arg)); return "ok" // to this many pixels down
         case "retry": App.retryUnmatched(); return "ok"
         case "rescan": App.rescan(); return "ok"
         case "cookies": return (arg === "" ? (App.removeCookies(), "") : App.importCookies(arg)) || "ok"
         case "check-quality": App.checkQuality(); return "ok"
         case "check-cookies": App.checkCookies(); return "ok"
+        case "sign-in-on-bot-check": App.accountOnBotCheck = arg !== "off"; return "ok"
+        case "resume": App.resumeImport(); return "ok"
         case "fetch-subtitles": App.fetchSubtitles(); return "ok"
         case "delete-untracked": return "" + App.deleteUntracked()
         case "reimport": return "" + App.reimportVideo(parseInt(arg)) // reimport <video id>
@@ -575,8 +578,9 @@ ApplicationWindow {
                 subtitleLangs: App.subtitleLangs, subtitlesOn: App.subtitlesOn, hasSubtitles: window.mpv.hasSubtitles,
                 fetchingSubtitles: App.fetchingSubtitles, cookies: App.hasCookies, checkingCookies: App.checkingCookies, cookiesState: App.cookiesState,
                 cookiesStatus: App.cookiesStatus, checkingQuality: App.checkingQuality, reviewCount: App.reviewCount,
+                paused: App.importPaused, pauseKind: App.pauseKind, accountOnBotCheck: App.accountOnBotCheck,
                 facet: App.videos.facetType, facetValue: App.videos.facetValue, section: App.videos.section,
-                orphanCount: App.orphanCount, reviewLabel: controlBar.reviewLabel,
+                orphanCount: App.orphanCount, reviewLabel: controlBar.reviewLabel, trackLength: controlBar.trackLength,
                 replacing: App.replacing, replaceStage: App.replaceStage, replaceDialog: replaceDialog.opened, replaceOptions: replaceDialog.options.length, replaceMode: replaceDialog.mode,
                 accent: "" + Theme.accent, accentMode: App.accent, theme: App.themeMode, dark: Theme.dark,
                 systemDark: App.systemDark, bg: "" + Theme.bg, musicDirs: App.musicDirs, frameColor: "" + mpv.frameColor,

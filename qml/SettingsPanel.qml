@@ -77,6 +77,8 @@ Popup {
         onAccepted: root.cookiesError = App.importCookies(App.urlToPath(selectedFile))
     }
     property string cookiesError: ""
+    // For automation: how far down the settings are shown.
+    function scrollTo(y) { flick.contentY = Math.max(0, Math.min(y, flick.contentHeight - flick.height)) }
 
     component FolderRow: Item {
         id: folderRow
@@ -935,6 +937,14 @@ Popup {
                                 onClicked: App.checkQuality()
                             }
                         }
+                    }
+                    Item { visible: App.hasCookies; width: 1; height: 6 }
+                    SwitchRow {
+                        visible: App.hasCookies
+                        label: "Sign in when YouTube refuses guests"
+                        hint: "When YouTube asks a guest to “confirm you’re not a bot”, download with the account. Heavy use can get an account restricted."
+                        checked: App.accountOnBotCheck
+                        onToggled: (c) => App.accountOnBotCheck = c
                     }
 
                     // Windows only: elsewhere yt-dlp is updated with the system.

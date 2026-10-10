@@ -40,6 +40,9 @@ Rectangle {
     }
     // What a video under review is playing right now; empty otherwise.
     readonly property string reviewLabel: audioSwitch.reviewing ? chipLabel.text : ""
+    // How long the track of a video under review is: the seek bar has the
+    // video's length, and a video much shorter than its track is a cut.
+    readonly property string trackLength: current !== null && current.review === true ? App.trackLength(current.videoId) : ""
 
     HoverHandler { id: hover }
     // Swallow clicks so they do not reach the video underneath in fullscreen.
@@ -97,12 +100,23 @@ Rectangle {
                 elide: Text.ElideRight
                 Behavior on color { ColorAnimation { duration: Theme.fast } }
             }
-            Text {
+            Row {
                 width: parent.width
-                text: root.current ? root.current.artist.replace(/; /g, ", ") : ""
-                color: Theme.textDim
-                font.pixelSize: 12
-                elide: Text.ElideRight
+                Text {
+                    width: Math.min(implicitWidth, parent.width - (trackLengthLabel.visible ? trackLengthLabel.implicitWidth : 0))
+                    text: root.current ? root.current.artist.replace(/; /g, ", ") : ""
+                    color: Theme.textDim
+                    font.pixelSize: 12
+                    elide: Text.ElideRight
+                }
+                Text {
+                    id: trackLengthLabel
+                    visible: root.trackLength.length > 0
+                    text: "  ·  Track " + root.trackLength
+                    color: Theme.textDim
+                    font.pixelSize: 12
+                    font.features: { "tnum": 1 }
+                }
             }
         }
         MouseArea {

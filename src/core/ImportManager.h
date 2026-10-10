@@ -26,6 +26,7 @@ struct ImportSettings {
     int concurrency = 2;
     QStringList ytdlpArgs;         // extra yt-dlp arguments (cookies, proxies, ...)
     QString cookiesFile;           // cookies.txt of a YouTube Premium account; empty: none
+    bool accountOnBotCheck = false; // sign in with it where YouTube refuses a guest with its bot check
     QStringList subtitleLangs;     // subtitles to fetch with a video ("en"); empty: none
     int retryNotFoundDays = 14;
     int pauseBaseSecs = 600;       // first wait after YouTube blocks requests; doubles on repeats
@@ -147,6 +148,10 @@ private:
     // Re-import: deletes the track's videos (its own, or the options it has
     // waiting) whose file is empty or missing. True when there were any.
     bool dropBrokenVideos(const TrackInfo &track);
+    // Re-import: deletes the options the track has waiting for review that
+    // today's rules rule out by their length for every track waiting on
+    // them. Needs no request. True when there were any.
+    bool dropOutdatedOptions(const TrackInfo &track);
     void pump();
     void onScanFinished(const LibraryScanner::Result &r);
     void onJobFinished(qint64 trackId);

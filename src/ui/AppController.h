@@ -78,6 +78,9 @@ class AppController : public QObject
     Q_PROPERTY(bool checkingCookies READ checkingCookies NOTIFY cookiesCheckChanged)
     Q_PROPERTY(QString cookiesState READ cookiesState NOTIFY cookiesCheckChanged)
     Q_PROPERTY(QString cookiesStatus READ cookiesStatus NOTIFY cookiesCheckChanged)
+    // Whether the account is used where YouTube refuses a guest with its
+    // bot check ("Sign in to confirm you're not a bot"): for the user to say.
+    Q_PROPERTY(bool accountOnBotCheck READ accountOnBotCheck WRITE setAccountOnBotCheck NOTIFY settingsChanged)
 
     // Replacing a video by hand: whether a search, check or replacement
     // runs, what it is doing, and for which video.
@@ -93,6 +96,11 @@ class AppController : public QObject
     // YouTube is refusing requests; the queue waits and resumes by itself.
     Q_PROPERTY(bool importPaused READ importPaused NOTIFY activityChanged)
     Q_PROPERTY(QString pauseReason READ pauseReason NOTIFY activityChanged)
+    // What the pause wants of the user: "" (nothing: requests are limited
+    // and it passes), "signin" (YouTube asks for a sign-in, and the account
+    // can give it if the user agrees) or "cookies" (it asks for one, and
+    // there is no account whose cookies work).
+    Q_PROPERTY(QString pauseKind READ pauseKind NOTIFY activityChanged)
 
     // "auto" (follow the playing video) or a colour such as "#8b7dff"
     Q_PROPERTY(QString accent READ accent WRITE setAccent NOTIFY appearanceChanged)
@@ -162,6 +170,8 @@ public:
     QString cookiesState() const { return m_cookiesState; }
     QString cookiesStatus() const { return m_cookiesStatus; }
     Q_INVOKABLE void checkCookies();
+    bool accountOnBotCheck() const { return m_cfg.accountOnBotCheck; }
+    void setAccountOnBotCheck(bool v);
     bool checkingQuality() const;
     Q_INVOKABLE void checkQuality();
 
@@ -173,6 +183,7 @@ public:
     QString statusText() const;
     bool importPaused() const;
     QString pauseReason() const;
+    QString pauseKind() const;
     Q_INVOKABLE void resumeImport();
 
     QString accent() const { return m_accent; }
@@ -212,10 +223,12 @@ public:
     Q_INVOKABLE bool replaceWith(qint64 videoId, const QString &ytId);
     static QString youtubeId(const QString &text);
     Q_INVOKABLE QVariantList unmatchedTracks() const;
-    // What a video stands for: {ytUrl, ytTitle, ytChannel, files}. files:
-    // the music files that have it, the one whose tags it carries first,
-    // each {path, absent, format, tags: [{key, value}]}.
+    // What a video stands for: {ytUrl, ytTitle, ytChannel, videoLength,
+    // files}. files: the music files that have it, the one whose tags it
+    // carries first, each {path, absent, length, format, tags: [{key, value}]}.
     Q_INVOKABLE QVariantMap videoSources(qint64 videoId) const;
+    // How long the first of those files plays ("4:59"); empty with none.
+    Q_INVOKABLE QString trackLength(qint64 videoId) const;
     Q_INVOKABLE QString urlToPath(const QUrl &url) const;
     Q_INVOKABLE QUrl pathToUrl(const QString &path) const;
     Q_INVOKABLE QString displayPath(const QString &path) const;
@@ -245,6 +258,9 @@ private:
     void saveSettings();
     QString cookiesPath() const;
     void setCookiesCheck(const QString &state, const QString &status);
+    // The music files that have a video, those still in the music folders
+    // first, the best of them first. Needs the library open.
+    QVector<TrackInfo> sourceTracks(const VideoInfo &v) const;
 
     AppOptions m_options;
     std::unique_ptr<QSettings> m_settings;

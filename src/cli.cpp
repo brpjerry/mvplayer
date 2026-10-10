@@ -62,6 +62,7 @@ int main(int argc, char **argv)
         {QStringLiteral("retry"), QStringLiteral("Retry tracks that previously failed or had no video.")},
         {QStringLiteral("ytdlp-arg"), QStringLiteral("Extra argument passed to yt-dlp (repeatable)."), QStringLiteral("arg")},
         {QStringLiteral("cookies"), QStringLiteral("cookies.txt of a YouTube Premium account, for its higher audio bitrate."), QStringLiteral("file")},
+        {QStringLiteral("sign-in-on-bot-check"), QStringLiteral("Where YouTube refuses a guest (\"Sign in to confirm you're not a bot\"), make the request with the account (needs --cookies).")},
         {QStringLiteral("approve"), QStringLiteral("Accept a video that waits for review, by its YouTube id (repeatable)."), QStringLiteral("id")},
         {QStringLiteral("reject"), QStringLiteral("Turn down a video that waits for review, by its YouTube id: it is deleted and its tracks have no video (repeatable)."), QStringLiteral("id")},
         {QStringLiteral("subtitles"), QStringLiteral("Languages of the subtitles to fetch with each video, e.g. \"en,ja\"."), QStringLiteral("languages")},
@@ -247,6 +248,11 @@ int main(int argc, char **argv)
             out << "error: " << cfg.cookiesFile << " is not a cookies.txt with YouTube cookies" << Qt::endl;
             return 1;
         }
+    }
+    cfg.accountOnBotCheck = parser.isSet(QStringLiteral("sign-in-on-bot-check"));
+    if (cfg.accountOnBotCheck && cfg.cookiesFile.isEmpty()) {
+        out << "error: --sign-in-on-bot-check needs --cookies" << Qt::endl;
+        return 1;
     }
     if (pos.value(0) == QLatin1String("check-cookies")) {
         if (cfg.cookiesFile.isEmpty()) {

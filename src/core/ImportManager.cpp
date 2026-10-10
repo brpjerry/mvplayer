@@ -837,7 +837,7 @@ void ImportManager::subtitleVideos(const ImportSettings &cfg)
             videos << v;
     }
     m_upgradeTotal = int(videos.size());
-    YtDlp yt(qEnvironmentVariable("MVPLAYER_YTDLP", toolPath(QStringLiteral("yt-dlp"))), cfg.ytdlpArgs, cfg.cookiesFile, &m_cancel);
+    YtDlp yt(qEnvironmentVariable("MVPLAYER_YTDLP", toolPath(QStringLiteral("yt-dlp"))), cfg.ytdlpArgs, cfg.cookiesFile, &m_cancel, cfg.accountOnBotCheck);
     yt.setCacheDir(cacheDir(cfg.mvDir));
     const QString workDir = QDir(dataDir(cfg.mvDir)).filePath(QStringLiteral("tmp/subtitles"));
     int withSubs = 0, failed = 0;
@@ -958,7 +958,7 @@ QString ImportManager::upgradeVideo(const VideoInfo &video, const ImportSettings
         return QStringLiteral("skipped");
     }
 
-    YtDlp yt(qEnvironmentVariable("MVPLAYER_YTDLP", toolPath(QStringLiteral("yt-dlp"))), cfg.ytdlpArgs, cfg.cookiesFile, &m_cancel);
+    YtDlp yt(qEnvironmentVariable("MVPLAYER_YTDLP", toolPath(QStringLiteral("yt-dlp"))), cfg.ytdlpArgs, cfg.cookiesFile, &m_cancel, cfg.accountOnBotCheck);
     yt.setCacheDir(cacheDir(cfg.mvDir));
     QString error;
     QJsonObject offer;
@@ -1079,11 +1079,93 @@ void ImportManager::retryUnmatched()
     pump();
 }
 
+bool ImportManager::dropOutdatedOptions(const TrackInfo &track)
+{
+    // An option brought in for review under earlier rules, which today's
+    // would not examine: an upload under half the track's length, the
+    // opening of a show against the whole song. It was only ever there to
+    // be judged, and the rule has judged it. Several tracks can wait on the
+    // same options (a single and its album cut): one that still fits any of
+    // them stays.
+    const std::optional<VideoInfo> own = track.videoId > 0 ? m_db->video(track.videoId) : std::nullopt;
+    if (!own || !own->review)
+        return false;
+    const QVector<VideoInfo> options = m_db->reviewOptions(own->reviewGroup > 0 ? own->reviewGroup : own->id);
+    QVector<TrackInfo> waiting;
+    for (const VideoInfo &o : options)
+        waiting += m_db->tracksForVideo(o.id);
+    if (waiting.isEmpty())
+        return false;
+    QVector<VideoInfo> kept, outdated;
+    QHash<qint64, QString> reasons;
+    for (const VideoInfo &o : options) {
+        QString why;
+        for (const TrackInfo &t : std::as_const(waiting)) {
+            why = Matcher::lengthMismatch(t, o.duration);
+            if (why.isEmpty())
+                break;
+        }
+        if (why.isEmpty()) {
+            kept.append(o);
+        } else {
+            outdated.append(o);
+            reasons.insert(o.id, why);
+        }
+    }
+    bool dropped = false;
+    for (const VideoInfo &v : std::as_const(outdated)) {
+        if (!claimVideo(v.ytId))
+            break; // cancelled
+        // (Another track of the group may have been here meanwhile.)
+        if (!m_db->video(v.id)) {
+            releaseVideo(v.ytId);
+            continue;
+        }
+        // Its tracks keep the options that are left; with none left they
+        // have no video (the database unlinks them) and look for one.
+        if (!kept.isEmpty())
+            m_db->relinkTracks(v.id, kept.first().id);
+        m_db->removeVideo(v.id);
+        removeVideoFiles(v);
+        const QString root = QDir(settings().mvDir).absolutePath();
+        const QString dir = QFileInfo(v.path).absolutePath();
+        if (dir != root && dir.startsWith(root + QLatin1Char('/')))
+            QDir().rmdir(dir);
+        releaseVideo(v.ytId);
+        dropped = true;
+        qInfo().noquote() << QStringLiteral("[import] “%1” [%2]: let go of “%3”, which waited for review: %4 (%5 of %6)")
+                                 .arg(track.title, track.album, v.ytTitle, reasons.value(v.id), formatDuration(v.duration),
+                                      formatDuration(track.duration));
+        appendLog({{QStringLiteral("event"), QStringLiteral("outdated-option")}, {QStringLiteral("videoId"), v.id},
+                   {QStringLiteral("id"), v.ytId}, {QStringLiteral("title"), v.ytTitle}, {QStringLiteral("channel"), v.ytChannel},
+                   {QStringLiteral("duration"), qRound(v.duration)}, {QStringLiteral("reason"), reasons.value(v.id)},
+                   {QStringLiteral("trackId"), track.id}, {QStringLiteral("track"), track.title},
+                   {QStringLiteral("trackDuration"), qRound(track.duration)}});
+        emit videoRemoved(v.id);
+    }
+    if (dropped && kept.isEmpty()) {
+        // The other tracks that waited on them look for a video again too.
+        for (const TrackInfo &t : std::as_const(waiting)) {
+            if (t.id != track.id && (track.recording <= 0 || t.recording != track.recording))
+                m_db->setTrackReimport(t.id);
+        }
+        QMetaObject::invokeMethod(this, [this] {
+            if (!m_started)
+                return;
+            for (const TrackInfo &t : m_db->pendingRecordings())
+                enqueue(t.id);
+            pump();
+        }, Qt::QueuedConnection);
+    }
+    return dropped;
+}
+
 int ImportManager::reimport(const QVector<qint64> &trackIds)
 {
     if (!m_started)
         return 0;
     QSet<qint64> recordings;
+    QVector<qint64> marked;
     int queued = 0;
     for (qint64 id : trackIds) {
         const std::optional<TrackInfo> t = m_db->track(id);
@@ -1096,10 +1178,21 @@ int ImportManager::reimport(const QVector<qint64> &trackIds)
             continue;
         recordings.insert(key);
         m_db->setTrackReimport(t->id);
+        marked << t->id;
         ++queued;
     }
     if (queued == 0)
         return 0;
+    // What the rules settle without asking YouTube is settled now: a lookup
+    // may have to wait out a pause.
+    m_jobPool.start([this, marked] {
+        for (qint64 id : marked) {
+            if (m_cancel)
+                break;
+            if (const std::optional<TrackInfo> t = m_db->track(id))
+                dropOutdatedOptions(*t);
+        }
+    });
     for (const TrackInfo &t : m_db->pendingRecordings())
         enqueue(t.id);
     qInfo("[import] re-importing %d tracks", queued);
@@ -1290,7 +1383,7 @@ void ImportManager::replaceSearchJob(const VideoInfo &video, const TrackInfo &tr
     auto fail = [&](const QString &why) { emit replaceOptions(video.id, {}, why); };
 
     stage(QStringLiteral("Searching"));
-    YtDlp yt(qEnvironmentVariable("MVPLAYER_YTDLP", toolPath(QStringLiteral("yt-dlp"))), cfg.ytdlpArgs, cfg.cookiesFile, &m_cancel);
+    YtDlp yt(qEnvironmentVariable("MVPLAYER_YTDLP", toolPath(QStringLiteral("yt-dlp"))), cfg.ytdlpArgs, cfg.cookiesFile, &m_cancel, cfg.accountOnBotCheck);
     yt.setCacheDir(cacheDir(cfg.mvDir));
     QVector<YtCandidate> candidates;
     QSet<QString> seen;
@@ -1361,7 +1454,7 @@ void ImportManager::replaceCheckJob(const VideoInfo &video, const TrackInfo &tra
     emit replaceStageChanged(video.id, QStringLiteral("Checking audio"));
     QVariantMap r{{QStringLiteral("id"), ytId}, {QStringLiteral("matches"), false}};
     auto answer = [&] { emit replaceChecked(video.id, r); };
-    YtDlp yt(qEnvironmentVariable("MVPLAYER_YTDLP", toolPath(QStringLiteral("yt-dlp"))), cfg.ytdlpArgs, cfg.cookiesFile, &m_cancel);
+    YtDlp yt(qEnvironmentVariable("MVPLAYER_YTDLP", toolPath(QStringLiteral("yt-dlp"))), cfg.ytdlpArgs, cfg.cookiesFile, &m_cancel, cfg.accountOnBotCheck);
     yt.setCacheDir(cacheDir(cfg.mvDir));
     std::vector<int16_t> trackPcm;
     QString error;
@@ -1466,7 +1559,7 @@ void ImportManager::replaceWithJob(const VideoInfo &video, const TrackInfo &trac
         return;
     }
 
-    YtDlp yt(qEnvironmentVariable("MVPLAYER_YTDLP", toolPath(QStringLiteral("yt-dlp"))), cfg.ytdlpArgs, cfg.cookiesFile, &m_cancel);
+    YtDlp yt(qEnvironmentVariable("MVPLAYER_YTDLP", toolPath(QStringLiteral("yt-dlp"))), cfg.ytdlpArgs, cfg.cookiesFile, &m_cancel, cfg.accountOnBotCheck);
     yt.setCacheDir(cacheDir(cfg.mvDir));
     const QString dir = QDir(workDir).filePath(ytId);
     QDir().mkpath(dir);
@@ -1733,7 +1826,7 @@ void ImportManager::runJob(qint64 trackId, const ImportSettings &cfg)
         return;
     if (m_blocked)
         return; // stays pending; picked up again when the pause ends
-    if (maybe->reimport && dropBrokenVideos(*maybe)) {
+    if (maybe->reimport && (dropBrokenVideos(*maybe) | dropOutdatedOptions(*maybe))) {
         maybe = m_db->track(trackId);
         if (!maybe)
             return;
@@ -1968,7 +2061,7 @@ void ImportManager::runJob(qint64 trackId, const ImportSettings &cfg)
 
     // ---- 1. Search ---------------------------------------------------------
     report(QStringLiteral("Searching"));
-    YtDlp yt(qEnvironmentVariable("MVPLAYER_YTDLP", toolPath(QStringLiteral("yt-dlp"))), cfg.ytdlpArgs, cfg.cookiesFile, &m_cancel);
+    YtDlp yt(qEnvironmentVariable("MVPLAYER_YTDLP", toolPath(QStringLiteral("yt-dlp"))), cfg.ytdlpArgs, cfg.cookiesFile, &m_cancel, cfg.accountOnBotCheck);
     yt.setCacheDir(cacheDir(cfg.mvDir));
     ytForLog = &yt;
     QVector<YtCandidate> candidates;

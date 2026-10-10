@@ -6,6 +6,9 @@
 # tracks.
 set -euo pipefail
 export MVPLAYER_NO_MUSICBRAINZ=1
+# The songs made up here run 40 to 50 seconds; tracks under 1:20 are not
+# looked up otherwise (see "short tracks" below).
+export MVPLAYER_MIN_TRACK_SECS=30
 
 BUILD=${1:-build}
 # On Windows "mvplayer" alone would name the QML module's build folder.
@@ -368,6 +371,28 @@ OUT=$(MVPLAYER_YTDLP="$SITE" timeout 120 "$BUILD/mvplayer-import" --allow-still-
 echo "$OUT" | grep -E "^\[import\]|^done:" | cut -c1-150
 [[ "$OUT" == *"for your review (1 option)"* && "$OUT" == *"done: 0 videos and 1 for review"* ]]
 grep -q "a cut of the song: 40 s of 50 s" "$WORK/mvlib10/.mvplayer/import-log.jsonl"
+# Under half the track it is not examined at all: the opening of a show
+# against the whole song. Nothing of it is downloaded.
+mkdir -p "$WORK/mvlib12"
+rm -f "$WORK/site-args"
+echo '{"entries": [{"id": "tvs", "ie_key": "Youtube", "title": "Hal - Seven (Official Video)", "channel": "Hal", "duration": 24, "view_count": 1000, "channel_is_verified": true}]}' > "$WORK/site-search.json"
+OUT=$(MVPLAYER_YTDLP="$SITE" timeout 120 "$BUILD/mvplayer-import" --allow-still-images --music-dir "$WORK/lib10" --mv-dir "$WORK/mvlib12" --jobs 1 2>&1)
+echo "$OUT" | grep -E "^\[import\]|^done:" | cut -c1-150
+[[ "$OUT" == *"done: 0 videos; tracks: not_found=1"* ]]
+grep -q "under half the track's length" "$WORK/mvlib12/.mvplayer/import-log.jsonl"
+! grep -q -v ytsearch "$WORK/site-args"
+# An option that waits for review from before that rule goes with a
+# re-import of its track: here the cut above, taken for 20 s long (and
+# yesterday's search results, which have it at 40 s, forgotten).
+python3 -c "import sqlite3, sys; db = sqlite3.connect(sys.argv[1]); db.execute('UPDATE videos SET duration = 20'); db.commit()" "$WORK/mvlib10/.mvplayer/library.db"
+rm -rf "$WORK/mvlib10/.mvplayer/cache"
+[[ -s "$WORK/mvlib10/Hal/Seven [cut].mkv" ]]
+OUT=$(MVPLAYER_YTDLP="$SITE" timeout 120 "$BUILD/mvplayer-import" --allow-still-images --music-dir "$WORK/lib10" --mv-dir "$WORK/mvlib10" --jobs 1 --reimport "$WORK/lib10" 2>&1)
+echo "$OUT" | grep -E "^\[import\]|^done:" | cut -c1-150
+[[ "$OUT" == *"let go of “Hal - Seven (Official Video)”, which waited for review: under half the track's length"* ]]
+[[ "$OUT" == *"done: 0 videos; tracks: not_found=1"* ]]
+[[ ! -e "$WORK/mvlib10/Hal/Seven [cut].mkv" ]]
+grep -q '"event":"outdated-option"' "$WORK/mvlib10/.mvplayer/import-log.jsonl"
 
 echo "== a video changes hands"
 # "Sixth" is the song "Six" with something else over it for one second in
@@ -643,6 +668,83 @@ fi
 OUT=$(MVPLAYER_PAUSE_SECS=1 MVPLAYER_YTDLP="$REFUSE" timeout 100 "$BUILD/mvplayer-import" --music-dir "$WORK/lib7" --mv-dir "$WORK/mvlib8" --jobs 1 2>&1)
 echo "$OUT" | grep -E "^\[import\] paused|^done:" | cut -c1-70
 [[ "$OUT" == *"paused for 0:01"* && "$OUT" == *"paused for 0:02"* && "$OUT" == *"paused for 0:04"* ]]
+
+echo "== short tracks, and the TV size"
+# A track under 1:20 is not looked up: an interlude, a jingle. A show's
+# opening cut of a song runs a minute and a half and is, whatever its title
+# calls it — also one an earlier rule had skipped: the next scan takes that
+# back.
+mkdir -p "$WORK/lib16/Ivy" "$WORK/mvlib16"
+ffmpeg -v error -y -f lavfi -i "$(song 240 37 | sed 's/d=40/d=60/')" -metadata title="Interlude" -metadata artist=Ivy "$WORK/lib16/Ivy/interlude.flac"
+ffmpeg -v error -y -f lavfi -i "$(song 290 43 | sed 's/d=40/d=90/')" -metadata title="Nine (TV size)" -metadata artist=Ivy "$WORK/lib16/Ivy/nine.flac"
+touch -d "10 seconds ago" "$WORK/lib16/Ivy/interlude.flac" "$WORK/lib16/Ivy/nine.flac"
+ffmpeg -v error -y -i "$WORK/lib16/Ivy/nine.flac" -c:a libopus -b:a 96k "$WORK/site-audio.opus"
+ffmpeg -v error -y -f lavfi -i "testsrc2=s=160x90:r=10:d=90" -c:v libx264 -preset ultrafast "$WORK/site-video.mkv"
+echo '{"entries": [{"id": "tvs", "ie_key": "Youtube", "title": "Ivy - Nine (Official Video)", "channel": "Ivy", "duration": 90, "view_count": 1000, "channel_is_verified": true}]}' > "$WORK/site-search.json"
+short() { MVPLAYER_YTDLP="$SITE" timeout 120 "$BUILD/mvplayer-import" --allow-still-images --music-dir "$WORK/lib16" --mv-dir "$WORK/mvlib16" --jobs 1 2>&1 | grep -E "^\[import\]|^done:" | cut -c1-150; }
+short_states() { python3 -c "import sqlite3, sys; print(sorted(sqlite3.connect(sys.argv[1]).execute('SELECT title, state, message FROM tracks').fetchall()))" "$WORK/mvlib16/.mvplayer/library.db"; }
+MVPLAYER_MIN_TRACK_SECS=120 short
+[[ "$(short_states)" == "[('Interlude', 'skipped', '60-second track'), ('Nine (TV size)', 'skipped', '90-second track')]" ]]
+(unset MVPLAYER_MIN_TRACK_SECS; short)
+STATES=$(short_states); echo "$STATES" | cut -c1-150
+[[ "$STATES" == "[('Interlude', 'skipped', '60-second track'), ('Nine (TV size)', 'done', "* ]]
+grep -q '"what":"unskipped"' "$WORK/mvlib16/.mvplayer/import-log.jsonl"
+
+echo "== signed in past the bot check"
+# YouTube refuses this connection's guests every video page ("Sign in to
+# confirm you're not a bot") and serves the account. There is nothing to
+# solve: the sign-in is what it asks for. Without the user's say the account
+# is left out of it and the queue pauses; with it, the refused request is
+# made again signed in, and the next ones go to the account straight away.
+mkdir -p "$WORK/mvlib13" "$WORK/mvlib14" "$WORK/mvlib15"
+ffmpeg -v error -y -i "$WORK/lib9/Gil/six.flac" -c:a libopus -b:a 96k "$WORK/site-audio.opus"
+ffmpeg -v error -y -i "$WORK/mv.mkv" -map 0:v:0 -c copy -t 50 "$WORK/site-video.mkv"
+echo '{"entries": [{"id": "own", "ie_key": "Youtube", "title": "Gil - Six (Official Video)", "channel": "Gil", "duration": 50, "view_count": 1000, "channel_is_verified": true}]}' > "$WORK/site-search.json"
+cat > "$WORK/fake-guard" <<FAKE
+#!/bin/sh
+echo "\$*" >> "$WORK/guard-args"
+refuse() {
+    n=\$(cat "$WORK/guarded"); echo \$((n + 1)) > "$WORK/guarded"
+    if [ "\$n" -lt 2 ]; then echo "ERROR: [youtube] own: Sign in to confirm you’re not a bot" >&2; else echo "ERROR: [youtube] own: Video unavailable" >&2; fi
+    exit 1
+}
+case " \$* " in
+*ytsearch*) ;;
+*" --load-info-json "*) echo "ERROR: unable to download video data: HTTP Error 403: Forbidden" >&2; exit 1 ;;
+*" --cookies "*) if [ -f "$WORK/guard-expired" ]; then
+        echo "WARNING: [youtube] The provided YouTube account cookies are no longer valid." >&2
+        refuse
+    fi ;;
+*)  refuse ;;
+esac
+exec sh "$WORK/fake-site" "\$@"
+FAKE
+chmod +x "$WORK/fake-guard"
+GUARD="$WORK/fake-guard"
+if [[ -n "$EXE" ]]; then
+    printf '@"%s" "%%~dp0fake-guard" %%*\r\n' "$(cygpath -w "$(command -v sh)")" > "$WORK/fake-guard.cmd"
+    GUARD="$WORK/fake-guard.cmd"
+fi
+guard() { echo 0 > "$WORK/guarded"; rm -f "$WORK/guard-args"; MVPLAYER_PAUSE_SECS=1 MVPLAYER_YTDLP="$GUARD" timeout 100 "$BUILD/mvplayer-import" --allow-still-images --music-dir "$WORK/lib9" --jobs 1 --cookies "$WORK/cookies.txt" "$@" 2>&1; }
+OUT=$(guard --mv-dir "$WORK/mvlib13")
+echo "$OUT" | grep -E "^\[import\] paused|^done:" | cut -c1-70
+[[ "$OUT" == *"paused for 0:01"* && "$OUT" == *"done: 0 videos"* ]]
+! grep -q -e "--cookies" "$WORK/guard-args"
+OUT=$(guard --mv-dir "$WORK/mvlib14" --sign-in-on-bot-check)
+echo "$OUT" | grep -E "^\[import\] paused|^done:" | cut -c1-70
+[[ "$OUT" != *"paused for"* && "$OUT" == *"done: 1 videos; tracks: done=1"* ]]
+# One request was refused as a guest; the video's page was asked signed in
+# without trying that again.
+[[ $(cat "$WORK/guarded") -eq 1 ]]
+[[ $(grep -c -e "--cookies" "$WORK/guard-args") -ge 2 ]]
+! grep -q -e "--cookies $WORK/cookies.txt" "$WORK/guard-args"
+# Cookies the browser has rotated since: yt-dlp carries on as a guest and is
+# refused like one. The pause says what is wrong.
+touch "$WORK/guard-expired"
+OUT=$(guard --mv-dir "$WORK/mvlib15" --sign-in-on-bot-check)
+echo "$OUT" | grep -E "^\[import\] paused|^done:" | cut -c1-70
+[[ "$OUT" == *"paused for 0:01"* && "$OUT" == *"done: 0 videos"* ]]
+grep '"event":"paused"' "$WORK/mvlib15/.mvplayer/import-log.jsonl" | grep -q "the account's cookies have expired"
 
 echo "== binaries start"
 "$BUILD/mvplayer-import" --help >/dev/null

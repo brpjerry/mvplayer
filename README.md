@@ -126,8 +126,12 @@ For every track without a video (`src/core/ImportManager.cpp`):
    dropped — except that on the artist's own channel the title is not held
    against an upload: the artist's cover of a song is the video of a track
    that is that cover, and the audio decides. A label's channel that names
-   the artist is examined as well. Tracks that are themselves instrumentals are skipped, and so is
-   anything under thirty seconds. So is
+   the artist is examined as well. An upload under half the track's length
+   is not examined either: the ninety seconds used as a show's opening are
+   a cut of the song, not its video. Tracks that are themselves instrumentals are skipped, and so is
+   anything under 1:20: a jingle, a skit, an interlude (a show's opening
+   cut of a song, its "TV size", runs a minute and a half and is looked up
+   like any track). So is
    talk between songs — a stage announcement, an interview — when the title
    says so ("MC", "MC06", "Talk 2", "… (Interview)"; the word has to be the
    whole title or a tag) and the track also sounds like it: full of pauses
@@ -236,6 +240,11 @@ already, so nothing is downloaded for it:
   is the track's video or one of the options waiting for review. Its upload
   is then found and downloaded again like any other.
 
+An option waiting for review that today's rules rule out by its length —
+under half the track — is deleted as soon as the re-import is asked for,
+without a request to YouTube; its tracks keep the options that are left, or
+look for a video again.
+
 Tracks without a video are simply looked up again. Re-import one video
 from the Re-import button in the music-file popup (the bottom bar's
 title), every video under a sidebar entry from its right-click menu, or
@@ -275,6 +284,19 @@ block lasts, then one job tests the water before the rest follow. The import
 panel shows the pause and has a "Resume now" button; `pauseSeconds` under
 `[import]` in the config file changes the first wait.
 
+One kind of refusal does not pass by waiting: "Sign in to confirm you're not
+a bot". YouTube then serves a connection's guests no video at all — whatever
+the client, for days — and there is nothing to solve: what it asks for is the
+sign-in. Searches still work. The pause says so, and with an account set up
+(below) offers "Carry on signed in": the refused request is made again with
+the account, and while guests are refused the downloads go to the account
+straight away, with a guest trying again every half hour. That is yours to
+switch on (also under Settings → YouTube Premium), because an account that
+downloads a great deal is one YouTube may restrict; videos fetched that way
+also miss the "1080p Premium" picture. Where the account's cookies have
+expired the pause says that instead. Headless: `--sign-in-on-bot-check` with
+`--cookies`.
+
 Everything the importer decides is recorded in
 `<MV folder>/.mvplayer/import-log.jsonl`, one JSON object per line:
 
@@ -291,6 +313,9 @@ Everything the importer decides is recorded in
 - `reimport`: tracks queued for a lookup by today's rules (see Re-importing).
 - `broken-video`: a video deleted at a re-import because its file was empty
   or missing.
+- `outdated-option`: a video that waited for review deleted at a re-import
+  because today's rules rule it out by its length for every track waiting on
+  it (under half the track, say).
 - `untracked-kept` / `untracked-deleted`: a video whose tracks are gone kept,
   or deleted (one at a time, or all of them from Settings).
 - `paused` / `resumed`: the request circuit breaker.
@@ -355,10 +380,11 @@ library, one at a time, and rebuilds those the account is offered something
 better for: the audio is fetched again and put into the existing file, the
 picture is only downloaded again if a higher resolution has appeared.
 
-The account is used for nothing else. Searches and video downloads stay
-anonymous (the "1080p Premium" picture needs no account, and signed-in
-clients are not offered it); the cookies are only tried for a video that
-cannot be had without signing in, such as an age-restricted one. Headless:
+The account is used for nothing else unless you say so. Searches and video
+downloads stay anonymous (the "1080p Premium" picture needs no account, and
+signed-in clients are not offered it); the cookies are only tried for a video
+that cannot be had without signing in, such as an age-restricted one, and —
+once switched on — where YouTube refuses guests with its bot check. Headless:
 `--cookies cookies.txt` with `--check-quality`, or with the `check-cookies`
 command.
 
@@ -378,8 +404,11 @@ command.
   thumbnail; click it to bring the player back.
 - In the bottom bar, the playing video's picture switches between the player
   and the library. Its title shows the music file the video was found for —
-  where it is, its format and every tag in it, with arrows when several files
-  hold the recording — and a link to the video on YouTube.
+  where it is, how long it plays, its format and every tag in it, with arrows
+  when several files hold the recording — and the video's own length with a
+  link to it on YouTube. For a video under review the track's length is in
+  the bar itself, beside the artist: the seek bar has the video's, and a
+  video much shorter than its track is a cut of the song.
 - The sidebar lists one tag at a time. The selector above the list switches
   between album artists, artists, genres, albums and years, and the box under
   it filters the listed values. The search box at the top right searches every

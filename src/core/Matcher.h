@@ -55,6 +55,11 @@ QStringList searchQueries(const TrackInfo &track);
 // synthesised voice credited in the title is not another version.
 bool sameVersion(const TrackInfo &track, const QString &videoTitle, bool artistChannel = false);
 
+// Why an upload of this length is not examined for the track, or nothing:
+// under half of it (the ninety seconds used as a show's opening, against the
+// whole song), or several times its length.
+QString lengthMismatch(const TrackInfo &track, double seconds);
+
 // Scores every candidate against the track and sorts best-first.
 // `knownChannel`: whether a candidate's channel is the artist's own by
 // other means than its name (MusicBrainz, the user's approvals).
