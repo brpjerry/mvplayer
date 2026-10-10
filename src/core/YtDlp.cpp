@@ -22,6 +22,11 @@
 
 namespace {
 
+// When YouTube last asked a guest here to sign in ("confirm you're not a
+// bot"), in seconds since the epoch. It refuses a whole connection, so every
+// wrapper shares what one of them found out.
+std::atomic<qint64> g_guestsRefusedAt{0};
+
 QString findFile(const QString &dir, const QString &base, const QStringList &skipSuffixes)
 {
     const QFileInfoList entries = QDir(dir).entryInfoList({base + QStringLiteral(".*")}, QDir::Files);
@@ -71,10 +76,11 @@ std::function<bool()> stallWatch(const QString &dir)
 } // namespace
 
 YtDlp::YtDlp(const QString &program, const QStringList &extraArgs, const QString &cookiesFile,
-             const std::atomic<bool> *cancel)
+             const std::atomic<bool> *cancel, bool accountOnBotCheck)
     : m_program(program.isEmpty() ? QStringLiteral("yt-dlp") : program)
     , m_extraArgs(extraArgs)
     , m_cookiesFile(looksLikeCookies(cookiesFile) ? cookiesFile : QString())
+    , m_accountOnBotCheck(accountOnBotCheck)
     , m_cancel(cancel)
 {
 }
@@ -119,6 +125,15 @@ QStringList YtDlp::accountArgs()
 
 ProcResult YtDlp::run(const QStringList &args, const ProcOptions &opts)
 {
+    // While YouTube refuses this connection's guests, the request it would
+    // refuse is not made: the account is asked straight away. A guest tries
+    // again every half hour, which is how the end of it is noticed.
+    if (m_accountOnBotCheck && !m_cookiesFile.isEmpty()
+        && QDateTime::currentSecsSinceEpoch() - g_guestsRefusedAt.load() < 30 * 60) {
+        const QStringList account = accountArgs();
+        if (!account.isEmpty())
+            return runWithAccount(account, args, opts);
+    }
     ProcResult r = runProcess(m_program, baseArgs() + args, opts);
     if (r.ok() || m_cookiesFile.isEmpty() || (m_cancel && m_cancel->load()))
         return r;
@@ -128,13 +143,29 @@ ProcResult YtDlp::run(const QStringList &args, const ProcOptions &opts)
         QStringLiteral("please sign in"),
     };
     const QString e = r.errorText().toLower();
-    if (std::none_of(signs.begin(), signs.end(), [&e](const QString &s) { return e.contains(s); }))
+    const bool botCheck = looksBotCheck(e);
+    if (botCheck ? !m_accountOnBotCheck : std::none_of(signs.begin(), signs.end(), [&e](const QString &s) { return e.contains(s); }))
         return r;
     const QStringList account = accountArgs();
     if (account.isEmpty())
         return r;
+    if (botCheck)
+        g_guestsRefusedAt = QDateTime::currentSecsSinceEpoch();
+    return runWithAccount(account, args, opts);
+}
+
+ProcResult YtDlp::runWithAccount(const QStringList &account, const QStringList &args, const ProcOptions &opts)
+{
     ++m_accountRequests;
-    return runProcess(m_program, baseArgs() + account + args, opts);
+    // With its warnings: that the cookies are no longer accepted is one, and
+    // yt-dlp then carries on as a guest.
+    QStringList base = baseArgs();
+    base.removeAll(QStringLiteral("--no-warnings"));
+    ProcResult r = runProcess(m_program, base + account + args, opts);
+    if (!r.ok() && !r.cancelled && r.err.contains("cookies are no longer valid") && looksBotCheck(r.errorText())) {
+        r.err = r.err.trimmed() + QByteArrayLiteral(" — and the account's cookies have expired: export cookies.txt from the browser again");
+    }
+    return r;
 }
 
 QString YtDlp::cacheEntry(const QString &id) const
@@ -263,6 +294,11 @@ bool YtDlp::looksBlocked(const QString &error)
             return true;
     }
     return false;
+}
+
+bool YtDlp::looksBotCheck(const QString &error)
+{
+    return error.contains(QLatin1String("not a bot"), Qt::CaseInsensitive);
 }
 
 QString YtDlp::url(const QString &id)

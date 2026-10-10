@@ -78,12 +78,24 @@ Popup {
                 width: parent.width
                 height: 34
                 Text {
+                    id: fileHeading
                     x: 18
                     anchors.verticalCenter: parent.verticalCenter
                     text: "Music file"
                     color: Theme.text
                     font.pixelSize: 15
                     font.weight: Font.DemiBold
+                }
+                // How long the track is: against the video's length, below,
+                // it shows a video that is only a cut of the song.
+                Text {
+                    anchors.left: fileHeading.right
+                    anchors.leftMargin: 10
+                    anchors.baseline: fileHeading.baseline
+                    text: root.file ? root.file.length : ""
+                    color: Theme.text
+                    font.pixelSize: 13
+                    font.features: { "tnum": 1 }
                 }
                 Row {
                     visible: root.files.length > 1
@@ -241,11 +253,21 @@ Popup {
                     width: parent.width
                     height: 34
                     Text {
+                        id: ytHeading
                         anchors.verticalCenter: parent.verticalCenter
                         text: "YouTube"
                         color: Theme.text
                         font.pixelSize: 15
                         font.weight: Font.DemiBold
+                    }
+                    Text {
+                        anchors.left: ytHeading.right
+                        anchors.leftMargin: 10
+                        anchors.baseline: ytHeading.baseline
+                        text: root.info.videoLength || ""
+                        color: Theme.text
+                        font.pixelSize: 13
+                        font.features: { "tnum": 1 }
                     }
                     Row {
                         anchors.right: parent.right

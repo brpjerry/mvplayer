@@ -155,21 +155,39 @@ Popup {
                         y: 10
                         width: parent.width - 24
                         wrapMode: Text.WordWrap
-                        maximumLineCount: 4
+                        maximumLineCount: 6
                         elide: Text.ElideRight
                         lineHeight: 1.25
                         color: Theme.textDim
                         font.pixelSize: 12
-                        text: App.statusText + ". YouTube is refusing requests, so importing waits instead of failing track after track. It resumes by itself.\n" + App.pauseReason
+                        // What YouTube asks of a guest here is a sign-in:
+                        // nothing to solve, and the user's to give.
+                        text: App.statusText + (App.pauseKind === "signin"
+                                ? ". YouTube serves this connection no more videos without a sign-in. Importing can carry on with your account; YouTube may restrict an account that downloads a great deal.\n"
+                            : App.pauseKind === "cookies"
+                                ? ". YouTube serves this connection no more videos without a sign-in, and " + (App.hasCookies
+                                    ? "your account's cookies have expired. Export cookies.txt again and replace it in Settings.\n"
+                                    : "no account is set up. Add your account's cookies.txt in Settings to carry on signed in.\n")
+                                : ". YouTube is refusing requests, so importing waits instead of failing track after track. It resumes by itself.\n")
+                            + App.pauseReason
                     }
-                    FlatButton {
+                    Row {
                         anchors.right: parent.right
                         anchors.rightMargin: 8
                         anchors.bottom: parent.bottom
                         anchors.bottomMargin: 6
-                        implicitHeight: 26
-                        text: "Resume now"
-                        onClicked: App.resumeImport()
+                        spacing: 8
+                        FlatButton {
+                            visible: App.pauseKind === "signin"
+                            implicitHeight: 26
+                            text: "Carry on signed in"
+                            onClicked: App.accountOnBotCheck = true
+                        }
+                        FlatButton {
+                            implicitHeight: 26
+                            text: "Resume now"
+                            onClicked: App.resumeImport()
+                        }
                     }
                 }
             }

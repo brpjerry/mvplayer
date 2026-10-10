@@ -118,7 +118,11 @@ for existing videos.
 
 ## How importing works
 
-For every track without a video (`src/core/ImportManager.cpp`):
+The rules, every one of them, are drawn as decision trees in
+[`docs/import-rules.html`](docs/import-rules.html): that page is the
+reference, and a rule changes there before it changes in the code. In
+outline, for every track without a video
+(`src/core/ImportManager.cpp`):
 
 1. **Search** YouTube through `yt-dlp` and rank the results by title, artist,
    channel and duration. Covers, live cuts, instrumentals, auto-generated
@@ -126,8 +130,12 @@ For every track without a video (`src/core/ImportManager.cpp`):
    dropped — except that on the artist's own channel the title is not held
    against an upload: the artist's cover of a song is the video of a track
    that is that cover, and the audio decides. A label's channel that names
-   the artist is examined as well. Tracks that are themselves instrumentals are skipped, and so is
-   anything under thirty seconds. So is
+   the artist is examined as well. An upload under half the track's length
+   is not examined either: the ninety seconds used as a show's opening are
+   a cut of the song, not its video. Tracks that are themselves instrumentals are skipped, and so is
+   anything under 1:20: a jingle, a skit, an interlude (a show's opening
+   cut of a song, its "TV size", runs a minute and a half and is looked up
+   like any track). So is
    talk between songs — a stage announcement, an interview — when the title
    says so ("MC", "MC06", "Talk 2", "… (Interview)"; the word has to be the
    whole title or a tag) and the track also sounds like it: full of pauses
@@ -196,14 +204,28 @@ fits outright, and then waits for you:
   they are shown, the sidebar lists the tags of the videos waiting and
   narrows them as it does the library; the tag picked stays when you go
   between the two, unless the other side has nothing under it.
-- Playing one, the sound changes every ten seconds between YouTube's audio
-  and your track's, level-matched; the chip in the bottom bar says which.
+- Playing one, you hear your track's audio put to the video. `A`, or a click
+  on the chip in the bottom bar, changes over to YouTube's own audio and
+  back at the same place; the chip says which of the two is playing and
+  carries the key.
 - When several uploads could be the track's video, they are options on one
   card: the arrows on the thumbnail step through them. Accepting one drops the
   others; turning one down leaves the rest to choose from.
 - ✓ on its thumbnail accepts it: it joins the library with your track's audio.
   ✗ turns it down: the video is deleted, its track counts as having no video,
   and that upload is not offered for it again.
+- One verdict can be for several tracks: a track whose search turns up a
+  video that already waits for review through another track waits on it too,
+  where it is the same recording — the same waveform as the upload, or 90%
+  the waveform of that other track (the single and its album cut; the same
+  song in another language measures 63-88%, a live take 68%). And only when
+  the search has nothing for it alone: its own video, kept or found, comes
+  first. The same song as another recording has no part in that verdict,
+  and looks for a video of its own — unless the upload carries that
+  track's title and not the title of the track it waits for, and is the
+  waveform of neither (the original and its English version, and the first
+  to be looked up got the other one's video): then the video is made over
+  for the track it is titled after, and the other goes back to the queue.
 
 Headless: `--approve <youtube id>` and `--reject <youtube id>`.
 
@@ -221,7 +243,7 @@ already, so nothing is downloaded for it:
 - Where it still fits outright, it is kept as it is. Where the track's audio
   was not in it and now belongs there, it is put in.
 - Where it is the song but can no longer be taken outright, it goes to
-  review, its file rebuilt with the review stream, alongside whatever other
+  review, its file rebuilt with your track's audio put in, alongside whatever other
   options the search turns up.
 - Where another upload fits outright and ranks above it, that one is
   imported in its place, and the old file is deleted unless other tracks
@@ -235,6 +257,17 @@ already, so nothing is downloaded for it:
   a video is being written can leave it empty — is deleted first, whether it
   is the track's video or one of the options waiting for review. Its upload
   is then found and downloaded again like any other.
+
+A track that shares its video with other tracks, or waits for review with
+them, does so as the same recording (see above). Looked up again, one that
+is only the same song lets go: of the options, which stay for the other
+tracks, or of the video, which stays theirs and is not made over for review
+on its account.
+
+An option waiting for review that today's rules rule out by its length —
+under half the track — is deleted as soon as the re-import is asked for,
+without a request to YouTube; its tracks keep the options that are left, or
+look for a video again.
 
 Tracks without a video are simply looked up again. Re-import one video
 from the Re-import button in the music-file popup (the bottom bar's
@@ -275,6 +308,19 @@ block lasts, then one job tests the water before the rest follow. The import
 panel shows the pause and has a "Resume now" button; `pauseSeconds` under
 `[import]` in the config file changes the first wait.
 
+One kind of refusal does not pass by waiting: "Sign in to confirm you're not
+a bot". YouTube then serves a connection's guests no video at all — whatever
+the client, for days — and there is nothing to solve: what it asks for is the
+sign-in. Searches still work. The pause says so, and with an account set up
+(below) offers "Carry on signed in": the refused request is made again with
+the account, and while guests are refused the downloads go to the account
+straight away, with a guest trying again every half hour. That is yours to
+switch on (also under Settings → YouTube Premium), because an account that
+downloads a great deal is one YouTube may restrict; videos fetched that way
+also miss the "1080p Premium" picture. Where the account's cookies have
+expired the pause says that instead. Headless: `--sign-in-on-bot-check` with
+`--cookies`.
+
 Everything the importer decides is recorded in
 `<MV folder>/.mvplayer/import-log.jsonl`, one JSON object per line:
 
@@ -291,6 +337,14 @@ Everything the importer decides is recorded in
 - `reimport`: tracks queued for a lookup by today's rules (see Re-importing).
 - `broken-video`: a video deleted at a re-import because its file was empty
   or missing.
+- `left-review`: at a re-import, a track that waited on the options of other
+  tracks without being their recording no longer does.
+- `review-moved`: a video under review made over for the track its upload
+  is titled after; the track it waited for keeps its other options or is
+  queued again (`requeued`).
+- `outdated-option`: a video that waited for review deleted at a re-import
+  because today's rules rule it out by its length for every track waiting on
+  it (under half the track, say).
 - `untracked-kept` / `untracked-deleted`: a video whose tracks are gone kept,
   or deleted (one at a time, or all of them from Settings).
 - `paused` / `resumed`: the request circuit breaker.
@@ -355,10 +409,11 @@ library, one at a time, and rebuilds those the account is offered something
 better for: the audio is fetched again and put into the existing file, the
 picture is only downloaded again if a higher resolution has appeared.
 
-The account is used for nothing else. Searches and video downloads stay
-anonymous (the "1080p Premium" picture needs no account, and signed-in
-clients are not offered it); the cookies are only tried for a video that
-cannot be had without signing in, such as an age-restricted one. Headless:
+The account is used for nothing else unless you say so. Searches and video
+downloads stay anonymous (the "1080p Premium" picture needs no account, and
+signed-in clients are not offered it); the cookies are only tried for a video
+that cannot be had without signing in, such as an age-restricted one, and —
+once switched on — where YouTube refuses guests with its bot check. Headless:
 `--cookies cookies.txt` with `--check-quality`, or with the `check-cookies`
 command.
 
@@ -378,8 +433,11 @@ command.
   thumbnail; click it to bring the player back.
 - In the bottom bar, the playing video's picture switches between the player
   and the library. Its title shows the music file the video was found for —
-  where it is, its format and every tag in it, with arrows when several files
-  hold the recording — and a link to the video on YouTube.
+  where it is, how long it plays, its format and every tag in it, with arrows
+  when several files hold the recording — and the video's own length with a
+  link to it on YouTube. For a video under review the track's length is in
+  the bar itself, beside the artist: the seek bar has the video's, and a
+  video much shorter than its track is a cut of the song.
 - The sidebar lists one tag at a time. The selector above the list switches
   between album artists, artists, genres, albums and years, and the box under
   it filters the listed values. The search box at the top right searches every
@@ -406,6 +464,7 @@ command.
 | ← → (Shift: 30 s) | Seek 5 s |
 | ↑ ↓ | Volume |
 | M | Mute |
+| A | Your library's audio / YouTube's, where a video has both |
 | N / P | Next / previous |
 | F, F11, double-click | Fullscreen |
 | Esc | Leave fullscreen, then back to the library |

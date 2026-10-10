@@ -117,9 +117,20 @@ const QStringList &nonMvTrackTerms()
     static const QStringList t = {
         QStringLiteral("instrumental"), QStringLiteral("inst"), QStringLiteral("off vocal"),
         QStringLiteral("offvocal"), QStringLiteral("karaoke"), QStringLiteral("カラオケ"),
-        QStringLiteral("backing track"), QStringLiteral("tv size"),
+        QStringLiteral("backing track"),
     };
     return t;
+}
+
+// Nothing shorter has a music video of its own: a jingle, a skit, an
+// interlude. A show's opening cut of a song ("TV size") runs about a minute
+// and a half, has the show's opening for its video, and stays in.
+double minTrackSecs()
+{
+    // (Lower for tests, whose songs are short.)
+    static const double secs = qEnvironmentVariableIsSet("MVPLAYER_MIN_TRACK_SECS")
+        ? qEnvironmentVariableIntValue("MVPLAYER_MIN_TRACK_SECS") : 80;
+    return secs;
 }
 
 } // namespace
@@ -136,8 +147,7 @@ QStringList Matcher::artistNames(const TrackInfo &t)
 
 bool Matcher::isNonMvTrack(const TrackInfo &track, QString *why)
 {
-    // Nothing this short has a music video: a jingle, a skit, a few words.
-    if (track.duration > 0 && track.duration < 30) {
+    if (track.duration > 0 && track.duration < minTrackSecs()) {
         if (why)
             *why = QStringLiteral("%1-second track").arg(qRound(track.duration));
         return true;
@@ -151,6 +161,21 @@ bool Matcher::isNonMvTrack(const TrackInfo &track, QString *why)
         }
     }
     return false;
+}
+
+QString Matcher::lengthMismatch(const TrackInfo &track, double seconds)
+{
+    if (track.duration <= 0 || seconds <= 0)
+        return {};
+    const double ratio = seconds / track.duration;
+    // Under half the track: the ninety seconds used as a show's opening,
+    // against the whole song. That is the video of the "TV size" cut a
+    // release has beside the song, not the song's.
+    if (ratio < 0.5)
+        return QStringLiteral("under half the track's length");
+    if (ratio > 3.0 || seconds > track.duration + 900)
+        return QStringLiteral("duration mismatch");
+    return {};
 }
 
 bool Matcher::isTalkTitle(const QString &title)
@@ -309,6 +334,20 @@ bool Matcher::isOwnChannel(const TrackInfo &track, const QString &channel)
     return rest.trimmed().isEmpty();
 }
 
+bool Matcher::namesTitle(const TrackInfo &track, const QString &videoTitle)
+{
+    // What an upload says in brackets is about the title, not the title:
+    // "Twelve (「十二」English Ver.)" is the upload of "Twelve", and mentions
+    // the song it is the English version of.
+    static const QRegularExpression aside(QStringLiteral("[(（][^()（）]*[)）]"));
+    QString named = videoTitle;
+    named.remove(aside).remove(aside);
+    // Both run from space to space: whole words, and whole runs of a script
+    // written without spaces.
+    const QString title = tokens(track.title);
+    return title.trimmed().size() >= 2 && tokens(named).contains(title);
+}
+
 bool Matcher::namesArtist(const TrackInfo &track, const QString &videoTitle, const QString &channel)
 {
     const QString ct = tokens(videoTitle), ch = tokens(channel);
@@ -380,13 +419,9 @@ void Matcher::rank(const TrackInfo &track, QVector<YtCandidate> &candidates,
             c.rejectReason = QStringLiteral("auto-generated art track");
             continue;
         }
-        if (track.duration > 0 && c.duration > 0) {
-            const double ratio = c.duration / track.duration;
-            if (ratio < 0.3 || ratio > 3.0 || c.duration > track.duration + 900) {
-                c.rejectReason = QStringLiteral("duration mismatch");
-                continue;
-            }
-        }
+        c.rejectReason = lengthMismatch(track, c.duration);
+        if (!c.rejectReason.isEmpty())
+            continue;
         // On the artist's own channel the title is not held against the
         // upload: the artist's cover of a song is a cover by its title, the
         // video of a track that is that cover; a music video followed by an

@@ -305,6 +305,9 @@ MpvItem::MpvItem(QQuickItem *parent)
     mpv_observe_property(mpv, 0, "dheight", MPV_FORMAT_INT64);
     mpv_observe_property(mpv, 0, "hwdec-current", MPV_FORMAT_STRING);
     mpv_observe_property(mpv, 0, "eof-reached", MPV_FORMAT_FLAG);
+    // Asked for each file once it is open and before its tracks are chosen
+    // (see MPV_EVENT_HOOK below).
+    mpv_hook_add(mpv, 0, "on_preloaded", 0);
     mpv_set_wakeup_callback(mpv, MpvCore::onWakeup, m_core.get());
 
     // One frame a second follows the mood of a video closely enough; the
@@ -553,6 +556,20 @@ void MpvItem::drainEvents()
         case MPV_EVENT_PROPERTY_CHANGE:
             handleProperty(static_cast<const mpv_event_property *>(e->data));
             break;
+        case MPV_EVENT_HOOK: {
+            // Every video starts on its first audio track: the library's
+            // where it has been put in, else YouTube's. Not on whichever the
+            // last one was left on (mpv carries that over between files that
+            // look alike), and not on the stream that videos under review
+            // used to carry as their default, which alternated between the
+            // two. An option given with the file does not do: mpv puts the
+            // choice back to automatic when the next file's tracks differ.
+            const auto *hook = static_cast<const mpv_event_hook *>(e->data);
+            qint64 first = 1;
+            mpv_set_property(m_core->mpv, "aid", MPV_FORMAT_INT64, &first);
+            mpv_hook_continue(m_core->mpv, hook->id);
+            break;
+        }
         case MPV_EVENT_FILE_LOADED:
             refreshTracks();
             break;

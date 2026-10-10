@@ -33,8 +33,6 @@ public:
         YtTitleRole,
         YtChannelRole,
         ReviewRole,
-        ReviewStartRole,
-        ReviewEndRole,
         ReviewOptionRole,  // which of its group's options this is, from 1
         ReviewOptionsRole, // how many options the group has
         SameTitleRole,     // of a video under review: a library video with its title {album, ytTitle}

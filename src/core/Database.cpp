@@ -929,6 +929,27 @@ void Database::setTrackPending(qint64 trackId)
     run(q);
 }
 
+void Database::unlinkTrack(qint64 id)
+{
+    QSqlQuery q(conn());
+    q.prepare(QStringLiteral("UPDATE tracks SET state = 'pending', video_id = NULL, message = ''"
+                             " WHERE id = ? OR (recording > 0 AND recording = (SELECT recording FROM tracks WHERE id = ?))"));
+    q.addBindValue(id);
+    q.addBindValue(id);
+    run(q);
+}
+
+void Database::linkTrack(qint64 id, qint64 videoId)
+{
+    QSqlQuery q(conn());
+    q.prepare(QStringLiteral("UPDATE tracks SET video_id = ?"
+                             " WHERE id = ? OR (recording > 0 AND recording = (SELECT recording FROM tracks WHERE id = ?))"));
+    q.addBindValue(videoId);
+    q.addBindValue(id);
+    q.addBindValue(id);
+    run(q);
+}
+
 void Database::setTrackReimport(qint64 trackId)
 {
     // The whole recording: the lookup runs under its best file, whichever

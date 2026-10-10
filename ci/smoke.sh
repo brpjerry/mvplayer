@@ -6,6 +6,9 @@
 # tracks.
 set -euo pipefail
 export MVPLAYER_NO_MUSICBRAINZ=1
+# The songs made up here run 40 to 50 seconds; tracks under 1:20 are not
+# looked up otherwise (see "short tracks" below).
+export MVPLAYER_MIN_TRACK_SECS=30
 
 BUILD=${1:-build}
 # On Windows "mvplayer" alone would name the QML module's build folder.
@@ -256,10 +259,10 @@ echo "== review"
 # A stand-in for YouTube with one upload for the track "Five": the same notes
 # 0.4% faster, so the song by its fingerprints but not demonstrably the
 # track's recording. It is neither given the track's audio outright nor
-# passed over: it is brought in to wait for the user, with a default audio
-# stream that alternates between YouTube's and the track's. Accepted, it
-# joins the library with the track's audio; turned down, it is deleted, its
-# track has no video and is not offered that upload again.
+# passed over: it is brought in to wait for the user, with the track's audio
+# and YouTube's side by side to compare. Accepted, it joins the library with
+# the track's audio; turned down, it is deleted, its track has no video and
+# is not offered that upload again.
 mkdir -p "$WORK/lib5/Dee"
 ffmpeg -v error -y -f lavfi -i "$(song 277 41 | sed 's/d=20/d=40/')" -metadata title="Five" -metadata artist=Dee "$WORK/lib5/Dee/five.flac"
 touch -d "10 seconds ago" "$WORK/lib5/Dee/five.flac"
@@ -291,11 +294,16 @@ review_state() { python3 -c "import sqlite3, sys; print(sqlite3.connect(sys.argv
 OUT=$(MVPLAYER_YTDLP="$SITE" timeout 120 "$BUILD/mvplayer-import" --allow-still-images --music-dir "$WORK/lib5" --mv-dir "$WORK/mvlib5" 2>&1)
 echo "$OUT" | grep -E "^\[import\]|^done:"
 [[ "$OUT" == *"for your review (1 option)"* && "$OUT" == *"done: 0 videos and 1 for review; tracks: done=1"* ]]
-[[ "$(streams)" == "h264 flac opus flac " && "$(review_state)" == "[(1, 'library')]" ]]
+[[ "$(streams)" == "h264 flac opus " && "$(review_state)" == "[(1, 'library')]" ]]
 # search, audio to listen to, the video. (The look at the picture is left out:
 # its format selector has a ">" in it, which the Windows stand-in, a batch
 # file, would take for a redirection.)
 [[ $(wc -l < "$WORK/site-args") -eq 3 ]]
+# A video from when review had a third stream, played by default, that
+# alternated between the two: accepting it takes that stream out.
+(cd "$WORK/mvlib5/Dee" && ffmpeg -v error -y -i "Five [liv].mkv" -map 0:v:0 -map 0:a:0 -map 0:a:1 -map 0:a:0 -c copy \
+    -disposition:a:0 0 -disposition:a:2 default -f matroska old.part && mv old.part "Five [liv].mkv")
+[[ "$(streams)" == "h264 flac opus flac " ]]
 OUT=$(MVPLAYER_YTDLP="$SITE" timeout 120 "$BUILD/mvplayer-import" --allow-still-images --music-dir "$WORK/lib5" --mv-dir "$WORK/mvlib5" --approve liv 2>&1)
 echo "$OUT" | grep -E "^\[review\]|^done:"
 [[ "$OUT" == *"done: 1 videos; tracks: done=1"* ]]
@@ -368,6 +376,28 @@ OUT=$(MVPLAYER_YTDLP="$SITE" timeout 120 "$BUILD/mvplayer-import" --allow-still-
 echo "$OUT" | grep -E "^\[import\]|^done:" | cut -c1-150
 [[ "$OUT" == *"for your review (1 option)"* && "$OUT" == *"done: 0 videos and 1 for review"* ]]
 grep -q "a cut of the song: 40 s of 50 s" "$WORK/mvlib10/.mvplayer/import-log.jsonl"
+# Under half the track it is not examined at all: the opening of a show
+# against the whole song. Nothing of it is downloaded.
+mkdir -p "$WORK/mvlib12"
+rm -f "$WORK/site-args"
+echo '{"entries": [{"id": "tvs", "ie_key": "Youtube", "title": "Hal - Seven (Official Video)", "channel": "Hal", "duration": 24, "view_count": 1000, "channel_is_verified": true}]}' > "$WORK/site-search.json"
+OUT=$(MVPLAYER_YTDLP="$SITE" timeout 120 "$BUILD/mvplayer-import" --allow-still-images --music-dir "$WORK/lib10" --mv-dir "$WORK/mvlib12" --jobs 1 2>&1)
+echo "$OUT" | grep -E "^\[import\]|^done:" | cut -c1-150
+[[ "$OUT" == *"done: 0 videos; tracks: not_found=1"* ]]
+grep -q "under half the track's length" "$WORK/mvlib12/.mvplayer/import-log.jsonl"
+! grep -q -v ytsearch "$WORK/site-args"
+# An option that waits for review from before that rule goes with a
+# re-import of its track: here the cut above, taken for 20 s long (and
+# yesterday's search results, which have it at 40 s, forgotten).
+python3 -c "import sqlite3, sys; db = sqlite3.connect(sys.argv[1]); db.execute('UPDATE videos SET duration = 20'); db.commit()" "$WORK/mvlib10/.mvplayer/library.db"
+rm -rf "$WORK/mvlib10/.mvplayer/cache"
+[[ -s "$WORK/mvlib10/Hal/Seven [cut].mkv" ]]
+OUT=$(MVPLAYER_YTDLP="$SITE" timeout 120 "$BUILD/mvplayer-import" --allow-still-images --music-dir "$WORK/lib10" --mv-dir "$WORK/mvlib10" --jobs 1 --reimport "$WORK/lib10" 2>&1)
+echo "$OUT" | grep -E "^\[import\]|^done:" | cut -c1-150
+[[ "$OUT" == *"let go of “Hal - Seven (Official Video)”, which waited for review: under half the track's length"* ]]
+[[ "$OUT" == *"done: 0 videos; tracks: not_found=1"* ]]
+[[ ! -e "$WORK/mvlib10/Hal/Seven [cut].mkv" ]]
+grep -q '"event":"outdated-option"' "$WORK/mvlib10/.mvplayer/import-log.jsonl"
 
 echo "== a video changes hands"
 # "Sixth" is the song "Six" with something else over it for one second in
@@ -643,6 +673,159 @@ fi
 OUT=$(MVPLAYER_PAUSE_SECS=1 MVPLAYER_YTDLP="$REFUSE" timeout 100 "$BUILD/mvplayer-import" --music-dir "$WORK/lib7" --mv-dir "$WORK/mvlib8" --jobs 1 2>&1)
 echo "$OUT" | grep -E "^\[import\] paused|^done:" | cut -c1-70
 [[ "$OUT" == *"paused for 0:01"* && "$OUT" == *"paused for 0:02"* && "$OUT" == *"paused for 0:04"* ]]
+
+echo "== sharing a video with another track"
+# "Ten" has an upload waiting for review. "Tenth" is the same song with
+# something else over it for one second in four: the song by its
+# fingerprints, another recording by its waveform (another language's
+# version, a live take). It does not join that review — the verdict on it is
+# for "Ten" — and has no video until one of its own turns up.
+mkdir -p "$WORK/lib17/Jay" "$WORK/lib18/Jay" "$WORK/mvlib17"
+ffmpeg -v error -y -f lavfi -i "$(song 430 33 | sed 's/d=40/d=50/')" -metadata title="Ten" -metadata artist=Jay "$WORK/lib17/Jay/ten.flac"
+ffmpeg -v error -y -i "$WORK/lib17/Jay/ten.flac" -f lavfi -i "$(song 560 29 | sed 's/d=40/d=55/')" -filter_complex \
+    "[1]volume='if(lt(mod(t\,4)\,1)\,6\,0)':eval=frame[g];[0]apad=whole_dur=55[p];[p][g]amix=inputs=2:normalize=0:duration=longest,volume=0.25" \
+    -metadata title="Tenth" -metadata artist=Jay "$WORK/lib18/Jay/tenth.flac"
+touch -d "10 seconds ago" "$WORK/lib17/Jay/ten.flac" "$WORK/lib18/Jay/tenth.flac"
+ten_site() {
+    ffmpeg -v error -y -i "$WORK/lib17/Jay/ten.flac" -af atempo=1.004 -c:a libopus -b:a 96k "$WORK/site-audio.opus"
+    ffmpeg -v error -y -i "$WORK/mv.mkv" -map 0:v:0 -c copy -t 50 "$WORK/site-video.mkv"
+    echo '{"entries": [{"id": "ten", "ie_key": "Youtube", "title": "Jay - Ten (Official Video)", "channel": "Jay", "duration": 50, "view_count": 1000, "channel_is_verified": true}]}' > "$WORK/site-search.json"
+    rm -rf "$WORK/mvlib17/.mvplayer/cache"
+}
+share() { MVPLAYER_YTDLP="$SITE" timeout 120 "$BUILD/mvplayer-import" --allow-still-images --mv-dir "$WORK/mvlib17" --jobs 1 --music-dir "$WORK/lib17" "$@" 2>&1 | grep -E "^\[import\]|^\[review\]|^done:" | cut -c1-150; }
+share_states() { python3 -c "import sqlite3, sys; db = sqlite3.connect(sys.argv[1]); print(sorted(db.execute('SELECT t.title, t.state, (SELECT v.yt_id || (CASE v.review WHEN 1 THEN \":review\" ELSE \":accepted\" END) FROM videos v WHERE v.id = t.video_id) FROM tracks t').fetchall()))" "$WORK/mvlib17/.mvplayer/library.db"; }
+share_sql() { python3 -c "import sqlite3, sys; db = sqlite3.connect(sys.argv[1]); db.executescript(sys.argv[2]); db.commit()" "$WORK/mvlib17/.mvplayer/library.db" "$1"; }
+ten_site
+share
+share --music-dir "$WORK/lib18"
+[[ "$(share_states)" == "[('Ten', 'done', 'ten:review'), ('Tenth', 'not_found', None)]" ]]
+grep -q "already waiting for review through “Ten”; this track is the song but not that recording" "$WORK/mvlib17/.mvplayer/import-log.jsonl"
+# A track that had joined such a review all the same (it used to take the
+# fingerprints alone) lets go of it when it is looked up again.
+share_sql "UPDATE tracks SET state = 'done', video_id = (SELECT id FROM videos WHERE yt_id = 'ten') WHERE title = 'Tenth'"
+share --music-dir "$WORK/lib18" --reimport "$WORK/lib18"
+[[ "$(share_states)" == "[('Ten', 'done', 'ten:review'), ('Tenth', 'not_found', None)]" ]]
+grep -q '"event":"left-review"' "$WORK/mvlib17/.mvplayer/import-log.jsonl"
+# With a video of its own that fits outright, it leaves the options it was
+# waiting on to the track that still waits on them.
+share_sql "UPDATE tracks SET state = 'pending', video_id = (SELECT id FROM videos WHERE yt_id = 'ten'), message = '' WHERE title = 'Tenth'"
+ffmpeg -v error -y -i "$WORK/lib18/Jay/tenth.flac" -c:a libopus -b:a 96k "$WORK/site-audio.opus"
+ffmpeg -v error -y -i "$WORK/mv.mkv" -map 0:v:0 -c copy -t 55 "$WORK/site-video.mkv"
+echo '{"entries": [{"id": "tenth", "ie_key": "Youtube", "title": "Jay - Tenth (Official Video)", "channel": "Jay", "duration": 55, "view_count": 1000, "channel_is_verified": true}]}' > "$WORK/site-search.json"
+rm -rf "$WORK/mvlib17/.mvplayer/cache"
+share --music-dir "$WORK/lib18"
+[[ "$(share_states)" == "[('Ten', 'done', 'ten:review'), ('Tenth', 'done', 'tenth:accepted')]" ]]
+[[ -s "$WORK/mvlib17/Jay/Ten [ten].mkv" ]]
+# And a video in the library that other tracks have: looked up again, the
+# track that is only the song lets go of it. It is not made over for review
+# on that track's account.
+share --music-dir "$WORK/lib18" --approve ten
+share_sql "DELETE FROM videos WHERE yt_id = 'tenth'; UPDATE tracks SET state = 'done', video_id = (SELECT id FROM videos WHERE yt_id = 'ten'), message = '' WHERE title = 'Tenth'"
+rm -f "$WORK/mvlib17/Jay/Tenth [tenth]".*
+ten_site
+SHARED=$(cd "$WORK/mvlib17/Jay" && stat -c %Y-%s "Ten [ten].mkv")
+share --music-dir "$WORK/lib18" --reimport "$WORK/lib18"
+[[ "$(share_states)" == "[('Ten', 'done', 'ten:accepted'), ('Tenth', 'not_found', None)]" ]]
+[[ "$(cd "$WORK/mvlib17/Jay" && stat -c %Y-%s "Ten [ten].mkv")" == "$SHARED" ]]
+grep -q '"fate":"released"' "$WORK/mvlib17/.mvplayer/import-log.jsonl"
+# The same song under two titles (the original and its English version, as
+# it were), and the first of the two to be looked up has the other one's
+# video waiting for review: the upload is titled "Twelve" and waits for
+# "Dozen". It is neither's waveform. When "Twelve" is looked up it is that
+# track's to wait on, and "Dozen" goes back to the queue.
+mkdir -p "$WORK/lib19/Kay" "$WORK/lib20/Kay" "$WORK/mvlib19"
+ffmpeg -v error -y -f lavfi -i "$(song 470 37 | sed 's/d=40/d=50/')" -metadata title="Dozen" -metadata artist=Kay "$WORK/lib19/Kay/dozen.flac"
+ffmpeg -v error -y -i "$WORK/lib19/Kay/dozen.flac" -f lavfi -i "$(song 610 23 | sed 's/d=40/d=55/')" -filter_complex \
+    "[1]volume='if(lt(mod(t\,4)\,1)\,6\,0)':eval=frame[g];[0]apad=whole_dur=55[p];[p][g]amix=inputs=2:normalize=0:duration=longest,volume=0.25" \
+    -metadata title="Twelve" -metadata artist=Kay "$WORK/lib20/Kay/twelve.flac"
+touch -d "10 seconds ago" "$WORK/lib19/Kay/dozen.flac" "$WORK/lib20/Kay/twelve.flac"
+ffmpeg -v error -y -i "$WORK/lib19/Kay/dozen.flac" -af atempo=1.004 -c:a libopus -b:a 96k "$WORK/site-audio.opus"
+ffmpeg -v error -y -i "$WORK/mv.mkv" -map 0:v:0 -c copy -t 50 "$WORK/site-video.mkv"
+echo '{"entries": [{"id": "twelve", "ie_key": "Youtube", "title": "Kay - Twelve (Official Video)", "channel": "Kay", "duration": 50, "view_count": 1000, "channel_is_verified": true}]}' > "$WORK/site-search.json"
+titled() { MVPLAYER_YTDLP="$SITE" timeout 120 "$BUILD/mvplayer-import" --allow-still-images --mv-dir "$WORK/mvlib19" --jobs 1 --music-dir "$WORK/lib19" "$@" 2>&1 | grep -E "^\[import\]|^done:" | cut -c1-150; }
+titled_states() { python3 -c "import sqlite3, sys; db = sqlite3.connect(sys.argv[1]); print(sorted(db.execute('SELECT t.title, t.state, (SELECT v.yt_id || \":\" || v.review || \":\" || v.title FROM videos v WHERE v.id = t.video_id) FROM tracks t').fetchall()))" "$WORK/mvlib19/.mvplayer/library.db"; }
+titled
+[[ "$(titled_states)" == "[('Dozen', 'done', 'twelve:1:Dozen')]" ]]
+titled --music-dir "$WORK/lib20"
+[[ "$(titled_states)" == "[('Dozen', 'not_found', None), ('Twelve', 'done', 'twelve:1:Twelve')]" ]]
+grep -q '"event":"review-moved"' "$WORK/mvlib19/.mvplayer/import-log.jsonl"
+
+echo "== short tracks, and the TV size"
+# A track under 1:20 is not looked up: an interlude, a jingle. A show's
+# opening cut of a song runs a minute and a half and is, whatever its title
+# calls it — also one an earlier rule had skipped: the next scan takes that
+# back.
+mkdir -p "$WORK/lib16/Ivy" "$WORK/mvlib16"
+ffmpeg -v error -y -f lavfi -i "$(song 240 37 | sed 's/d=40/d=60/')" -metadata title="Interlude" -metadata artist=Ivy "$WORK/lib16/Ivy/interlude.flac"
+ffmpeg -v error -y -f lavfi -i "$(song 290 43 | sed 's/d=40/d=90/')" -metadata title="Nine (TV size)" -metadata artist=Ivy "$WORK/lib16/Ivy/nine.flac"
+touch -d "10 seconds ago" "$WORK/lib16/Ivy/interlude.flac" "$WORK/lib16/Ivy/nine.flac"
+ffmpeg -v error -y -i "$WORK/lib16/Ivy/nine.flac" -c:a libopus -b:a 96k "$WORK/site-audio.opus"
+ffmpeg -v error -y -f lavfi -i "testsrc2=s=160x90:r=10:d=90" -c:v libx264 -preset ultrafast "$WORK/site-video.mkv"
+echo '{"entries": [{"id": "tvs", "ie_key": "Youtube", "title": "Ivy - Nine (Official Video)", "channel": "Ivy", "duration": 90, "view_count": 1000, "channel_is_verified": true}]}' > "$WORK/site-search.json"
+short() { MVPLAYER_YTDLP="$SITE" timeout 120 "$BUILD/mvplayer-import" --allow-still-images --music-dir "$WORK/lib16" --mv-dir "$WORK/mvlib16" --jobs 1 2>&1 | grep -E "^\[import\]|^done:" | cut -c1-150; }
+short_states() { python3 -c "import sqlite3, sys; print(sorted(sqlite3.connect(sys.argv[1]).execute('SELECT title, state, message FROM tracks').fetchall()))" "$WORK/mvlib16/.mvplayer/library.db"; }
+MVPLAYER_MIN_TRACK_SECS=120 short
+[[ "$(short_states)" == "[('Interlude', 'skipped', '60-second track'), ('Nine (TV size)', 'skipped', '90-second track')]" ]]
+(unset MVPLAYER_MIN_TRACK_SECS; short)
+STATES=$(short_states); echo "$STATES" | cut -c1-150
+[[ "$STATES" == "[('Interlude', 'skipped', '60-second track'), ('Nine (TV size)', 'done', "* ]]
+grep -q '"what":"unskipped"' "$WORK/mvlib16/.mvplayer/import-log.jsonl"
+
+echo "== signed in past the bot check"
+# YouTube refuses this connection's guests every video page ("Sign in to
+# confirm you're not a bot") and serves the account. There is nothing to
+# solve: the sign-in is what it asks for. Without the user's say the account
+# is left out of it and the queue pauses; with it, the refused request is
+# made again signed in, and the next ones go to the account straight away.
+mkdir -p "$WORK/mvlib13" "$WORK/mvlib14" "$WORK/mvlib15"
+ffmpeg -v error -y -i "$WORK/lib9/Gil/six.flac" -c:a libopus -b:a 96k "$WORK/site-audio.opus"
+ffmpeg -v error -y -i "$WORK/mv.mkv" -map 0:v:0 -c copy -t 50 "$WORK/site-video.mkv"
+echo '{"entries": [{"id": "own", "ie_key": "Youtube", "title": "Gil - Six (Official Video)", "channel": "Gil", "duration": 50, "view_count": 1000, "channel_is_verified": true}]}' > "$WORK/site-search.json"
+cat > "$WORK/fake-guard" <<FAKE
+#!/bin/sh
+echo "\$*" >> "$WORK/guard-args"
+refuse() {
+    n=\$(cat "$WORK/guarded"); echo \$((n + 1)) > "$WORK/guarded"
+    if [ "\$n" -lt 2 ]; then echo "ERROR: [youtube] own: Sign in to confirm you’re not a bot" >&2; else echo "ERROR: [youtube] own: Video unavailable" >&2; fi
+    exit 1
+}
+case " \$* " in
+*ytsearch*) ;;
+*" --load-info-json "*) echo "ERROR: unable to download video data: HTTP Error 403: Forbidden" >&2; exit 1 ;;
+*" --cookies "*) if [ -f "$WORK/guard-expired" ]; then
+        echo "WARNING: [youtube] The provided YouTube account cookies are no longer valid." >&2
+        refuse
+    fi ;;
+*)  refuse ;;
+esac
+exec sh "$WORK/fake-site" "\$@"
+FAKE
+chmod +x "$WORK/fake-guard"
+GUARD="$WORK/fake-guard"
+if [[ -n "$EXE" ]]; then
+    printf '@"%s" "%%~dp0fake-guard" %%*\r\n' "$(cygpath -w "$(command -v sh)")" > "$WORK/fake-guard.cmd"
+    GUARD="$WORK/fake-guard.cmd"
+fi
+guard() { echo 0 > "$WORK/guarded"; rm -f "$WORK/guard-args"; MVPLAYER_PAUSE_SECS=1 MVPLAYER_YTDLP="$GUARD" timeout 100 "$BUILD/mvplayer-import" --allow-still-images --music-dir "$WORK/lib9" --jobs 1 --cookies "$WORK/cookies.txt" "$@" 2>&1; }
+OUT=$(guard --mv-dir "$WORK/mvlib13")
+echo "$OUT" | grep -E "^\[import\] paused|^done:" | cut -c1-70
+[[ "$OUT" == *"paused for 0:01"* && "$OUT" == *"done: 0 videos"* ]]
+! grep -q -e "--cookies" "$WORK/guard-args"
+OUT=$(guard --mv-dir "$WORK/mvlib14" --sign-in-on-bot-check)
+echo "$OUT" | grep -E "^\[import\] paused|^done:" | cut -c1-70
+[[ "$OUT" != *"paused for"* && "$OUT" == *"done: 1 videos; tracks: done=1"* ]]
+# One request was refused as a guest; the video's page was asked signed in
+# without trying that again.
+[[ $(cat "$WORK/guarded") -eq 1 ]]
+[[ $(grep -c -e "--cookies" "$WORK/guard-args") -ge 2 ]]
+! grep -q -e "--cookies $WORK/cookies.txt" "$WORK/guard-args"
+# Cookies the browser has rotated since: yt-dlp carries on as a guest and is
+# refused like one. The pause says what is wrong.
+touch "$WORK/guard-expired"
+OUT=$(guard --mv-dir "$WORK/mvlib15" --sign-in-on-bot-check)
+echo "$OUT" | grep -E "^\[import\] paused|^done:" | cut -c1-70
+[[ "$OUT" == *"paused for 0:01"* && "$OUT" == *"done: 0 videos"* ]]
+grep '"event":"paused"' "$WORK/mvlib15/.mvplayer/import-log.jsonl" | grep -q "the account's cookies have expired"
 
 echo "== binaries start"
 "$BUILD/mvplayer-import" --help >/dev/null

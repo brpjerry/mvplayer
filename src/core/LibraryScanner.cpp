@@ -187,6 +187,20 @@ Result scan(const QStringList &rootsIn, Database &db, const std::atomic<bool> *c
                     note(t, QStringLiteral("returned"), QStringLiteral("back in the music folders: keeps its video and state"));
                     continue;
                 }
+                // Skipped for its title or its length by a rule that has
+                // changed since (a "TV size" track): looked up after all.
+                // Talk between songs is skipped by its sound as well, which
+                // the lookup settles.
+                if (old->state == QLatin1String("skipped") && !Matcher::isNonMvTrack(*old) && !Matcher::isTalkTitle(old->title)) {
+                    TrackInfo t = *old;
+                    t.state = QStringLiteral("pending");
+                    t.message.clear();
+                    if (save(t)) {
+                        ++res.changed;
+                        note(t, QStringLiteral("unskipped"), QStringLiteral("no longer skipped by today's rules: to be looked up"));
+                        continue;
+                    }
+                }
                 current.insert(old->id, *old);
                 continue;
             }

@@ -101,8 +101,8 @@ struct VideoInfo {
 
     // Waiting for the user to say whether this is the track's video: the
     // fingerprints say it is the song, the waveforms cannot confirm the
-    // recording. Its default audio alternates every ten seconds between
-    // YouTube's and the track's, the latter between these two times.
+    // recording. It carries the track's audio and YouTube's to compare; the
+    // track's sits between these two times of the video.
     bool review = false;
     double reviewStart = 0;
     double reviewEnd = 0;

@@ -222,7 +222,6 @@ bool mux(const Plan &plan, const std::atomic<bool> *cancel, QString *audioDetail
         const QString trackRaw = QDir(plan.workDir).filePath(QStringLiteral("track.raw"));
         const QString mvRaw = QDir(plan.workDir).filePath(QStringLiteral("mv.raw"));
         const QString outRaw = QDir(plan.workDir).filePath(QStringLiteral("mix.raw"));
-        const QString reviewRaw = QDir(plan.workDir).filePath(QStringLiteral("review.raw"));
 
         if (!decodeRaw(t.path, trackRaw, rate, ch, cancel, error)
             || !decodeRaw(plan.ytAudioFile, mvRaw, rate, ch, cancel, error, plan.ytAudioStream))
@@ -261,30 +260,9 @@ bool mux(const Plan &plan, const std::atomic<bool> *cancel, QString *audioDetail
                     *error = QStringLiteral("cancelled");
                 return false;
             }
-            if (plan.review) {
-                // YouTube's audio for ten seconds, the track's for the next
-                // ten, and so on, wherever the track reaches.
-                const qint64 stretch = qint64(kReviewSeconds) * rate;
-                QVector<NativeSegment> turns;
-                for (const NativeSegment &whole : std::as_const(segs)) {
-                    for (qint64 a = stretch; a < M.frames; a += 2 * stretch) {
-                        NativeSegment t;
-                        t.start = std::max(a, whole.start);
-                        t.end = std::min(a + stretch, whole.end);
-                        t.lag = whole.lag;
-                        if (t.end - t.start >= rate)
-                            turns.append(t);
-                    }
-                }
-                if (!compose(T, M, turns, gain, rate, reviewRaw, cancel, error)) {
-                    if (error && error->isEmpty())
-                        *error = QStringLiteral("cancelled");
-                    return false;
-                }
-                if (reviewSpan) {
-                    reviewSpan->start = double(segs.first().start) / rate;
-                    reviewSpan->end = double(segs.last().end) / rate;
-                }
+            if (reviewSpan) {
+                reviewSpan->start = double(segs.first().start) / rate;
+                reviewSpan->end = double(segs.last().end) / rate;
             }
         }
         QFile::remove(trackRaw);
@@ -295,31 +273,18 @@ bool mux(const Plan &plan, const std::atomic<bool> *cancel, QString *audioDetail
              << QStringLiteral("-f") << QStringLiteral("s32le") << QStringLiteral("-ar") << QString::number(rate)
              << QStringLiteral("-ac") << QString::number(ch) << QStringLiteral("-i") << outRaw
              << QStringLiteral("-i") << plan.ytAudioFile;
-        if (plan.review) {
-            args << QStringLiteral("-f") << QStringLiteral("s32le") << QStringLiteral("-ar") << QString::number(rate)
-                 << QStringLiteral("-ac") << QString::number(ch) << QStringLiteral("-i") << reviewRaw;
-        }
         args << QStringLiteral("-map") << QStringLiteral("0:v:0") << QStringLiteral("-map") << QStringLiteral("1:a:0")
-             << QStringLiteral("-map") << QStringLiteral("2:a:%1").arg(plan.ytAudioStream);
-        if (plan.review)
-            args << QStringLiteral("-map") << QStringLiteral("3:a:0");
-        args << QStringLiteral("-c:v") << QStringLiteral("copy")
+             << QStringLiteral("-map") << QStringLiteral("2:a:%1").arg(plan.ytAudioStream)
+             << QStringLiteral("-c:v") << QStringLiteral("copy")
              << QStringLiteral("-c:a:0") << QStringLiteral("flac")
              << QStringLiteral("-sample_fmt:a:0") << (deep ? QStringLiteral("s32") : QStringLiteral("s16"));
         if (deep)
             args << QStringLiteral("-bits_per_raw_sample:a:0") << QStringLiteral("24");
         args << QStringLiteral("-c:a:1") << QStringLiteral("copy")
-             << QStringLiteral("-disposition:a:0") << (plan.review ? QStringLiteral("0") : QStringLiteral("default"))
+             << QStringLiteral("-disposition:a:0") << QStringLiteral("default")
              << QStringLiteral("-disposition:a:1") << QStringLiteral("0")
              << QStringLiteral("-metadata:s:a:0") << QStringLiteral("title=Library audio")
              << QStringLiteral("-metadata:s:a:1") << QStringLiteral("title=YouTube audio");
-        if (plan.review) {
-            args << QStringLiteral("-c:a:2") << QStringLiteral("flac")
-                 << QStringLiteral("-sample_fmt:a:2") << QStringLiteral("s16")
-                 << QStringLiteral("-disposition:a:2") << QStringLiteral("default")
-                 << QStringLiteral("-metadata:s:a:2")
-                 << QStringLiteral("title=For review: %1 s YouTube, %1 s library").arg(kReviewSeconds);
-        }
         if (audioDetail) {
             const QString khz = QString::number(rate / 1000.0, 'g', 4);
             *audioDetail = QStringLiteral("FLAC %1/%2").arg(deep ? 24 : 16).arg(khz);
@@ -354,10 +319,16 @@ bool mux(const Plan &plan, const std::atomic<bool> *cancel, QString *audioDetail
 
 bool dropReviewStream(const QString &file, const std::atomic<bool> *cancel, QString *error)
 {
-    const QString partFile = file + QStringLiteral(".part.mkv");
     ProcOptions opts;
     opts.cancel = cancel;
     opts.timeoutMs = 30 * 60 * 1000;
+    // The track's audio and YouTube's, and nothing after them: as it should be.
+    const ProcResult streams = runProcess(QStringLiteral("ffprobe"), {
+        QStringLiteral("-v"), QStringLiteral("error"), QStringLiteral("-select_streams"), QStringLiteral("a"),
+        QStringLiteral("-show_entries"), QStringLiteral("stream=index"), QStringLiteral("-of"), QStringLiteral("csv=p=0"), file}, opts);
+    if (streams.ok() && streams.out.trimmed().split('\n').size() < 3)
+        return true;
+    const QString partFile = file + QStringLiteral(".part.mkv");
     const ProcResult r = runProcess(kFfmpeg, {
         QStringLiteral("-v"), QStringLiteral("error"), QStringLiteral("-nostdin"), QStringLiteral("-y"),
         QStringLiteral("-i"), file,

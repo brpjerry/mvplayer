@@ -69,8 +69,6 @@ QVariant VideoModel::data(const QModelIndex &index, int role) const
     case YtTitleRole: return v.ytTitle;
     case YtChannelRole: return v.ytChannel;
     case ReviewRole: return v.review;
-    case ReviewStartRole: return v.reviewStart;
-    case ReviewEndRole: return v.reviewEnd;
     case ReviewOptionRole: return int(reviewOptions(v).indexOf(v.id)) + 1;
     case ReviewOptionsRole: return int(reviewOptions(v).size());
     case SameTitleRole: {
@@ -104,8 +102,6 @@ QHash<int, QByteArray> VideoModel::roleNames() const
         {YtTitleRole, "ytTitle"},
         {YtChannelRole, "ytChannel"},
         {ReviewRole, "review"},
-        {ReviewStartRole, "reviewStart"},
-        {ReviewEndRole, "reviewEnd"},
         {ReviewOptionRole, "reviewOption"},
         {ReviewOptionsRole, "reviewOptions"},
         {SameTitleRole, "sameTitle"},

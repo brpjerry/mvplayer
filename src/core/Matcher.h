@@ -39,6 +39,12 @@ bool isTalkTitle(const QString &title);
 // is, an upload that names none of them is not taken for the track's.
 bool namesArtist(const TrackInfo &track, const QString &videoTitle, const QString &channel);
 
+// Whether an upload's title carries the track's title, word for word and
+// outside brackets. The same song under two titles (the original and its
+// English version) has an upload for each, and the title is what tells them
+// apart.
+bool namesTitle(const TrackInfo &track, const QString &videoTitle);
+
 // Whether a channel is the artist's own: the artist's name and nothing else
 // but "official", "channel" and the like. "Artist Latino" and "We love
 // Artist" are somebody else's.
@@ -54,6 +60,11 @@ QStringList searchQueries(const TrackInfo &track);
 // `artistChannel`: the upload is on the artist's own channel, where a
 // synthesised voice credited in the title is not another version.
 bool sameVersion(const TrackInfo &track, const QString &videoTitle, bool artistChannel = false);
+
+// Why an upload of this length is not examined for the track, or nothing:
+// under half of it (the ninety seconds used as a show's opening, against the
+// whole song), or several times its length.
+QString lengthMismatch(const TrackInfo &track, double seconds);
 
 // Scores every candidate against the track and sorts best-first.
 // `knownChannel`: whether a candidate's channel is the artist's own by
