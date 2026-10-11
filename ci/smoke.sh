@@ -6,6 +6,9 @@
 # tracks.
 set -euo pipefail
 export MVPLAYER_NO_MUSICBRAINZ=1
+# What Python prints here is compared with text in this file, which is UTF-8;
+# on Windows it would print in the console's code page otherwise.
+export PYTHONUTF8=1
 # The songs made up here run 40 to 50 seconds; tracks under 1:20 are not
 # looked up otherwise (see "short tracks" below).
 export MVPLAYER_MIN_TRACK_SECS=30
