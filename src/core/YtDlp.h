@@ -68,6 +68,31 @@ public:
 
     // What YouTube offers the account for a video, without downloading.
     bool premiumInfo(const QString &id, QJsonObject *info, QString *error);
+    // What the upload's page says, with nothing downloaded: its channel and
+    // that channel's subscribers among the rest. From what an earlier look
+    // left in the cache, where there is something.
+    bool pageInfo(const QString &id, QJsonObject *info, QString *error);
+    // The channel an upload is on, as its page (the info that comes with its
+    // audio) has it. `listedAs`: the channel as the search results name it,
+    // "A and B" for an upload YouTube lists under several channels.
+    struct Channel {
+        QString id;
+        QString name;
+        // -1: none to go by. The channel hides it; or the upload is listed
+        // under several channels, where the page gives the first one's in
+        // words ("7.43 million", which reads as 743) and the others' not at all.
+        qint64 subscribers = -1;
+        bool verified = false;
+        bool several = false;
+        // "@name" as the page has it; empty (never null) where it gives none.
+        QString handle;
+    };
+    static Channel channelOf(const QJsonObject &info, const QString &listedAs = QString());
+    // How a channel is named for good: its handle ("@name", in lower case:
+    // YouTube does not tell cases apart) or its id ("UC…"), out of either of
+    // them as typed or out of the address of the channel's page. Empty where
+    // `typed` is neither: a channel's name will not do, two can have the same.
+    static QString channelRef(const QString &typed);
 
     // The video's own subtitles (not the machine-made ones) in YouTube's
     // format, for the languages wanted: language wanted -> file in `dir`.

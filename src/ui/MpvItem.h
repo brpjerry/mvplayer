@@ -23,6 +23,9 @@ class MpvItem : public QQuickFramebufferObject
     Q_PROPERTY(bool muted READ muted WRITE setMuted NOTIFY mutedChanged)
     Q_PROPERTY(int audioTrack READ audioTrack WRITE setAudioTrack NOTIFY audioTrackChanged)
     Q_PROPERTY(QVariantList audioTracks READ audioTracks NOTIFY audioTracksChanged)
+    // The audio track the next file starts on, from 1: the first, unless the
+    // file is one under review whose candidate on show has a later one.
+    Q_PROPERTY(int firstAudioTrack MEMBER m_firstAudioTrack)
     // Subtitles kept beside the video: whether it has any, whether they are
     // shown, and the languages preferred ("en,ja").
     Q_PROPERTY(bool hasSubtitles READ hasSubtitles NOTIFY hasSubtitlesChanged)
@@ -120,6 +123,7 @@ private:
     double m_volume = 1.0;
     bool m_muted = false;
     int m_audioTrack = 0;
+    int m_firstAudioTrack = 1;
     QVariantList m_audioTracks;
     bool m_hasSubtitles = false;
     bool m_subtitlesVisible = true;

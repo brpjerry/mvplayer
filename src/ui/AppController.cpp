@@ -112,6 +112,14 @@ AppController::AppController(const AppOptions &options, QObject *parent)
     m_cfg.replaceAudio = m_settings->value(QStringLiteral("import/replaceAudio"), true).toBool();
     m_cfg.allowUnofficial = m_settings->value(QStringLiteral("import/allowUnofficial"), false).toBool();
     m_cfg.skipStillImages = m_settings->value(QStringLiteral("import/skipStillImages"), true).toBool();
+    m_ignoreSmallChannels = m_settings->value(QStringLiteral("import/ignoreSmallChannels"), true).toBool();
+    m_minSubscribers = qMax(1, m_settings->value(QStringLiteral("import/minSubscribers"), 5000).toInt());
+    m_cfg.minSubscribers = m_ignoreSmallChannels ? m_minSubscribers : 0;
+    for (const QString &kept : m_settings->value(QStringLiteral("import/smallChannelExceptions")).toStringList()) {
+        const QString channel = YtDlp::channelRef(kept);
+        if (!channel.isEmpty() && !m_cfg.smallChannelExceptions.contains(channel))
+            m_cfg.smallChannelExceptions << channel;
+    }
     m_cfg.concurrency = m_settings->value(QStringLiteral("import/concurrency"), 2).toInt();
     // By default the language the desktop is in.
     QString language = QLocale::system().name().section(QLatin1Char('_'), 0, 0).toLower();
@@ -209,6 +217,10 @@ void AppController::openLibrary()
             videos << v;
     }
     m_model->reset(videos);
+    m_shownKey.clear();
+    for (const VideoInfo &v : std::as_const(videos))
+        updateShown(v);
+    emit candidatesChanged();
 
     m_manager = std::make_unique<ImportManager>(m_db.get());
     m_manager->setSettings(m_cfg);
@@ -222,15 +234,22 @@ void AppController::openLibrary()
     connect(m_manager.get(), &ImportManager::videoAdded, this, [this](qint64 id) {
         if (const auto v = m_db->video(id)) {
             m_model->upsert(*v);
+            updateShown(*v);
+            emit candidatesChanged();
             emit videoImported(m_model->toMap(m_model->rowCount() - 1));
         }
     });
     connect(m_manager.get(), &ImportManager::videoChanged, this, [this](qint64 id) {
-        if (const auto v = m_db->video(id))
+        if (const auto v = m_db->video(id)) {
             m_model->upsert(*v);
+            updateShown(*v);
+            emit candidatesChanged();
+        }
     });
     connect(m_manager.get(), &ImportManager::videoRemoved, this, [this](qint64 id) {
         m_model->remove(id);
+        m_shownKey.remove(id);
+        emit candidatesChanged();
         refreshCounts();
     });
     connect(m_manager.get(), &ImportManager::activityChanged, this, [this] {
@@ -295,12 +314,12 @@ void AppController::rebuildFacets()
     collator.setCaseSensitivity(Qt::CaseInsensitive);
 
     // Each section of the grid has its own list: the review queue one card
-    // per group of options, the orphans those of the library's videos.
+    // per video, the orphans those of the library's videos.
     QVariantList out;
     for (const Def &def : defs) {
         const QString key = QLatin1String(def.key);
         QHash<QString, int> counts;
-        QHash<QString, QSet<qint64>> reviewGroups;
+        QHash<QString, int> reviewCounts;
         QHash<QString, int> orphanCounts;
         for (const VideoInfo &v : m_model->videos()) {
             QStringList values;
@@ -317,16 +336,13 @@ void AppController::rebuildFacets()
             const bool orphan = m_model->isOrphan(v);
             for (const QString &value : std::as_const(values)) {
                 if (v.review)
-                    reviewGroups[value].insert(v.reviewGroup > 0 ? v.reviewGroup : v.id);
+                    ++reviewCounts[value];
                 else
                     ++counts[value];
                 if (orphan)
                     ++orphanCounts[value];
             }
         }
-        QHash<QString, int> reviewCounts;
-        for (auto it = reviewGroups.cbegin(); it != reviewGroups.cend(); ++it)
-            reviewCounts.insert(it.key(), int(it.value().size()));
         auto itemsOf = [&](const QHash<QString, int> &counts) {
             QStringList names = counts.keys();
             std::sort(names.begin(), names.end(), [&](const QString &a, const QString &b) {
@@ -348,15 +364,9 @@ void AppController::rebuildFacets()
         };
     }
     m_facets = out;
-    // Several options for the same track are one thing to review.
-    QSet<qint64> groups;
-    for (const VideoInfo &v : m_model->videos()) {
-        if (v.review)
-            groups.insert(v.reviewGroup > 0 ? v.reviewGroup : v.id);
-    }
-    m_reviewCount = int(groups.size());
     m_reviewVideos = int(std::count_if(m_model->videos().begin(), m_model->videos().end(),
                                        [](const VideoInfo &v) { return v.review; }));
+    m_reviewCount = m_reviewVideos;
     m_orphanCount = int(std::count_if(m_model->videos().begin(), m_model->videos().end(),
                                       [this](const VideoInfo &v) { return m_model->isOrphan(v); }));
     emit facetsChanged();
@@ -372,6 +382,9 @@ void AppController::saveSettings()
     m_settings->setValue(QStringLiteral("import/replaceAudio"), m_cfg.replaceAudio);
     m_settings->setValue(QStringLiteral("import/allowUnofficial"), m_cfg.allowUnofficial);
     m_settings->setValue(QStringLiteral("import/skipStillImages"), m_cfg.skipStillImages);
+    m_settings->setValue(QStringLiteral("import/ignoreSmallChannels"), m_ignoreSmallChannels);
+    m_settings->setValue(QStringLiteral("import/minSubscribers"), m_minSubscribers);
+    m_settings->setValue(QStringLiteral("import/smallChannelExceptions"), m_cfg.smallChannelExceptions);
     m_settings->setValue(QStringLiteral("import/accountOnBotCheck"), m_cfg.accountOnBotCheck);
     m_settings->setValue(QStringLiteral("player/volume"), m_volume);
     m_settings->setValue(QStringLiteral("player/muted"), m_muted);
@@ -568,8 +581,103 @@ void AppController::removeCookies()
 
 void AppController::approveVideo(qint64 videoId)
 {
-    if (m_manager)
-        m_manager->approveVideo(videoId);
+    if (!m_manager || !m_db)
+        return;
+    // For the candidate track on show.
+    qint64 trackId = 0;
+    if (const auto v = m_db->video(videoId); v && v->review) {
+        const QVector<Database::Candidate> all = ImportManager::candidatesInOrder(m_db.get(), *v);
+        if (!all.isEmpty())
+            trackId = all.at(qBound(0, shownCandidate(videoId), int(all.size()) - 1)).track.id;
+    }
+    m_manager->approveVideo(videoId, trackId);
+}
+
+QVariantList AppController::candidates(qint64 videoId) const
+{
+    QVariantList out;
+    const std::optional<VideoInfo> v = m_db ? m_db->video(videoId) : std::nullopt;
+    if (!v || !v->review)
+        return out;
+    for (const Database::Candidate &c : ImportManager::candidatesInOrder(m_db.get(), *v)) {
+        QVariantList elsewhere;
+        for (const VideoInfo &o : m_db->candidacies(c.track)) {
+            if (o.id != videoId)
+                elsewhere << o.id;
+        }
+        out << QVariantMap{
+            {QStringLiteral("trackId"), c.track.id},
+            {QStringLiteral("title"), c.track.title},
+            {QStringLiteral("artist"), c.track.artist},
+            {QStringLiteral("album"), c.track.album},
+            {QStringLiteral("length"), c.track.duration > 0 ? formatDuration(c.track.duration) : QString()},
+            {QStringLiteral("stream"), c.stream},
+            {QStringLiteral("audioDetail"), c.audioDetail},
+            {QStringLiteral("elsewhere"), elsewhere},
+        };
+    }
+    return out;
+}
+
+int AppController::shownCandidate(qint64 videoId) const
+{
+    const std::optional<VideoInfo> v = m_db ? m_db->video(videoId) : std::nullopt;
+    const auto key = m_shownKey.constFind(videoId);
+    if (!v || !v->review || key == m_shownKey.constEnd())
+        return 0;
+    const QVector<Database::Candidate> all = ImportManager::candidatesInOrder(m_db.get(), *v);
+    for (int i = 0; i < all.size(); ++i) {
+        if (Database::trackKey(all[i].track) == *key)
+            return i;
+    }
+    return 0;
+}
+
+void AppController::showCandidate(qint64 videoId, int index)
+{
+    const std::optional<VideoInfo> v = m_db ? m_db->video(videoId) : std::nullopt;
+    if (!v || !v->review)
+        return;
+    const QVector<Database::Candidate> all = ImportManager::candidatesInOrder(m_db.get(), *v);
+    if (index < 0 || index >= all.size())
+        return;
+    m_shownKey.insert(videoId, Database::trackKey(all[index].track));
+    updateShown(*v);
+    emit candidatesChanged();
+}
+
+int AppController::firstAudioTrack(qint64 videoId) const
+{
+    const std::optional<VideoInfo> v = m_db ? m_db->video(videoId) : std::nullopt;
+    if (!v || !v->review)
+        return 1;
+    const QVector<Database::Candidate> all = ImportManager::candidatesInOrder(m_db.get(), *v);
+    if (all.isEmpty())
+        return 1;
+    // (A candidate without audio of its own in the file would keep YouTube's.)
+    const Database::Candidate &c = all.at(qBound(0, shownCandidate(videoId), int(all.size()) - 1));
+    return c.stream > 0 ? c.stream : v->ytStream + 1;
+}
+
+void AppController::updateShown(const VideoInfo &v)
+{
+    if (!v.review || !m_db)
+        return;
+    const QVector<Database::Candidate> all = ImportManager::candidatesInOrder(m_db.get(), v);
+    VideoModel::Shown shown;
+    shown.count = int(all.size());
+    if (!all.isEmpty()) {
+        int at = 0;
+        const auto key = m_shownKey.constFind(v.id);
+        for (int i = 0; key != m_shownKey.constEnd() && i < all.size(); ++i) {
+            if (Database::trackKey(all[i].track) == *key)
+                at = i;
+        }
+        shown.index = at + 1;
+        shown.title = all[at].track.title;
+        shown.artist = all[at].track.artist;
+    }
+    m_model->setShown(v.id, shown);
 }
 
 void AppController::rejectVideo(qint64 videoId)
@@ -678,6 +786,52 @@ void AppController::fetchSubtitles()
 {
     if (m_manager)
         m_manager->fetchSubtitles();
+}
+
+void AppController::setIgnoreSmallChannels(bool v)
+{
+    if (v == m_ignoreSmallChannels)
+        return;
+    m_ignoreSmallChannels = v;
+    m_cfg.minSubscribers = m_ignoreSmallChannels ? m_minSubscribers : 0;
+    saveSettings();
+    if (m_manager)
+        m_manager->setSettings(m_cfg);
+    emit settingsChanged();
+}
+
+void AppController::setMinSubscribers(int n)
+{
+    n = qBound(1, n, 1000000000);
+    if (n == m_minSubscribers)
+        return;
+    m_minSubscribers = n;
+    m_cfg.minSubscribers = m_ignoreSmallChannels ? m_minSubscribers : 0;
+    saveSettings();
+    if (m_manager)
+        m_manager->setSettings(m_cfg);
+    emit settingsChanged();
+}
+
+void AppController::setSmallChannelExceptions(const QString &channels)
+{
+    // Not at spaces: a channel's name typed for its handle is not two handles.
+    static const QRegularExpression separators(QStringLiteral("[,;\\n]+"));
+    QStringList list;
+    for (const QString &typed : channels.split(separators, Qt::SkipEmptyParts)) {
+        const QString channel = YtDlp::channelRef(typed);
+        if (!channel.isEmpty() && !list.contains(channel))
+            list << channel;
+    }
+    if (list == m_cfg.smallChannelExceptions) {
+        emit settingsChanged(); // the field shows what was understood
+        return;
+    }
+    m_cfg.smallChannelExceptions = list;
+    saveSettings();
+    if (m_manager)
+        m_manager->setSettings(m_cfg);
+    emit settingsChanged();
 }
 
 void AppController::setSkipStillImages(bool v)
@@ -832,6 +986,8 @@ int AppController::reimportFacet(const QString &type, const QString &value)
     for (qint64 videoId : m_filter->videosWithFacet(type, value)) {
         for (const TrackInfo &t : m_db->tracksForVideo(videoId))
             tracks << t.id;
+        for (const Database::Candidate &c : m_db->candidates(videoId))
+            tracks << c.track.id;
     }
     const int n = m_manager->reimport(tracks);
     refreshCounts();
@@ -899,15 +1055,14 @@ QVariantList AppController::unmatchedTracks() const
 
 QVector<TrackInfo> AppController::sourceTracks(const VideoInfo &v) const
 {
-    // Several options under review wait for the same tracks, which point at
-    // one of them.
-    QVector<TrackInfo> tracks;
+    // Of a video under review: the music file of its candidate on show.
     if (v.review) {
-        for (const VideoInfo &option : m_db->reviewOptions(v.reviewGroup > 0 ? v.reviewGroup : v.id))
-            tracks += m_db->tracksForVideo(option.id, true);
-    } else {
-        tracks = m_db->tracksForVideo(v.id, true);
+        const QVector<Database::Candidate> all = ImportManager::candidatesInOrder(m_db.get(), v);
+        if (all.isEmpty())
+            return {};
+        return {all.at(qBound(0, shownCandidate(v.id), int(all.size()) - 1)).track};
     }
+    QVector<TrackInfo> tracks = m_db->tracksForVideo(v.id, true);
     std::sort(tracks.begin(), tracks.end(), [](const TrackInfo &a, const TrackInfo &b) {
         return a.absent != b.absent ? !a.absent : betterSource(a, b);
     });

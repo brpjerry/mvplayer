@@ -173,7 +173,9 @@ QString Matcher::lengthMismatch(const TrackInfo &track, double seconds)
     // release has beside the song, not the song's.
     if (ratio < 0.5)
         return QStringLiteral("under half the track's length");
-    if (ratio > 3.0 || seconds > track.duration + 900)
+    // Twice the track, or four minutes more of it: the whole song against
+    // its opening cut, a live video of two songs, a film with the song in it.
+    if (ratio > 2.0 || seconds > track.duration + 240)
         return QStringLiteral("duration mismatch");
     return {};
 }

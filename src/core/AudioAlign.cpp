@@ -264,6 +264,7 @@ enum FrameState : uint8_t { Out, Bad, Soft, Neutral, Good };
 struct FrameScan {
     std::vector<uint8_t> state;
     std::vector<float> m2, t2; // per-frame energies
+    std::vector<float> d;      // and what the two have in common there (their product)
     std::vector<qint64> lag;   // the offset each frame was compared at
 };
 
@@ -317,7 +318,8 @@ FrameScan scanFrames(const std::vector<float> &M, const std::vector<float> &T, q
     }
 
     const double quiet = kSilenceRms * kSilenceRms * kFrame;
-    std::vector<float> d(frames, 0);
+    fs.d.assign(frames, 0);
+    std::vector<float> &d = fs.d;
     for (qint64 f = 0; f < frames; ++f) {
         const qint64 p = f * kFrame, t = p - fs.lag[f];
         if (t < 0 || t + kFrame > nT)
@@ -445,6 +447,8 @@ QString Result::summary() const
         parts << QStringLiteral("gain %1 dB").arg(20 * std::log10(gain), 0, 'f', 2);
     if (!segments.isEmpty() && pcmMatchedSec > 0)
         parts << QStringLiteral("%1% of it plainly the same").arg(qRound(100 * goodSec / pcmMatchedSec));
+    if (!segments.isEmpty())
+        parts << QStringLiteral("fit %1%").arg(100 * likeness, 0, 'f', 1);
     int places = 0;
     if (const double other = interruptedSec(&places); places > 0)
         parts << QStringLiteral("interrupted %1 times by %2s of other audio").arg(places).arg(other, 0, 'f', 1);
@@ -524,6 +528,7 @@ Result align(const std::vector<int16_t> &track, const std::vector<int16_t> &vide
     const qint64 frames = nM / kFrame;
     std::vector<uint8_t> claimed(frames, 0);
     double sumM2 = 0, sumT2 = 0;
+    double common = 0; // what the two have in common inside the segments, for `likeness`
     QVector<qint64> lagsDone;
     int sign = 0; // polarity of the video's audio against the track's, set by the best run
 
@@ -582,6 +587,7 @@ Result align(const std::vector<int16_t> &track, const std::vector<int16_t> &vide
                 return;
             std::fill(claimed.begin() + a, claimed.begin() + b, 1);
             for (qint64 f = a; f < b; ++f) {
+                common += fs.d[f];
                 if (fs.state[f] == Good) {
                     sumM2 += fs.m2[f];
                     sumT2 += fs.t2[f];
@@ -633,6 +639,11 @@ Result align(const std::vector<int16_t> &track, const std::vector<int16_t> &vide
         res.pcmMatchedSec += double(s.mvEnd - s.mvStart) / kRate;
     if (sumM2 > 0 && sumT2 > 0)
         res.gain = std::sqrt(sumT2 / sumM2);
+    double wholeM2 = 0;
+    for (const float v : M)
+        wholeM2 += double(v) * v;
+    if (wholeM2 > 0 && cumT2.back() > 0)
+        res.likeness = std::clamp(common / std::sqrt(wholeM2 * cumT2.back()), 0.0, 1.0);
     return res;
 }
 

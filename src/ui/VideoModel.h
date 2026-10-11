@@ -33,8 +33,13 @@ public:
         YtTitleRole,
         YtChannelRole,
         ReviewRole,
-        ReviewOptionRole,  // which of its group's options this is, from 1
-        ReviewOptionsRole, // how many options the group has
+        // Of a video under review: its candidate track on show (the one a
+        // verdict is for), which of them that is from 1, and how many it has.
+        CandidateTitleRole,
+        CandidateArtistRole,
+        CandidateRole,
+        CandidatesRole,
+        YtStreamRole,      // which of the file's audio streams is YouTube's, from 0
         SameTitleRole,     // of a video under review: a library video with its title {album, ytTitle}
         OrphanRole,        // a library video that no track in the music folders has
     };
@@ -53,8 +58,15 @@ public:
     const VideoInfo &at(int row) const { return m_videos.at(row); }
     const QString &searchText(int row) const { return m_search.at(row); }
     QVariantMap toMap(int row) const;
-    // The videos waiting as options alongside `v` (itself included), by id.
-    QVector<qint64> reviewOptions(const VideoInfo &v) const;
+    // The candidate track a video under review shows.
+    struct Shown {
+        QString title;
+        QString artist;
+        int index = 0; // from 1; 0: it has none
+        int count = 0;
+        bool operator==(const Shown &o) const { return title == o.title && artist == o.artist && index == o.index && count == o.count; }
+    };
+    void setShown(qint64 videoId, const Shown &shown);
     // The accepted video that has the title of `v`, a video under review:
     // the song may have its video already. Null when there is none.
     const VideoInfo *sameTitle(const VideoInfo &v) const;
@@ -65,7 +77,6 @@ public:
 
 private:
     static QString buildSearchText(const VideoInfo &v);
-    void reviewOptionsChanged();
 
     // The library is thousands of videos and the review view hundreds of
     // cards; what a card asks per row must not walk the library.
@@ -75,7 +86,7 @@ private:
 
     QVector<VideoInfo> m_videos;
     QVector<QString> m_search; // folded text of every tag, parallel to m_videos
-    QHash<qint64, QVector<qint64>> m_groups;  // review group -> its options, sorted
+    QHash<qint64, Shown> m_shown;             // video under review -> its candidate on show
     QHash<QString, QVector<qint64>> m_titles; // folded title -> accepted videos with it
     QSet<qint64> m_untracked;
 };
@@ -116,10 +127,6 @@ public:
     Q_INVOKABLE QVariantMap get(int row) const;
     Q_INVOKABLE QVariantList snapshot() const;
     Q_INVOKABLE int rowOfVideo(qint64 videoId) const;
-    // Of several videos that wait as options for the same track, the review
-    // view shows one. Steps to the next (+1) or previous (-1) option and
-    // returns the video now shown.
-    Q_INVOKABLE qint64 stepReview(qint64 videoId, int delta);
     // The videos of the section on show that a sidebar row stands for:
     // every one with that tag, whatever the search box says.
     QVector<qint64> videosWithFacet(const QString &type, const QString &value) const;
@@ -149,6 +156,5 @@ private:
     QString m_facetType = QStringLiteral("all");
     QString m_facetValue;
     QString m_sortMode = QStringLiteral("title");
-    QHash<qint64, qint64> m_reviewShown; // review group -> the option on show
     QCollator m_collator;
 };

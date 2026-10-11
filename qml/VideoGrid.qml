@@ -15,7 +15,6 @@ Item {
     // the orphans
     signal approved(var videoId)
     signal rejected(var videoId)
-    signal stepped(var videoId, int delta)
 
     readonly property alias view: grid
     readonly property alias wheel: wheel
@@ -39,6 +38,13 @@ Item {
             currentCard = null
     }
 
+    // Brings a video's card into view, as a button that names it asks.
+    function reveal(videoId) {
+        const row = App.videos.rowOfVideo(videoId)
+        if (row >= 0)
+            grid.positionViewAtIndex(row, GridView.Center)
+        return row
+    }
     function thumbDecodeWidth(row) {
         const item = grid.itemAtIndex(row)
         return item ? item.thumbnail.decodeWidth : 0
@@ -74,7 +80,6 @@ Item {
             onActivated: root.activated(index)
             onApproved: root.approved(videoId)
             onRejected: root.rejected(videoId)
-            onStepped: (delta) => root.stepped(videoId, delta)
             onCurrentChanged: current ? root.claimCurrent(card) : root.releaseCurrent(card)
             Component.onCompleted: if (current) root.claimCurrent(card)
             Component.onDestruction: root.releaseCurrent(card)

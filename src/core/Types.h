@@ -34,7 +34,9 @@ struct TrackInfo {
     // and with it one lookup and one video. 0: not identified yet.
     qint64 recording = 0;
 
-    // Import state: pending | done | not_found | failed | skipped
+    // Import state: pending | done | review | not_found | failed | skipped.
+    // review: it has no video, and is a candidate of videos that wait for
+    // the user's verdict (Database::candidacies).
     QString state = QStringLiteral("pending");
     qint64 videoId = 0;
     int attempts = 0;
@@ -99,20 +101,35 @@ struct VideoInfo {
     QString audioDetail;  // e.g. "FLAC 24/48"
     double ytAbr = 0;     // bitrate of the YouTube audio in the file, kbit/s; 0: not recorded
 
-    // Waiting for the user to say whether this is the track's video: the
+    // Waiting for the user to say whose video this is, if anyone's: the
     // fingerprints say it is the song, the waveforms cannot confirm the
-    // recording. It carries the track's audio and YouTube's to compare; the
-    // track's sits between these two times of the video.
+    // recording. The tracks it could belong to are its candidates
+    // (Database::candidates); its file carries the audio of each of them that
+    // is the better audio, then YouTube's. The first candidate's audio sits
+    // between these two times of the video.
     bool review = false;
     double reviewStart = 0;
     double reviewEnd = 0;
-    // Several videos can wait as options for the same tracks: they share this
-    // number, and the tracks point at one of them.
-    qint64 reviewGroup = 0;
+    // Which of the file's audio streams is YouTube's, from 0: the ones before
+    // it are the library's.
+    int ytStream = 0;
 
     QString ytTitle;
     QString ytChannel;
     QString ytChannelId; // UC…; empty for videos from before it was kept
+    // What the upload's page said of its channel when the video was brought
+    // in, or when the page was last read for it: how many subscribers it
+    // has, and whether YouTube marks it as verified. -2: the page was never
+    // read for it (videos from before this was kept); -1: read, and there is
+    // no count to go by (the channel hides it, or YouTube lists the upload
+    // under several channels).
+    qint64 ytChannelSubs = -2;
+    bool ytChannelVerified = false;
+    // The channel's handle as its page has it ("@name"), the other way
+    // besides its id that an exception to "Ignore small channels" names it.
+    // Null: never kept (the page was read before handles were); empty: the
+    // page gave none.
+    QString ytChannelHandle;
     QJsonObject tags;
     qint64 addedAt = 0;
 };

@@ -43,11 +43,21 @@ struct Probe {
 bool mux(const Plan &plan, const std::atomic<bool> *cancel, QString *audioDetail, QString *error,
          ReviewSpan *reviewSpan = nullptr);
 
-// Videos brought in for review used to carry a third audio stream, played
-// by default, that alternated every ten seconds between YouTube's audio and
-// the track's. Once the user has accepted such a video: removes that stream
-// and makes the track's audio the default. A file without one is left alone.
-bool dropReviewStream(const QString &file, const std::atomic<bool> *cancel, QString *error);
+// A video under review gains one more candidate's audio: the track of
+// `plan`, placed by plan.align, as a stream after the library streams the
+// file has and ahead of YouTube's. plan.outFile is the file (its picture and
+// its other audio are copied); plan.ytAudioStream says which of its audio
+// streams is YouTube's, and the new stream takes that place.
+bool addLibraryStream(const Plan &plan, const std::atomic<bool> *cancel, QString *audioDetail, QString *error);
+
+// Once the user has accepted a video for one of its candidates: the file
+// keeps that track's audio (stream `libraryStream`, from 0; -1 where the
+// track has none in it) and YouTube's (`ytStream`), in that order, and
+// nothing else; it is tagged as `track`. Also for a video whose track has
+// changed and whose audio is YouTube's again. A file that is like that
+// already is left alone.
+bool keepAudio(const QString &file, int libraryStream, int ytStream, const TrackInfo &track, const QString &ytId,
+               const std::atomic<bool> *cancel, QString *error);
 
 bool probe(const QString &file, Probe *out);
 

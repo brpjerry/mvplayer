@@ -44,7 +44,7 @@ def main():
             # may only note that it is already waiting, or was turned down.
             seen = examined.setdefault(e.get("trackId"), {})
             for c in e.get("checked", []):
-                if c.get("result") in ("option", "rejected") and c.get("id") in seen:
+                if c.get("result") in ("option", "candidate", "rejected") and c.get("id") in seen:
                     continue
                 seen[c.get("id")] = c
         elif kind == "track":
@@ -68,6 +68,8 @@ def main():
             decision = "skipped"
         elif t["state"] == "pending":
             decision = "pending"
+        elif t["state"] == "review":
+            decision = "review"  # a candidate of videos that wait for the user's verdict
         elif video is not None:
             decision = "review" if video["review"] else "accept"
         elif t["state"] == "failed":

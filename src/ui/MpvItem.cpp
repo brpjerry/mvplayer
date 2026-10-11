@@ -558,14 +558,15 @@ void MpvItem::drainEvents()
             break;
         case MPV_EVENT_HOOK: {
             // Every video starts on its first audio track: the library's
-            // where it has been put in, else YouTube's. Not on whichever the
+            // where it has been put in, else YouTube's (one under review, on
+            // that of its candidate on show). Not on whichever the
             // last one was left on (mpv carries that over between files that
             // look alike), and not on the stream that videos under review
             // used to carry as their default, which alternated between the
             // two. An option given with the file does not do: mpv puts the
             // choice back to automatic when the next file's tracks differ.
             const auto *hook = static_cast<const mpv_event_hook *>(e->data);
-            qint64 first = 1;
+            qint64 first = qMax(1, m_firstAudioTrack);
             mpv_set_property(m_core->mpv, "aid", MPV_FORMAT_INT64, &first);
             mpv_hook_continue(m_core->mpv, hook->id);
             break;

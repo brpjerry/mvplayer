@@ -56,6 +56,13 @@ class AppController : public QObject
     Q_PROPERTY(bool replaceAudio READ replaceAudio WRITE setReplaceAudio NOTIFY settingsChanged)
     Q_PROPERTY(bool allowUnofficial READ allowUnofficial WRITE setAllowUnofficial NOTIFY settingsChanged)
     Q_PROPERTY(bool skipStillImages READ skipStillImages WRITE setSkipStillImages NOTIFY settingsChanged)
+    // Uploads from channels with fewer than minSubscribers subscribers are
+    // ignored while ignoreSmallChannels is on; the limit stays when it is off.
+    Q_PROPERTY(bool ignoreSmallChannels READ ignoreSmallChannels WRITE setIgnoreSmallChannels NOTIFY settingsChanged)
+    Q_PROPERTY(int minSubscribers READ minSubscribers WRITE setMinSubscribers NOTIFY settingsChanged)
+    // The channels that are never ignored as small: "@name, @other". Typed
+    // as handles, ids or the addresses of their pages; shown as understood.
+    Q_PROPERTY(QString smallChannelExceptions READ smallChannelExceptions WRITE setSmallChannelExceptions NOTIFY settingsChanged)
     // Subtitles: the languages fetched with each video ("en, ja"; empty for
     // none), and whether the player shows them.
     Q_PROPERTY(QString subtitleLangs READ subtitleLangs WRITE setSubtitleLangs NOTIFY settingsChanged)
@@ -128,8 +135,23 @@ public:
     QVariantList facets() const { return m_facets; }
     int videoCount() const { return m_model->rowCount() - m_reviewVideos; }
     int reviewCount() const { return m_reviewCount; }
+    // The verdict on a video under review. Accepted, it is the video of
+    // its candidate track on show; rejected, of none of them.
     Q_INVOKABLE void approveVideo(qint64 videoId);
     Q_INVOKABLE void rejectVideo(qint64 videoId);
+    // The candidate tracks of a video under review, the tracks whose video
+    // it could be, in the order they are shown: each {trackId, title, artist,
+    // album, length, stream, audioDetail, elsewhere}. stream: which audio
+    // track of the video is that track's audio, from 1 (0: it has none, and
+    // would keep YouTube's). elsewhere: the other videos under review the
+    // track is a candidate of, by id.
+    Q_INVOKABLE QVariantList candidates(qint64 videoId) const;
+    // Which of them the video's card and the panel show, from 0.
+    Q_INVOKABLE int shownCandidate(qint64 videoId) const;
+    Q_INVOKABLE void showCandidate(qint64 videoId, int index);
+    // The audio track a video starts on, from 1: the first, or under review
+    // that of its candidate on show.
+    Q_INVOKABLE int firstAudioTrack(qint64 videoId) const;
     int orphanCount() const { return m_orphanCount; }
     Q_INVOKABLE void keepOrphan(qint64 videoId);
     // False while the music folders are being read.
@@ -146,6 +168,10 @@ public:
     bool allowUnofficial() const { return m_cfg.allowUnofficial; }
     void setAllowUnofficial(bool v);
     bool skipStillImages() const { return m_cfg.skipStillImages; }
+    bool ignoreSmallChannels() const { return m_ignoreSmallChannels; }
+    int minSubscribers() const { return m_minSubscribers; }
+    QString smallChannelExceptions() const { return m_cfg.smallChannelExceptions.join(QStringLiteral(", ")); }
+    void setSmallChannelExceptions(const QString &channels);
     QString subtitleLangs() const { return m_cfg.subtitleLangs.join(QStringLiteral(", ")); }
     void setSubtitleLangs(const QString &langs);
     bool subtitlesOn() const { return m_subtitlesOn; }
@@ -161,6 +187,8 @@ public:
     int untrackedCount() const { return m_untrackedCount; }
     Q_INVOKABLE int deleteUntracked();
     void setSkipStillImages(bool v);
+    void setIgnoreSmallChannels(bool v);
+    void setMinSubscribers(int n);
     bool hasCookies() const { return !m_cfg.cookiesFile.isEmpty(); }
     QString cookiesAdded() const;
     // Stores a copy of `file`. Returns what is wrong with it, or nothing.
@@ -236,6 +264,8 @@ public:
     void shutdown();
 
 signals:
+    // What the videos under review have as candidates, or show of them, changed.
+    void candidatesChanged();
     void facetsChanged();
     void settingsChanged();
     void activityChanged();
@@ -261,6 +291,8 @@ private:
     // The music files that have a video, those still in the music folders
     // first, the best of them first. Needs the library open.
     QVector<TrackInfo> sourceTracks(const VideoInfo &v) const;
+    void updateShown(const VideoInfo &v);
+    QHash<qint64, qint64> m_shownKey; // video under review -> its candidate track on show (Database::trackKey)
 
     AppOptions m_options;
     std::unique_ptr<QSettings> m_settings;
@@ -279,8 +311,10 @@ private:
     QTimer m_facetTimer;
     QVariantMap m_trackCounts;
     int m_sessionDone = 0;
-    int m_reviewCount = 0;  // tracks with videos waiting for review
-    int m_reviewVideos = 0; // those videos, counting every option
+    bool m_ignoreSmallChannels = true;
+    int m_minSubscribers = 5000;
+    int m_reviewCount = 0;  // videos waiting for review
+    int m_reviewVideos = 0;
     int m_orphanCount = 0;
     QString m_accent = QStringLiteral("auto");
     QString m_sidebarFacet = QStringLiteral("albumArtist");

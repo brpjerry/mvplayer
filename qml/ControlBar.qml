@@ -17,6 +17,7 @@ Rectangle {
     readonly property bool hovered: hover.hovered || seek.dragging || sources.visible
 
     signal replaceRequested(var videoId)
+    signal revealRequested(var videoId) // bring that video's card into view
 
     signal playPauseRequested()
     signal nextRequested()
@@ -40,16 +41,92 @@ Rectangle {
     }
     // What a video under review is playing right now; empty otherwise.
     readonly property string reviewLabel: audioSwitch.reviewing ? chipLabel.text : ""
-    // The key that changes between the library's audio and YouTube's, as the
-    // chip shows it; the window binds it.
+
+    // A video under review has candidate tracks: the tracks whose video it
+    // could be. The panel shows one of them at a time, and the verdict is
+    // for that one. The arrows step through them and the audio goes with
+    // them: the candidate on show is the one whose audio plays.
+    property var candidates: []
+    property int shown: 0
+    readonly property bool reviewing: current !== null && current.review === true
+    readonly property var candidate: candidates.length > 0 ? candidates[Math.min(shown, candidates.length - 1)] : null
+    function refreshCandidates() {
+        // (Asked of `current` itself: this runs as it changes, ahead of the bindings on it.)
+        const list = current !== null && current.review === true ? App.candidates(current.videoId) : []
+        shown = list.length > 0 ? Math.max(0, Math.min(App.shownCandidate(current.videoId), list.length - 1)) : 0
+        candidates = list
+    }
+    onCurrentChanged: { elsewhereAt = 0; refreshCandidates() }
+    Connections {
+        target: App
+        function onCandidatesChanged() { root.refreshCandidates() }
+    }
+    function stepCandidate(delta) {
+        const n = candidates.length
+        if (n < 2)
+            return
+        const to = ((shown + delta) % n + n) % n
+        const c = candidates[to]
+        elsewhereAt = 0
+        App.showCandidate(current.videoId, to)
+        // (A candidate without audio of its own in the file would keep YouTube's.)
+        mpv.audioTrack = c.stream > 0 ? c.stream : current.ytStream + 1
+    }
+    // The candidate on show is a candidate of other videos too: goes to the
+    // next of those, and says which.
+    property int elsewhereAt: 0
+    function showElsewhere() {
+        if (candidate === null || candidate.elsewhere.length === 0)
+            return -1
+        const id = candidate.elsewhere[elsewhereAt % candidate.elsewhere.length]
+        elsewhereAt = (elsewhereAt + 1) % candidate.elsewhere.length
+        revealRequested(id)
+        return id
+    }
+    // What the panel says is playing: the candidate on show, under review.
+    readonly property string nowTitle: candidate !== null ? candidate.title : current !== null ? current.title : ""
+    readonly property string nowArtist: (candidate !== null ? candidate.artist : current !== null ? current.artist : "").replace(/; /g, ", ")
+
+    // The audio the playing video has, in the order the key goes through it:
+    // the library's (each candidate's that has one in the file, under
+    // review), then YouTube's. `candidate`: whose it is, from 0; -1 for none.
+    readonly property var audios: {
+        const list = []
+        if (!hasMedia)
+            return list
+        if (reviewing && candidates.length > 0) {
+            for (let i = 0; i < candidates.length; ++i) {
+                if (candidates[i].stream > 0)
+                    list.push({ track: candidates[i].stream, candidate: i, library: true })
+            }
+            list.push({ track: current.ytStream + 1, candidate: -1, library: false })
+        } else {
+            for (let i = 0; i < Math.min(2, mpv.audioTracks.length); ++i)
+                list.push({ track: i + 1, candidate: -1, library: i === 0 && mpv.audioTracks.length > 1 })
+        }
+        return list
+    }
+    readonly property int audioAt: {
+        for (let i = 0; i < audios.length; ++i) {
+            if (audios[i].track === mpv.audioTrack)
+                return i
+        }
+        return -1
+    }
+    // The key that goes on to the next of them, as the chip shows it; the
+    // window binds it.
     readonly property string audioKey: "A"
     function switchAudio() {
-        if (audioSwitch.available)
-            mpv.audioTrack = audioSwitch.library ? 2 : 1
+        if (!audioSwitch.available)
+            return
+        const next = audios[(audioAt + 1) % audios.length]
+        mpv.audioTrack = next.track
+        if (next.candidate >= 0 && next.candidate !== shown)
+            App.showCandidate(current.videoId, next.candidate)
     }
     // How long the track of a video under review is: the seek bar has the
     // video's length, and a video much shorter than its track is a cut.
-    readonly property string trackLength: current !== null && current.review === true ? App.trackLength(current.videoId) : ""
+    readonly property string trackLength: candidate !== null ? candidate.length : ""
 
     HoverHandler { id: hover }
     // Swallow clicks so they do not reach the video underneath in fullscreen.
@@ -99,8 +176,9 @@ Rectangle {
             anchors.verticalCenter: parent.verticalCenter
             spacing: 3
             Text {
-                width: parent.width
-                text: root.current ? root.current.title : ""
+                // (Room on the right for the arrows between candidates.)
+                width: parent.width - (candidateSteps.visible ? candidateSteps.width + 6 : 0)
+                text: root.nowTitle
                 color: textMouse.containsMouse || sources.visible ? Theme.accentHi : Theme.text
                 font.pixelSize: 14
                 font.weight: Font.DemiBold
@@ -108,10 +186,10 @@ Rectangle {
                 Behavior on color { ColorAnimation { duration: Theme.fast } }
             }
             Row {
-                width: parent.width
+                width: parent.width - (elsewhere.visible ? elsewhere.width + 6 : 0)
                 Text {
                     width: Math.min(implicitWidth, parent.width - (trackLengthLabel.visible ? trackLengthLabel.implicitWidth : 0))
-                    text: root.current ? root.current.artist.replace(/; /g, ", ") : ""
+                    text: root.nowArtist
                     color: Theme.textDim
                     font.pixelSize: 12
                     elide: Text.ElideRight
@@ -132,6 +210,85 @@ Rectangle {
             hoverEnabled: true
             cursorShape: Qt.PointingHandCursor
             onClicked: root.toggleSources()
+        }
+
+        // Several tracks could have the video under review: the arrows show
+        // the next one and the one before, with its audio.
+        Row {
+            id: candidateSteps
+            visible: root.candidates.length > 1
+            anchors.right: parent.right
+            y: trackText.y - 3
+            spacing: 0
+            IconButton {
+                anchors.verticalCenter: parent.verticalCenter
+                size: 22
+                iconSize: 16
+                icon: Icons.back
+                tooltip: "Previous candidate track"
+                onClicked: root.stepCandidate(-1)
+            }
+            Text {
+                anchors.verticalCenter: parent.verticalCenter
+                text: (root.shown + 1) + "/" + root.candidates.length
+                color: Theme.textDim
+                font.pixelSize: 11
+                font.weight: Font.DemiBold
+                font.features: { "tnum": 1 }
+            }
+            IconButton {
+                anchors.verticalCenter: parent.verticalCenter
+                size: 22
+                iconSize: 16
+                icon: Icons.back
+                iconRotation: 180
+                tooltip: "Next candidate track"
+                onClicked: root.stepCandidate(1)
+            }
+        }
+        // The candidate on show is a candidate of other videos as well: says
+        // so, and a click brings the next of them into view.
+        Rectangle {
+            id: elsewhere
+            readonly property int count: root.candidate !== null ? root.candidate.elsewhere.length : 0
+            visible: count > 0
+            anchors.right: parent.right
+            y: trackText.y + trackText.height - height + 2
+            width: elsewhereRow.implicitWidth + 12
+            height: 18
+            radius: 9
+            color: elsewhereMouse.containsMouse ? Theme.accent : Theme.accentSoft
+            Behavior on color { ColorAnimation { duration: Theme.fast } }
+            Row {
+                id: elsewhereRow
+                anchors.centerIn: parent
+                spacing: 4
+                Icon {
+                    anchors.verticalCenter: parent.verticalCenter
+                    path: Icons.movie
+                    size: 11
+                    color: elsewhereMouse.containsMouse ? Theme.accentInk : Theme.accentHi
+                }
+                Text {
+                    anchors.verticalCenter: parent.verticalCenter
+                    text: "+" + elsewhere.count
+                    color: elsewhereMouse.containsMouse ? Theme.accentInk : Theme.accentHi
+                    font.pixelSize: 10
+                    font.weight: Font.DemiBold
+                }
+            }
+            MouseArea {
+                id: elsewhereMouse
+                anchors.fill: parent
+                hoverEnabled: true
+                cursorShape: Qt.PointingHandCursor
+                onClicked: root.showElsewhere()
+            }
+            Tooltip {
+                text: elsewhere.count === 1 ? "This track is a candidate of another video too · click to go to it"
+                                            : "This track is a candidate of " + elsewhere.count + " other videos too · click to go to the next"
+                shown: elsewhereMouse.containsMouse
+            }
         }
 
         // The music file and the YouTube page behind the video
@@ -251,9 +408,14 @@ Rectangle {
         Item {
             id: audioSwitch
             anchors.verticalCenter: parent.verticalCenter
-            readonly property bool available: root.hasMedia && root.mpv.audioTracks.length > 1
-            readonly property bool reviewing: available && root.current !== null && root.current.review === true
-            readonly property bool library: root.mpv.audioTrack <= 1
+            readonly property bool available: root.hasMedia && root.audios.length > 1
+            readonly property bool reviewing: available && root.reviewing
+            readonly property var playing: root.audioAt >= 0 ? root.audios[root.audioAt] : null
+            readonly property bool library: playing !== null ? playing.library : root.mpv.audioTrack <= 1
+            // Under review with several candidates' audio in the file:
+            // which of them plays, "1/2".
+            readonly property int libraries: root.audios.length - 1
+            readonly property string which: reviewing && libraries > 1 && library ? " " + (root.audioAt + 1) + "/" + libraries : ""
             readonly property color ink: library ? Theme.accentHi : Theme.textDim
             width: available ? chipRow.implicitWidth + 20 : 0
             height: 26
@@ -281,9 +443,14 @@ Rectangle {
                     Text {
                         id: chipLabel
                         anchors.verticalCenter: parent.verticalCenter
-                        readonly property string detail: root.current && root.current.audioDetail ? root.current.audioDetail : ""
+                        readonly property string detail: {
+                            const p = audioSwitch.playing
+                            if (p !== null && p.candidate >= 0 && root.candidates[p.candidate].audioDetail)
+                                return root.candidates[p.candidate].audioDetail
+                            return root.current && root.current.audioDetail ? root.current.audioDetail : ""
+                        }
                         text: !audioSwitch.library ? "YouTube audio"
-                            : audioSwitch.reviewing ? "Library audio" + (detail ? " (" + detail + ")" : "")
+                            : audioSwitch.reviewing ? "Library audio" + audioSwitch.which + (detail ? " (" + detail + ")" : "")
                             : detail ? detail : "Library audio"
                         color: audioSwitch.ink
                         font.pixelSize: 11
@@ -318,8 +485,17 @@ Rectangle {
                 onClicked: root.switchAudio()
             }
             Tooltip {
-                text: audioSwitch.library ? "Your library's audio · click or press " + root.audioKey + " for YouTube's"
-                                          : "YouTube's audio · click or press " + root.audioKey + " for your library's"
+                text: {
+                    const next = root.audios.length > 0 ? root.audios[(root.audioAt + 1) % root.audios.length] : null
+                    const then = next === null ? "" : !next.library ? "YouTube's"
+                        : next.candidate >= 0 && audioSwitch.libraries > 1 ? "that of “" + root.candidates[next.candidate].title + "”"
+                        : "your library's"
+                    const now = !audioSwitch.library ? "YouTube's audio"
+                        : audioSwitch.playing !== null && audioSwitch.playing.candidate >= 0 && audioSwitch.libraries > 1
+                            ? "The audio of “" + root.candidates[audioSwitch.playing.candidate].title + "” from your library"
+                        : "Your library's audio"
+                    return now + " · click or press " + root.audioKey + " for " + then
+                }
                 shown: chipMouse.containsMouse
             }
         }

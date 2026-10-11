@@ -1,14 +1,16 @@
 import QtQuick
 
 // What a video that waits for review carries on its picture: accept and
-// reject, and — when several uploads could be the track's video — arrows to
-// step through them. Laid over the thumbnail in the grid, and over the video
-// while it plays there. An orphan carries the same verdict: keep or delete.
+// reject, and how many tracks could have it when that is more than one. Laid
+// over the thumbnail in the grid, and over the video while it plays there.
+// An orphan carries the same verdict: keep or delete.
 Item {
     id: root
 
-    property int option: 1    // which of the options is shown, from 1
-    property int options: 1
+    // The candidate tracks of the video: how many, and the title of the one
+    // on show, which accepting is for.
+    property int candidates: 1
+    property string candidateTitle
     // A video already in the library with this one's title: {album, ytTitle}.
     property var sameTitle: ({})
     // An orphan's verdict: keep it, or delete it. Deleting waits while the
@@ -19,55 +21,20 @@ Item {
 
     signal approved()
     signal rejected()
-    signal stepped(int delta) // show the next (+1) or previous (-1) option
 
-    // Other uploads that could be this track's video: step through them.
-    Repeater {
-        model: root.options > 1 ? [-1, 1] : []
-        Rectangle {
-            id: arrow
-            required property int modelData
-            x: modelData < 0 ? 8 : root.width - width - 8
-            y: (root.height - height) / 2
-            width: 34
-            height: 34
-            radius: 17
-            color: arrowMouse.containsMouse ? Theme.accent : Theme.scrim
-            scale: arrowMouse.pressed ? 0.92 : 1
-            Behavior on color { ColorAnimation { duration: Theme.fast } }
-            Behavior on scale { NumberAnimation { duration: Theme.fast } }
-            Icon {
-                anchors.centerIn: parent
-                path: Icons.back
-                rotation: arrow.modelData < 0 ? 0 : 180
-                size: 20
-                color: arrowMouse.containsMouse ? Theme.accentInk : Theme.scrimText
-            }
-            MouseArea {
-                id: arrowMouse
-                anchors.fill: parent
-                hoverEnabled: true
-                cursorShape: Qt.PointingHandCursor
-                onClicked: root.stepped(arrow.modelData)
-            }
-            Tooltip {
-                text: arrow.modelData < 0 ? "Previous option" : "Next option"
-                shown: arrowMouse.containsMouse
-            }
-        }
-    }
+    // Several tracks could have this video: the panel below steps through them.
     Rectangle {
-        visible: root.options > 1
+        visible: root.candidates > 1
         x: 8
         y: 8
-        width: optionLabel.implicitWidth + 12
+        width: candidatesLabel.implicitWidth + 12
         height: 20
         radius: 4
         color: Theme.scrim
         Text {
-            id: optionLabel
+            id: candidatesLabel
             anchors.centerIn: parent
-            text: "Option " + root.option + " of " + root.options
+            text: root.candidates + " candidate tracks"
             color: Theme.scrimText
             font.pixelSize: 11
             font.weight: Font.DemiBold
@@ -171,8 +138,9 @@ Item {
                     anchors.horizontalCenter: undefined
                     x: parent.width - width
                     text: verdict.modelData.accept
-                          ? (root.orphan ? "Keep it: its tracks are gone, but it stays" : "This is the track's video")
-                          : (!root.orphan ? "Not this track's video: delete it"
+                          ? (root.orphan ? "Keep it: its tracks are gone, but it stays"
+                             : root.candidateTitle ? "This is the video of “" + root.candidateTitle + "”" : "This is the track's video")
+                          : (!root.orphan ? (root.candidates > 1 ? "The video of none of its candidates: delete it" : "Not this track's video: delete it")
                              : root.canDelete ? "Delete it" : "Wait until the music folders have been read")
                     shown: verdictMouse.containsMouse
                 }

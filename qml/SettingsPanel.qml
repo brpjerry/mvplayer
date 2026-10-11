@@ -651,6 +651,140 @@ Popup {
                         checked: App.allowUnofficial
                         onToggled: (c) => App.allowUnofficial = c
                     }
+                    // Somebody's re-upload of a song comes from a small channel.
+                    Item {
+                        width: parent.width
+                        height: 76
+                        Column {
+                            anchors.left: parent.left
+                            anchors.right: smallChannels.left
+                            anchors.rightMargin: 20
+                            anchors.verticalCenter: parent.verticalCenter
+                            spacing: 3
+                            Text {
+                                text: "Ignore small channels"
+                                color: Theme.text
+                                font.pixelSize: 14
+                            }
+                            Text {
+                                width: parent.width
+                                text: "Uploads from channels with fewer subscribers than this are not taken. Verified channels, and uploads listed under several channels, are."
+                                color: Theme.textFaint
+                                font.pixelSize: 12
+                                wrapMode: Text.WordWrap
+                            }
+                        }
+                        Row {
+                            id: smallChannels
+                            anchors.right: parent.right
+                            anchors.verticalCenter: parent.verticalCenter
+                            spacing: 12
+                            Rectangle {
+                                anchors.verticalCenter: parent.verticalCenter
+                                width: 84
+                                height: 34
+                                radius: Theme.radiusSmall
+                                color: Theme.hover
+                                opacity: App.ignoreSmallChannels ? 1 : 0.45
+                                border.width: 1
+                                border.color: subscribersField.activeFocus ? Theme.accent : "transparent"
+                                TextInput {
+                                    id: subscribersField
+                                    anchors.fill: parent
+                                    anchors.leftMargin: 10
+                                    anchors.rightMargin: 10
+                                    verticalAlignment: TextInput.AlignVCenter
+                                    horizontalAlignment: TextInput.AlignRight
+                                    clip: true
+                                    enabled: App.ignoreSmallChannels
+                                    color: Theme.text
+                                    selectionColor: Theme.accent
+                                    selectedTextColor: Theme.accentInk
+                                    font.pixelSize: 13
+                                    font.features: { "tnum": 1 }
+                                    selectByMouse: true
+                                    inputMethodHints: Qt.ImhDigitsOnly
+                                    validator: IntValidator { bottom: 1; top: 1000000000 }
+                                    text: App.minSubscribers
+                                    onEditingFinished: {
+                                        App.minSubscribers = parseInt(text) || App.minSubscribers
+                                        text = Qt.binding(() => App.minSubscribers)
+                                        focus = false
+                                    }
+                                }
+                            }
+                            FlatSwitch {
+                                anchors.verticalCenter: parent.verticalCenter
+                                checked: App.ignoreSmallChannels
+                                onToggled: (c) => App.ignoreSmallChannels = c
+                            }
+                        }
+                    }
+                    // A label's channel, or an artist's own, can be a small one.
+                    Item {
+                        width: parent.width
+                        height: exceptions.implicitHeight + 14
+                        opacity: App.ignoreSmallChannels ? 1 : 0.45
+                        Column {
+                            id: exceptions
+                            anchors.left: parent.left
+                            anchors.right: parent.right
+                            anchors.verticalCenter: parent.verticalCenter
+                            spacing: 3
+                            Text {
+                                text: "Except these channels"
+                                color: Theme.text
+                                font.pixelSize: 14
+                            }
+                            Text {
+                                width: parent.width
+                                text: "Never ignored as small. By handle, like “@name”, or by the address of the channel's page, with commas between them."
+                                color: Theme.textFaint
+                                font.pixelSize: 12
+                                wrapMode: Text.WordWrap
+                            }
+                            Item { width: 1; height: 4 }
+                            Rectangle {
+                                width: parent.width
+                                height: 34
+                                radius: Theme.radiusSmall
+                                color: Theme.hover
+                                border.width: 1
+                                border.color: exceptionsField.activeFocus ? Theme.accent : "transparent"
+                                TextInput {
+                                    id: exceptionsField
+                                    anchors.fill: parent
+                                    anchors.leftMargin: 10
+                                    anchors.rightMargin: 10
+                                    verticalAlignment: TextInput.AlignVCenter
+                                    clip: true
+                                    enabled: App.ignoreSmallChannels
+                                    color: Theme.text
+                                    selectionColor: Theme.accent
+                                    selectedTextColor: Theme.accentInk
+                                    font.pixelSize: 13
+                                    selectByMouse: true
+                                    text: App.smallChannelExceptions
+                                    // A long list shows from its start while it is not being edited.
+                                    onTextChanged: if (!activeFocus) cursorPosition = 0
+                                    onEditingFinished: {
+                                        App.smallChannelExceptions = text
+                                        text = Qt.binding(() => App.smallChannelExceptions)
+                                        focus = false
+                                        cursorPosition = 0
+                                    }
+                                }
+                                Text {
+                                    anchors.fill: exceptionsField
+                                    verticalAlignment: Text.AlignVCenter
+                                    visible: exceptionsField.text.length === 0 && !exceptionsField.activeFocus
+                                    text: "None"
+                                    color: Theme.textFaint
+                                    font.pixelSize: 13
+                                }
+                            }
+                        }
+                    }
 
                     Item { width: 1; height: 12 }
 

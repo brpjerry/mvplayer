@@ -16,8 +16,9 @@ Item {
     required property bool review      // waits for the user's verdict
     required property string ytTitle
     required property string ytChannel
-    required property int reviewOption   // which of the options for this track is shown, from 1
-    required property int reviewOptions
+    required property int candidates       // of a video under review: how many tracks could have it
+    required property string candidateTitle // and the one on show, which a verdict is for
+    required property string candidateArtist
     required property var sameTitle     // a library video with this title, for a video under review
     required property bool orphan       // no track in the music folders has it
 
@@ -33,7 +34,6 @@ Item {
     signal activated()
     signal approved()
     signal rejected()
-    signal stepped(int delta)          // show the next (+1) or previous (-1) option
 
     readonly property bool hovered: mouse.containsMouse
 
@@ -157,7 +157,7 @@ Item {
             anchors.right: parent.right
             anchors.top: thumbItem.bottom
             anchors.topMargin: 10
-            text: root.title
+            text: root.review && root.candidateTitle ? root.candidateTitle : root.title
             color: root.current ? Theme.accentHi : Theme.text
             font.pixelSize: 14
             font.weight: Font.DemiBold
@@ -194,13 +194,12 @@ Item {
         y: body.y + thumbItem.y
         width: thumbItem.width
         height: thumbItem.height
-        option: root.reviewOption
-        options: root.reviewOptions
+        candidates: root.candidates
+        candidateTitle: root.candidateTitle
         sameTitle: root.sameTitle
         orphan: !root.review
         canDelete: root.canDelete
         onApproved: root.approved()
         onRejected: root.rejected()
-        onStepped: (delta) => root.stepped(delta)
     }
 }
