@@ -1,9 +1,14 @@
 import QtQuick
+import MvPlayer.Core
 
 // What a video that waits for review carries on its picture: accept and
 // reject, and how many tracks could have it when that is more than one. Laid
 // over the thumbnail in the grid, and over the video while it plays there.
 // An orphan carries the same verdict: keep or delete.
+// Resting on accept or reject for a second brings up a second button under
+// it, for the upload's channel as a whole: allow it (a tick with a doubled
+// arm), or deny it (a cross with one). Only where the channel is not an
+// artist's already.
 Item {
     id: root
 
@@ -18,9 +23,17 @@ Item {
     property bool orphan: false
     property bool canDelete: true
     readonly property bool canReject: !orphan || canDelete
+    // The video, for asking whether its channel can be allowed or denied.
+    property var videoId: -1
+    // How long the pointer rests on a verdict before the channel's button
+    // shows, and how long that stays once the pointer has left both.
+    property int dwell: 1000
+    property int linger: 400
 
     signal approved()
     signal rejected()
+    signal allowChannelRequested()
+    signal denyChannelRequested()
 
     // Several tracks could have this video: the panel below steps through them.
     Rectangle {
@@ -130,6 +143,74 @@ Item {
                             root.rejected()
                     }
                 }
+
+                // The channel's button: after a second on this one.
+                property bool channelShown: false
+                property string channelName: ""
+                readonly property bool onEither: verdictMouse.containsMouse || channelMouse.containsMouse
+                onVisibleChanged: if (!visible) channelShown = false
+                Timer {
+                    interval: root.dwell
+                    running: verdictMouse.containsMouse && !verdict.channelShown && !root.orphan && root.visible
+                    onTriggered: {
+                        const channel = App.channelActions(root.videoId)
+                        if (channel.offered === true) {
+                            verdict.channelName = channel.name
+                            verdict.channelShown = true
+                        }
+                    }
+                }
+                Timer {
+                    interval: root.linger
+                    running: verdict.channelShown && !verdict.onEither
+                    onTriggered: verdict.channelShown = false
+                }
+                Rectangle {
+                    id: channelButton
+                    y: parent.height + 6
+                    width: 34
+                    height: 34
+                    radius: 17
+                    visible: opacity > 0
+                    opacity: verdict.channelShown ? 1 : 0
+                    color: channelMouse.containsMouse ? verdict.modelData.tint : Theme.scrim
+                    border.width: 1
+                    border.color: verdict.modelData.tint
+                    scale: channelMouse.pressed ? 0.92 : 1
+                    Behavior on opacity { NumberAnimation { duration: Theme.fast } }
+                    Behavior on color { ColorAnimation { duration: Theme.fast } }
+                    Behavior on scale { NumberAnimation { duration: Theme.fast } }
+                    // The verdict's own icon with a stroke of it doubled.
+                    Icon {
+                        anchors.centerIn: parent
+                        path: verdict.modelData.accept ? Icons.checkAll : Icons.closeAll
+                        size: 20
+                        color: channelMouse.containsMouse ? "#ffffff" : verdict.modelData.tint
+                    }
+                    MouseArea {
+                        id: channelMouse
+                        anchors.fill: parent
+                        enabled: verdict.channelShown
+                        hoverEnabled: true
+                        cursorShape: Qt.PointingHandCursor
+                        onClicked: {
+                            verdict.channelShown = false
+                            if (verdict.modelData.accept)
+                                root.allowChannelRequested()
+                            else
+                                root.denyChannelRequested()
+                        }
+                    }
+                    Tooltip {
+                        below: true
+                        anchors.horizontalCenter: undefined
+                        x: parent.width - width
+                        text: verdict.modelData.accept
+                              ? "Allow the channel: “" + verdict.channelName + "” is an artist's channel"
+                              : "Deny the channel: delete every video from “" + verdict.channelName + "”"
+                        shown: channelMouse.containsMouse
+                    }
+                }
                 Tooltip {
                     // Below: the buttons are at the top of the card, and
                     // above them the first row's would leave the grid.
@@ -142,7 +223,8 @@ Item {
                              : root.candidateTitle ? "This is the video of “" + root.candidateTitle + "”" : "This is the track's video")
                           : (!root.orphan ? (root.candidates > 1 ? "The video of none of its candidates: delete it" : "Not this track's video: delete it")
                              : root.canDelete ? "Delete it" : "Wait until the music folders have been read")
-                    shown: verdictMouse.containsMouse
+                    // (It would lie over the channel's button, which is where it shows.)
+                    shown: verdictMouse.containsMouse && !verdict.channelShown
                 }
             }
         }

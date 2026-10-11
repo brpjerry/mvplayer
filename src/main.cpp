@@ -15,6 +15,7 @@
 #include <QGuiApplication>
 #include <QQmlApplicationEngine>
 #include <QQuickStyle>
+#include <QMouseEvent>
 #include <QQuickWindow>
 
 #include <cstdio>
@@ -120,6 +121,29 @@ int main(int argc, char **argv)
                     auto *window = qobject_cast<QQuickWindow *>(root);
                     return window && window->grabWindow().save(line.mid(grabWindow.size())) ? QStringLiteral("ok")
                                                                                              : QStringLiteral("failed");
+                }
+                // pointer <x> <y>: the pointer is moved there, in the
+                // window's own coordinates; click <x> <y>: and the left
+                // button pressed and released. What hovering brings up
+                // cannot be tried otherwise without a pointer of the desk's.
+                const bool click = line.startsWith(QLatin1String("click "));
+                if (click || line.startsWith(QLatin1String("pointer "))) {
+                    auto *window = qobject_cast<QQuickWindow *>(root);
+                    const QStringList at = line.section(QLatin1Char(' '), 1).split(QLatin1Char(' '), Qt::SkipEmptyParts);
+                    if (!window || at.size() != 2)
+                        return QStringLiteral("failed");
+                    const QPointF local(at[0].toDouble(), at[1].toDouble());
+                    const QPointF global = window->mapToGlobal(local);
+                    const auto send = [&](QEvent::Type type, Qt::MouseButton button, Qt::MouseButtons held) {
+                        QMouseEvent e(type, local, local, global, button, held, Qt::NoModifier);
+                        QCoreApplication::sendEvent(window, &e);
+                    };
+                    send(QEvent::MouseMove, Qt::NoButton, Qt::NoButton);
+                    if (click) {
+                        send(QEvent::MouseButtonPress, Qt::LeftButton, Qt::LeftButton);
+                        send(QEvent::MouseButtonRelease, Qt::LeftButton, Qt::NoButton);
+                    }
+                    return QStringLiteral("ok");
                 }
                 QVariant result;
                 QMetaObject::invokeMethod(root, "ipc", Q_RETURN_ARG(QVariant, result), Q_ARG(QVariant, line));

@@ -15,6 +15,8 @@ Item {
     // the orphans
     signal approved(var videoId)
     signal rejected(var videoId)
+    // Allow (true) or deny the channel of this video under review.
+    signal channelRequested(var videoId, bool allow)
 
     readonly property alias view: grid
     readonly property alias wheel: wheel
@@ -80,6 +82,8 @@ Item {
             onActivated: root.activated(index)
             onApproved: root.approved(videoId)
             onRejected: root.rejected(videoId)
+            onAllowChannelRequested: root.channelRequested(videoId, true)
+            onDenyChannelRequested: root.channelRequested(videoId, false)
             onCurrentChanged: current ? root.claimCurrent(card) : root.releaseCurrent(card)
             Component.onCompleted: if (current) root.claimCurrent(card)
             Component.onDestruction: root.releaseCurrent(card)

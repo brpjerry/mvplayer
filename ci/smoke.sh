@@ -311,6 +311,8 @@ OUT=$(MVPLAYER_YTDLP="$SITE" timeout 120 "$BUILD/mvplayer-import" --allow-still-
 echo "$OUT" | grep -E "^\[review\]|^done:"
 [[ "$OUT" == *"done: 1 videos; tracks: done=1"* ]]
 [[ "$(streams)" == "h264 flac opus " && "$(review_state)" == "[(0, 'library')]" ]]
+# The approval vouches for that upload, and for nothing else of its channel.
+[[ "$(python3 -c "import sqlite3, sys; db = sqlite3.connect(sys.argv[1]); print(db.execute('SELECT vouched FROM videos').fetchall(), db.execute(\"SELECT COUNT(*) FROM artist_channels WHERE source = 'approved'\").fetchall())" "$WORK/mvlib5/.mvplayer/library.db")" == "[(1,)] [(0,)]" ]]
 # Put back under review, and turned down this time.
 python3 - "$WORK/mvlib5/.mvplayer/library.db" <<'PY'
 import sqlite3, sys
@@ -334,8 +336,6 @@ db = sqlite3.connect(sys.argv[1])
 assert db.execute("SELECT COUNT(*) FROM videos").fetchone()[0] == 0
 assert [y for _, y in db.execute("SELECT key, yt_id FROM rejected_videos")] == ["liv"]
 assert "turned down" in db.execute("SELECT message FROM tracks").fetchone()[0]
-# The approval before vouched for the upload's channel, for the track's artist.
-assert db.execute("SELECT artist, channel, source FROM artist_channels WHERE channel != ''").fetchall() == [("Dee", "Dee", "approved")]
 print("review ok")
 PY
 # The log says what was decided about the upload, why, and on what numbers;
@@ -769,7 +769,8 @@ one mvlib17 --music-dir "$WORK/lib18" --approve "ten=$WORK/lib18/Jay/tenth.flac"
 # the track it was made for. Opened by this version, the video has the two
 # of them as candidates, and "Tenth" is given its audio in the file.
 sql mvlib24 "ALTER TABLE videos ADD COLUMN review_group INTEGER; UPDATE videos SET review_group = id;
-    DROP TABLE candidates; ALTER TABLE videos DROP COLUMN yt_stream; PRAGMA user_version = 4;
+    DROP TABLE candidates; ALTER TABLE videos DROP COLUMN yt_stream; ALTER TABLE videos DROP COLUMN vouched;
+    DROP TABLE channel_lists; PRAGMA user_version = 4;
     UPDATE tracks SET state = 'done', video_id = (SELECT id FROM videos)"
 python3 - "$WORK/mvlib24/.mvplayer/library.db" "$WORK/lib18/Jay/tenth.flac" <<'PY'
 import sqlite3, sys
@@ -783,7 +784,8 @@ db.commit()
 PY
 OUT=$(one mvlib24 --music-dir "$WORK/lib18"); echo "$OUT"
 [[ "$OUT" == *"library brought up from layout 4"* ]]
-[[ "$(ask mvlib24 "PRAGMA user_version")" == "[(5,)]" && "$(ask mvlib24 "$STATES")" == "[('Ten', 'review', None), ('Tenth', 'review', None)]" ]]
+[[ "$OUT" == *"library brought up from layout 5"* ]]
+[[ "$(ask mvlib24 "PRAGMA user_version")" == "[(6,)]" && "$(ask mvlib24 "$STATES")" == "[('Ten', 'review', None), ('Tenth', 'review', None)]" ]]
 [[ "$(ask mvlib24 "SELECT v.yt_id, t.title, c.stream, c.fit > 0 FROM candidates c JOIN videos v ON v.id = c.video_id JOIN tracks t ON t.recording = c.track_key ORDER BY t.title")" == "[('ten', 'Ten', 1, 1), ('ten', 'Tenth', 2, 1)]" ]]
 [[ "$(codecs mvlib24 "Ten [ten].mkv")" == "h264 flac flac opus " ]]
 
@@ -859,7 +861,7 @@ if [[ -n "$EXE" ]]; then
     printf '@"%s" "%%~dp0fake-chan" %%*\r\n' "$(cygpath -w "$(command -v sh)")" > "$WORK/fake-chan.cmd"
     CHAN="$WORK/fake-chan.cmd"
 fi
-chan() { local mv=$1; shift; rm -f "$WORK/site-args"; MVPLAYER_YTDLP="$CHAN" timeout 120 "$BUILD/mvplayer-import" --allow-still-images --mv-dir "$WORK/$mv" --jobs 1 "$@" 2>&1 | grep -E "^\[import\]|^\[review\]|^done:" | cut -c1-200; }
+chan() { local mv=$1; shift; rm -f "$WORK/site-args"; MVPLAYER_YTDLP="$CHAN" timeout 120 "$BUILD/mvplayer-import" --allow-still-images --mv-dir "$WORK/$mv" --jobs 1 "$@" 2>&1 | grep -E "^\[import\]|^\[review\]|^\[channel\]|^\[db\]|^done:" | cut -c1-200; }
 ffmpeg -v error -y -i "$WORK/lib17/Jay/ten.flac" -c:a libopus -b:a 96k "$WORK/site-audio.opus"
 ffmpeg -v error -y -i "$WORK/mv.mkv" -map 0:v:0 -c copy -t 50 "$WORK/site-video.mkv"
 echo '{"entries": [{"id": "reup", "ie_key": "Youtube", "title": "Jay - Ten (Official Video)", "channel": "Reup Music", "duration": 50, "view_count": 1000}]}' > "$WORK/site-search.json"
@@ -891,87 +893,167 @@ echo '{"abr": 96, "acodec": "opus", "channel": "Reup Music", "channel_id": "UCre
 OUT=$(chan mvlib27 --music-dir "$WORK/lib17" --reimport "$WORK/lib17"); echo "$OUT"
 [[ "$OUT" == *"no longer a candidate of “Jay - Ten (Official Video)”, which waits for review: its channel has 120 subscribers, under the limit of 5000"* ]]
 [[ "$(ask mvlib27 "$STATES")" == "[('Ten', 'not_found', None)]" && "$(ask mvlib27 "SELECT COUNT(*) FROM videos")" == "[(0,)]" ]]
-# A channel listed as an exception is not dropped as a small one: a label's
-# channel, an artist's own. It is named by its handle, in whatever case and
-# also as the address of its page, or by its id; the library keeps the
-# handle with the count.
+rm -f "$WORK/site-page.json"
+
+echo "== channels you allow"
+# "Reup Music" has 120 subscribers and is not Jay's by its name: under a
+# lower limit its upload comes in for review, on the one question of whose
+# channel it is. Allowed, the channel is an artist's channel for every
+# track and is never ignored as a small one: the video is accepted at once,
+# from its file, with nothing asked of YouTube. The channel is named by its
+# handle (which the library kept with the video), by the address of its
+# page, or by its id.
 echo '{"abr": 96, "acodec": "opus", "channel": "Reup Music", "channel_id": "UCreupreupreupreupreup-_", "uploader_id": "@ReupMusic", "channel_follower_count": 120}' > "$WORK/site-info.json"
-OUT=$(chan mvlib33 --music-dir "$WORK/lib17" --small-channel-exception @reupmusic); echo "$OUT"
-[[ "$OUT" == *"for your review (1 video)"* && "$(ask mvlib33 "SELECT yt_channel_handle, yt_channel_subs FROM videos")" == "[('@ReupMusic', 120)]" ]]
-OUT=$(chan mvlib34 --music-dir "$WORK/lib17" --small-channel-exception "https://www.youtube.com/@ReupMusic/videos"); echo "$OUT"
+OUT=$(chan mvlib33 --music-dir "$WORK/lib17" --min-subscribers 100); echo "$OUT"
+[[ "$OUT" == *"for your review (1 video)"* && "$(ask mvlib33 "SELECT yt_channel_id, yt_channel_handle, yt_channel_subs FROM videos")" == "[('UCreupreupreupreupreup-_', '@ReupMusic', 120)]" ]]
+for n in 34 35 44 45 46; do cp -r "$WORK/mvlib33" "$WORK/mvlib$n"; done
+OUT=$(chan mvlib33 --music-dir "$WORK/lib17" --allow-channel @reupmusic); echo "$OUT"
+[[ "$OUT" == *"[channel] allowed: “Reup Music”"* && "$OUT" == *"is accepted: its channel is one you allowed"* ]]
+[[ "$(ask mvlib33 "$STATES")" == "[('Ten', 'done', 'reup')]" && "$(ask mvlib33 "SELECT review, vouched FROM videos")" == "[(0, 0)]" ]]
+[[ "$(ask mvlib33 "SELECT channel_id, list, name, handle FROM channel_lists")" == "[('UCreupreupreupreupreup-_', 'allow', 'Reup Music', '@ReupMusic')]" ]]
+[[ ! -e "$WORK/site-args" ]]
+OUT=$(chan mvlib34 --music-dir "$WORK/lib17" --allow-channel "https://www.youtube.com/@ReupMusic/videos"); echo "$OUT"
+[[ "$(ask mvlib34 "$STATES")" == "[('Ten', 'done', 'reup')]" ]]
+OUT=$(chan mvlib35 --music-dir "$WORK/lib17" --allow-channel "youtube.com/channel/UCreupreupreupreupreup-_"); echo "$OUT"
+[[ "$(ask mvlib35 "$STATES")" == "[('Ten', 'done', 'reup')]" ]]
+# A name will not do (two channels can have the same one), nor a handle the
+# library has no video of: that does not say which channel it is.
+OUT=$(MVPLAYER_YTDLP="$CHAN" timeout 120 "$BUILD/mvplayer-import" --allow-still-images --mv-dir "$WORK/mvlib35" --jobs 1 --music-dir "$WORK/lib17" --allow-channel "Reup Music" --allow-channel @nobodyknown 2>&1); echo "$OUT" | grep "channel" | cut -c1-200
+[[ "$OUT" == *"not a channel's id (UC…), handle (@name) or address: Reup Music"* && "$OUT" == *"the library has no video of the channel @nobodyknown"* ]]
+[[ "$(ask mvlib35 "SELECT COUNT(*) FROM channel_lists")" == "[(1,)]" ]]
+# At a re-import the video is kept, small as its channel is: the channel is
+# allowed. Taken off the list, it is a small channel like any other, and
+# nobody's: the video goes.
+OUT=$(chan mvlib33 --music-dir "$WORK/lib17" --reimport "$WORK/lib17"); echo "$OUT"
+[[ "$OUT" == *"Re-imported (Jay - Ten (Official Video) · kept)"* && "$(ask mvlib33 "$STATES")" == "[('Ten', 'done', 'reup')]" ]]
+OUT=$(chan mvlib33 --music-dir "$WORK/lib17" --unlist-channel UCreupreupreupreupreup-_ --reimport "$WORK/lib17"); echo "$OUT"
+[[ "$OUT" == *"its channel has 120 subscribers, under the limit of 5000"* && "$(ask mvlib33 "$STATES")" == "[('Ten', 'not_found', None)]" ]]
+[[ "$(ask mvlib33 "SELECT COUNT(*) FROM channel_lists")" == "[(0,)]" && "$(ask mvlib33 "SELECT COUNT(*) FROM videos")" == "[(0,)]" ]]
+# Allowed before anything of it is in the library (by its id, then): its
+# upload is not dropped as a small channel's, and is taken outright.
+OUT=$(chan mvlib36 --music-dir "$WORK/lib17" --allow-channel UCreupreupreupreupreup-_); echo "$OUT"
+[[ "$OUT" == *"done: 1 videos; tracks: done=1"* && "$(ask mvlib36 "SELECT review, vouched FROM videos")" == "[(0, 0)]" ]]
+# The channel goes by its own name, whatever its uploads are listed under:
+# one that YouTube lists under several channels carries "Name and Other".
+sql mvlib36 "UPDATE videos SET yt_channel = 'Reup Music and Echo';
+    INSERT INTO videos (yt_id, path, title, review, yt_channel, yt_channel_id) VALUES ('reup2', 'Jay/none.mkv', 'x', 0, 'Reup Music and 2 more', 'UCreupreupreupreupreup-_')"
+OUT=$(chan mvlib36 --music-dir "$WORK/lib17" --allow-channel UCreupreupreupreupreup-_); echo "$OUT"
+[[ "$OUT" == *"[channel] allowed: “Reup Music” [UCreupreupreupreupreup-_]"* ]]
+# Whose channel it is was only one of the questions. Here the upload's audio
+# runs a little faster than the track: too little of it is the same
+# waveform, and the video stays under review, allowed channel or not.
+ffmpeg -v error -y -i "$WORK/lib17/Jay/ten.flac" -af atempo=1.004 -c:a libopus -b:a 96k "$WORK/site-audio.opus"
+OUT=$(chan mvlib37 --music-dir "$WORK/lib17" --min-subscribers 100); echo "$OUT"
 [[ "$OUT" == *"for your review (1 video)"* ]]
-OUT=$(chan mvlib35 --music-dir "$WORK/lib17" --small-channel-exception "youtube.com/channel/UCreupreupreupreupreup-_"); echo "$OUT"
-[[ "$OUT" == *"for your review (1 video)"* ]]
-# Another channel's exception is none for this one. And a channel's name
-# will not do: two channels can have the same one.
-OUT=$(chan mvlib36 --music-dir "$WORK/lib17" --small-channel-exception @somebodyelse); echo "$OUT"
-[[ "$OUT" == *"is from a small channel (120 subscribers)"* && "$OUT" == *"done: 0 videos; tracks: not_found=1"* ]]
-OUT=$("$BUILD/mvplayer-import" --mv-dir "$WORK/mvlib36" --music-dir "$WORK/lib17" --small-channel-exception "Reup Music" 2>&1 || echo "exit: $?"); echo "$OUT"
-[[ "$OUT" == *"not a channel's handle"* && "$OUT" == *"exit: 1"* ]]
-# Its video under review stays when the track is re-imported, by what the
-# library kept; nothing is asked of YouTube for that.
-cp -r "$WORK/mvlib33" "$WORK/mvlib37"
-OUT=$(chan mvlib33 --music-dir "$WORK/lib17" --small-channel-exception @reupmusic --reimport "$WORK/lib17"); echo "$OUT"
-[[ "$OUT" != *"no longer a candidate"* && "$(ask mvlib33 "$STATES")" == "[('Ten', 'review', None)]" ]]
-! grep -v ytsearch "$WORK/site-args" | grep -q -- " -J "
-# Where the library kept a count but no handle (the page was read before
-# handles were kept), it is not known whether the channel is the exception:
-# the video is not dropped on that count, and its page is read once more.
-echo '{"id": "reup", "title": "Jay - Ten (Official Video)", "channel": "Reup Music", "channel_id": "UCreupreupreupreupreup-_", "uploader_id": "@ReupMusic", "channel_follower_count": 120}' > "$WORK/site-page.json"
-for mv in mvlib33 mvlib37; do sql $mv "UPDATE videos SET yt_channel_handle = NULL"; rm -rf "$WORK/$mv/.mvplayer/cache"; done
-OUT=$(chan mvlib33 --music-dir "$WORK/lib17" --small-channel-exception @reupmusic --reimport "$WORK/lib17"); echo "$OUT"
-[[ "$OUT" != *"small channel"* && "$(ask mvlib33 "$STATES")" == "[('Ten', 'review', None)]" && "$(ask mvlib33 "SELECT yt_channel_handle FROM videos")" == "[('@ReupMusic',)]" ]]
-[[ $(grep -v ytsearch "$WORK/site-args" | grep -c -- " -J ") -eq 1 ]]
-# The page says it is not: dropped, like any upload from a small channel.
-OUT=$(chan mvlib37 --music-dir "$WORK/lib17" --small-channel-exception @somebodyelse --reimport "$WORK/lib17"); echo "$OUT"
-[[ "$OUT" == *"is from a small channel (120 subscribers)"* && "$(ask mvlib37 "$STATES")" == "[('Ten', 'not_found', None)]" && "$(ask mvlib37 "SELECT COUNT(*) FROM videos")" == "[(0,)]" ]]
+OUT=$(chan mvlib37 --music-dir "$WORK/lib17" --allow-channel @reupmusic); echo "$OUT"
+[[ "$OUT" == *"stays under review: "*"waveform"* && "$(ask mvlib37 "$STATES")" == "[('Ten', 'review', None)]" && "$(ask mvlib37 "SELECT review FROM videos")" == "[(1,)]" ]]
+grep -q '"event":"channel-kept-in-review"' "$WORK/mvlib37/.mvplayer/import-log.jsonl"
+ffmpeg -v error -y -i "$WORK/lib17/Jay/ten.flac" -c:a libopus -b:a 96k "$WORK/site-audio.opus"
+
+echo "== channels you deny"
+# Denied, every video the library has from the channel goes. One under
+# review is rejected for all its candidates, and is not offered to them
+# again.
+OUT=$(chan mvlib44 --music-dir "$WORK/lib17" --deny-channel @reupmusic); echo "$OUT"
+[[ "$OUT" == *"[channel] denied: “Reup Music”"* && "$OUT" == *"is deleted: its channel is one you denied"* ]]
+[[ "$(ask mvlib44 "$STATES")" == "[('Ten', 'not_found', None)]" && "$(ask mvlib44 "SELECT COUNT(*) FROM videos")" == "[(0,)]" && "$(ask mvlib44 "SELECT yt_id FROM rejected_videos")" == "[('reup',)]" ]]
+[[ "$(ask mvlib44 "SELECT list FROM channel_lists")" == "[('deny',)]" && ! -e "$WORK/mvlib44/Jay/Ten [reup].mkv" ]]
+# One that a track has is deleted, and the track is looked up again, to see
+# whether another upload is its. The channel's upload is found again and
+# dropped: here on its page, which comes with its audio, the search results
+# not saying whose it is.
+chan mvlib45 --music-dir "$WORK/lib17" --approve reup
+[[ "$(ask mvlib45 "$STATES")" == "[('Ten', 'done', 'reup')]" && "$(ask mvlib45 "SELECT vouched FROM videos")" == "[(1,)]" ]]
+cp -r "$WORK/mvlib45" "$WORK/mvlib47"; cp -r "$WORK/mvlib45" "$WORK/mvlib48"
+OUT=$(chan mvlib45 --music-dir "$WORK/lib17" --deny-channel UCreupreupreupreupreup-_); echo "$OUT"
+[[ "$OUT" == *"“Ten” (Jay - Ten (Official Video)) is deleted: its channel is one you denied"* && "$OUT" == *"is from a channel you denied"* ]]
+[[ "$(ask mvlib45 "$STATES")" == "[('Ten', 'not_found', None)]" && "$(ask mvlib45 "SELECT COUNT(*) FROM videos")" == "[(0,)]" && ! -e "$WORK/mvlib45/Jay/Ten [reup].mkv" ]]
+grep -q '"event":"denied-video"' "$WORK/mvlib45/.mvplayer/import-log.jsonl"
+grep -q '"result":"denied-channel"' "$WORK/mvlib45/.mvplayer/import-log.jsonl"
+# Where the search results say whose upload it is, it is dropped on sight:
+# searches, and nothing fetched.
+echo '{"entries": [{"id": "reup", "ie_key": "Youtube", "title": "Jay - Ten (Official Video)", "channel": "Reup Music", "channel_id": "UCreupreupreupreupreup-_", "duration": 50, "view_count": 1000}]}' > "$WORK/site-search.json"
+OUT=$(chan mvlib45 --music-dir "$WORK/lib17" --retry); echo "$OUT"
+[[ "$OUT" == *"done: 0 videos; tracks: not_found=1"* ]] && ! grep -qv ytsearch "$WORK/site-args"
+python3 - "$WORK/mvlib45/.mvplayer/import-log.jsonl" <<'PY'
+import json, sys
+look = [json.loads(l) for l in open(sys.argv[1], encoding="utf-8") if '"event":"lookup"' in l][-1]
+assert [(c["id"], c.get("rejected")) for c in look["candidates"]] == [("reup", "from a channel you denied")], look["candidates"]
+PY
+# A video from before channel ids were kept is not told when the channel is
+# denied: it goes when a re-import reads its page.
+old_library() { sql "$1" "UPDATE videos SET yt_channel_id = '', yt_channel_subs = NULL, yt_channel_verified = 0, yt_channel_handle = NULL"; rm -rf "$WORK/$1/.mvplayer/cache"; }
+old_library mvlib47
+echo '{"entries": [{"id": "reup", "ie_key": "Youtube", "title": "Jay - Ten (Official Video)", "channel": "Reup Music", "duration": 50, "view_count": 1000}]}' > "$WORK/site-search.json"
+echo '{"id": "reup", "title": "Jay - Ten (Official Video)", "channel": "Reup Music", "channel_id": "UCreupreupreupreupreup-_", "uploader_id": "@ReupMusic", "channel_follower_count": 120000}' > "$WORK/site-page.json"
+OUT=$(chan mvlib47 --music-dir "$WORK/lib17" --deny-channel UCreupreupreupreupreup-_); echo "$OUT"
+[[ "$(ask mvlib47 "$STATES")" == "[('Ten', 'done', 'reup')]" ]]
+OUT=$(chan mvlib47 --music-dir "$WORK/lib17" --reimport "$WORK/lib17"); echo "$OUT"
+[[ "$OUT" == *"its video until now (from a channel you denied)"* && "$(ask mvlib47 "$STATES")" == "[('Ten', 'not_found', None)]" && "$(ask mvlib47 "SELECT COUNT(*) FROM videos")" == "[(0,)]" ]]
 [[ $(grep -v ytsearch "$WORK/site-args" | grep -c -- " -J ") -eq 1 ]]
 rm -f "$WORK/site-page.json"
+
+echo "== a library from before channels were allowed or denied"
+# Accepting a video used to vouch for its channel, for the artists of the
+# track. Those channels no longer count by that; the videos that are in the
+# library on the strength of it keep it, each as an upload you accepted.
+sql mvlib48 "ALTER TABLE videos DROP COLUMN vouched; DROP TABLE channel_lists; PRAGMA user_version = 5;
+    INSERT INTO artist_channels (artist, channel_id, channel, source) VALUES ('Jay', 'UCreupreupreupreupreup-_', '', 'approved')"
+OUT=$(chan mvlib48 --music-dir "$WORK/lib17"); echo "$OUT"
+[[ "$OUT" == *"library brought up from layout 5"* && "$(ask mvlib48 "PRAGMA user_version")" == "[(6,)]" ]]
+[[ "$(ask mvlib48 "SELECT vouched FROM videos")" == "[(1,)]" && "$(ask mvlib48 "SELECT COUNT(*) FROM artist_channels WHERE source = 'approved'")" == "[(0,)]" ]]
+[[ "$(ask mvlib48 "SELECT COUNT(*) FROM channel_lists")" == "[(0,)]" ]]
 
 echo "== a track's own video at a re-import"
 # "Eleven" is tagged with its artist's name in one script, "Elle"; the
 # artist's channel goes by it in another. The video came in through review:
-# accepting it vouched for the channel, by its id.
+# accepting it vouched for that upload as the track's video, and for
+# nothing else of its channel.
 mkdir -p "$WORK/lib27/Elle" "$WORK/mvlib30"
 ffmpeg -v error -y -f lavfi -i "$(song 390 31 | sed 's/d=40/d=50/')" -metadata title="Eleven" -metadata artist=Elle "$WORK/lib27/Elle/eleven.flac"
 touch -d "10 seconds ago" "$WORK/lib27/Elle/eleven.flac"
 ffmpeg -v error -y -i "$WORK/lib27/Elle/eleven.flac" -c:a libopus -b:a 96k "$WORK/site-audio.opus"
-echo '{"entries": [{"id": "elv", "ie_key": "Youtube", "title": "Eleven", "channel": "エル OFFICIAL", "channel_id": "UCelle", "duration": 50, "view_count": 1000, "channel_is_verified": true}]}' > "$WORK/site-search.json"
-echo '{"abr": 96, "acodec": "opus", "channel": "エル OFFICIAL", "channel_id": "UCelle", "channel_follower_count": 250000, "channel_is_verified": true}' > "$WORK/site-info.json"
+echo '{"entries": [{"id": "elv", "ie_key": "Youtube", "title": "Eleven", "channel": "エル OFFICIAL", "channel_id": "UCelle_elle_elle_elle_01", "duration": 50, "view_count": 1000, "channel_is_verified": true}]}' > "$WORK/site-search.json"
+echo '{"abr": 96, "acodec": "opus", "channel": "エル OFFICIAL", "channel_id": "UCelle_elle_elle_elle_01", "channel_follower_count": 250000, "channel_is_verified": true}' > "$WORK/site-info.json"
 chan mvlib30 --music-dir "$WORK/lib27"
 chan mvlib30 --music-dir "$WORK/lib27" --approve elv
 [[ "$(ask mvlib30 "SELECT t.state, v.yt_id, v.review FROM tracks t JOIN videos v ON v.id = t.video_id")" == "[('done', 'elv', 0)]" ]]
-[[ "$(ask mvlib30 "SELECT artist, channel_id, source FROM artist_channels WHERE channel_id != ''")" == "[('Elle', 'UCelle', 'approved')]" ]]
+[[ "$(ask mvlib30 "SELECT vouched FROM videos")" == "[(1,)]" && "$(ask mvlib30 "SELECT COUNT(*) FROM artist_channels WHERE source = 'approved'")" == "[(0,)]" ]]
 # As a library from before a channel's id and subscribers were kept, and on
 # a day the search does not return the upload: the video is judged from
-# what the library kept about it. That used to be its end: "エル OFFICIAL"
-# is not Elle's channel by its name, so it did not look official. Now its
-# page is read for what was not kept, once, and the channel is known by its
-# id: the video still fits outright, and is kept.
-old_library() { sql "$1" "UPDATE videos SET yt_channel_id = '', yt_channel_subs = NULL, yt_channel_verified = 0, yt_channel_handle = NULL"; rm -rf "$WORK/$1/.mvplayer/cache"; }
-cp -r "$WORK/mvlib30" "$WORK/mvlib31"; cp -r "$WORK/mvlib30" "$WORK/mvlib32"
+# what the library kept about it. "エル OFFICIAL" is not Elle's channel by
+# its name, but the upload is one you accepted: it still fits outright, and
+# is kept. Its page is read for what was not kept, once.
+cp -r "$WORK/mvlib30" "$WORK/mvlib31"; cp -r "$WORK/mvlib30" "$WORK/mvlib32"; cp -r "$WORK/mvlib30" "$WORK/mvlib43"
 echo '{"entries": []}' > "$WORK/site-search.json"
-echo '{"id": "elv", "title": "Eleven", "channel": "エル OFFICIAL", "channel_id": "UCelle", "channel_follower_count": 250000, "channel_is_verified": true}' > "$WORK/site-page.json"
+echo '{"id": "elv", "title": "Eleven", "channel": "エル OFFICIAL", "channel_id": "UCelle_elle_elle_elle_01", "channel_follower_count": 250000, "channel_is_verified": true}' > "$WORK/site-page.json"
 old_library mvlib30
 OUT=$(chan mvlib30 --music-dir "$WORK/lib27" --reimport "$WORK/lib27"); echo "$OUT"
-[[ "$OUT" == *"Re-imported (Eleven · kept)"* && "$(ask mvlib30 "SELECT review, yt_channel_id, yt_channel_subs, yt_channel_verified FROM videos")" == "[(0, 'UCelle', 250000, 1)]" ]]
+[[ "$OUT" == *"Re-imported (Eleven · kept)"* && "$(ask mvlib30 "SELECT review, yt_channel_id, yt_channel_subs, yt_channel_verified FROM videos")" == "[(0, 'UCelle_elle_elle_elle_01', 250000, 1)]" ]]
 [[ $(grep -v ytsearch "$WORK/site-args" | grep -c -- " -J ") -eq 1 ]]
 grep -q '"fate":"kept"' "$WORK/mvlib30/.mvplayer/import-log.jsonl"
 # Asked once: the next re-import has it from the library.
 OUT=$(chan mvlib30 --music-dir "$WORK/lib27" --reimport "$WORK/lib27"); echo "$OUT"
 [[ "$OUT" == *"Re-imported (Eleven · kept)"* ]] && ! grep -v ytsearch "$WORK/site-args" | grep -q -- " -J "
 # Where the upload is gone from YouTube there is no page to read, and the
-# video is judged on what is known: listened to all the same, and since the
-# channel cannot be told to be the artist's, it goes back to review rather
-# than out of the library.
+# video is judged on what is known: that you accepted it, for one. Kept.
 rm "$WORK/site-page.json"
+old_library mvlib43
+OUT=$(chan mvlib43 --music-dir "$WORK/lib27" --reimport "$WORK/lib27"); echo "$OUT"
+[[ "$OUT" == *"Re-imported (Eleven · kept)"* && "$(ask mvlib43 "SELECT review, yt_channel_subs, vouched FROM videos")" == "[(0, -1, 1)]" ]]
+# A video that nobody accepted, on a channel that is not known as the
+# artist's (one that was allowed when the video was taken, say, and is not
+# any more): listened to all the same, and since the channel cannot be told
+# to be the artist's, it goes back to review rather than out of the library.
+sql mvlib31 "UPDATE videos SET vouched = 0"
 old_library mvlib31
 OUT=$(chan mvlib31 --music-dir "$WORK/lib27" --reimport "$WORK/lib27"); echo "$OUT"
 [[ "$OUT" == *"kept, now for review"* && "$(ask mvlib31 "SELECT review, yt_channel_subs FROM videos")" == "[(1, -1)]" ]]
 [[ "$(ask mvlib31 "$STATES")" == "[('Eleven', 'review', None)]" && -s "$WORK/mvlib31/Elle/Eleven [elv].mkv" ]]
 # And a track's own video from a channel that turns out to be a small one
-# goes, like any other today's rules turn down.
-echo '{"id": "elv", "title": "Eleven", "channel": "エル OFFICIAL", "channel_id": "UCelle", "channel_follower_count": 120}' > "$WORK/site-page.json"
+# goes, like any other today's rules turn down: also one you accepted. (A
+# channel you allowed is not ignored as a small one.)
+echo '{"id": "elv", "title": "Eleven", "channel": "エル OFFICIAL", "channel_id": "UCelle_elle_elle_elle_01", "channel_follower_count": 120}' > "$WORK/site-page.json"
 old_library mvlib32
 OUT=$(chan mvlib32 --music-dir "$WORK/lib27" --reimport "$WORK/lib27"); echo "$OUT"
 [[ "$OUT" == *"its channel has 120 subscribers, under the limit of 5000"* && "$(ask mvlib32 "SELECT COUNT(*) FROM videos")" == "[(0,)]" ]]
@@ -982,15 +1064,20 @@ echo "== a re-import judges every video the track waits on"
 # "Eleven" waits for review as a candidate of its video (the library where
 # the upload was gone, above). On a re-import that video goes on the
 # shortlist whether or not the search returns it, as a track's own video
-# does. Its page is read for what the library did not keep, and with its
-# channel known as Elle's by its id it has become the track's own
-# recording: accepted, out of review.
+# does. Its page is read for what the library did not keep: the channel's
+# id, by which it is one you allowed. With that it has become the track's
+# own recording: accepted, out of review. (Allowing the channel changed
+# nothing by itself here: the library did not know the video was its.)
 for n in 38 39 40 41; do cp -r "$WORK/mvlib31" "$WORK/mvlib$n"; old_library mvlib$n; done
+for n in 38 39 41; do
+    OUT=$(chan mvlib$n --music-dir "$WORK/lib27" --allow-channel UCelle_elle_elle_elle_01); echo "$OUT"
+    [[ "$(ask mvlib$n "$STATES")" == "[('Eleven', 'review', None)]" ]]
+done
 echo '{"entries": []}' > "$WORK/site-search.json"
-echo '{"id": "elv", "title": "Eleven", "channel": "エル OFFICIAL", "channel_id": "UCelle", "uploader_id": "@elle_official", "channel_follower_count": 250000, "channel_is_verified": true}' > "$WORK/site-page.json"
+echo '{"id": "elv", "title": "Eleven", "channel": "エル OFFICIAL", "channel_id": "UCelle_elle_elle_elle_01", "uploader_id": "@elle_official", "channel_follower_count": 250000, "channel_is_verified": true}' > "$WORK/site-page.json"
 OUT=$(chan mvlib38 --music-dir "$WORK/lib27" --reimport "$WORK/lib27"); echo "$OUT"
 [[ "$OUT" == *"(from review)"* && "$(ask mvlib38 "$STATES")" == "[('Eleven', 'done', 'elv')]" ]]
-[[ "$(ask mvlib38 "SELECT review, yt_channel_id, yt_channel_subs, yt_channel_handle FROM videos")" == "[(0, 'UCelle', 250000, '@elle_official')]" ]]
+[[ "$(ask mvlib38 "SELECT review, yt_channel_id, yt_channel_subs, yt_channel_handle FROM videos")" == "[(0, 'UCelle_elle_elle_elle_01', 250000, '@elle_official')]" ]]
 [[ $(grep -v ytsearch "$WORK/site-args" | grep -c -- " -J ") -eq 1 ]]
 # Nor does it take a place among the best four, or need one: four uploads
 # on a channel under the artist's name score higher and are listened to
@@ -1001,7 +1088,7 @@ python3 - "$WORK/site-search.json" <<'PY'
 import json, sys
 others = [{"id": f"e{n}", "ie_key": "Youtube", "title": "Elle - Eleven (Official Video)", "channel": "Elle", "channel_id": "UCother",
            "duration": 50, "view_count": 1000, "channel_is_verified": True} for n in range(1, 5)]
-held = {"id": "elv", "ie_key": "Youtube", "title": "Eleven", "channel": "エル OFFICIAL", "channel_id": "UCelle", "duration": 50, "view_count": 10}
+held = {"id": "elv", "ie_key": "Youtube", "title": "Eleven", "channel": "エル OFFICIAL", "channel_id": "UCelle_elle_elle_elle_01", "duration": 50, "view_count": 10}
 json.dump({"entries": others + [held]}, open(sys.argv[1], "w"))
 PY
 OUT=$(chan mvlib39 --music-dir "$WORK/lib27" --reimport "$WORK/lib27"); echo "$OUT"
@@ -1015,12 +1102,12 @@ heard = [(c["id"], c["result"] == "match") for c in look["checked"]]
 assert heard == [("e1", False), ("e2", False), ("e3", False), ("e4", False), ("elv", True)], heard
 PY
 # The page shows a small channel: the track is no longer a candidate of the
-# video, and the video goes. Unless the channel is an exception.
+# video, and the video goes. Unless the channel is one you allowed.
 echo '{"entries": []}' > "$WORK/site-search.json"
-echo '{"id": "elv", "title": "Eleven", "channel": "エル OFFICIAL", "channel_id": "UCelle", "uploader_id": "@elle_official", "channel_follower_count": 120}' > "$WORK/site-page.json"
+echo '{"id": "elv", "title": "Eleven", "channel": "エル OFFICIAL", "channel_id": "UCelle_elle_elle_elle_01", "uploader_id": "@elle_official", "channel_follower_count": 120}' > "$WORK/site-page.json"
 OUT=$(chan mvlib40 --music-dir "$WORK/lib27" --reimport "$WORK/lib27"); echo "$OUT"
 [[ "$OUT" == *"is from a small channel (120 subscribers)"* && "$(ask mvlib40 "$STATES")" == "[('Eleven', 'not_found', None)]" && "$(ask mvlib40 "SELECT COUNT(*) FROM videos")" == "[(0,)]" ]]
-OUT=$(chan mvlib41 --music-dir "$WORK/lib27" --small-channel-exception @Elle_Official --reimport "$WORK/lib27"); echo "$OUT"
+OUT=$(chan mvlib41 --music-dir "$WORK/lib27" --reimport "$WORK/lib27"); echo "$OUT"
 [[ "$OUT" != *"small channel"* && "$(ask mvlib41 "$STATES")" == "[('Eleven', 'done', 'elv')]" ]]
 rm -f "$WORK/site-page.json"
 # A track that today's rules skip waits for nothing. "Eleven" runs 50

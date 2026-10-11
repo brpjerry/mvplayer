@@ -16,6 +16,7 @@
 #include <QVariant>
 
 #include <atomic>
+#include <memory>
 
 struct ImportSettings {
     QStringList musicDirs;
@@ -24,7 +25,6 @@ struct ImportSettings {
     bool allowUnofficial = false;  // accept uploads that do not look official
     bool skipStillImages = true;   // reject videos whose picture never changes
     int minSubscribers = 5000;     // ignore uploads from channels with fewer subscribers; 0: none are ignored
-    QStringList smallChannelExceptions; // channels that are never ignored as small: "@handle" or "UC…" (YtDlp::channelRef)
     int concurrency = 2;
     QStringList ytdlpArgs;         // extra yt-dlp arguments (cookies, proxies, ...)
     QString cookiesFile;           // cookies.txt of a YouTube Premium account; empty: none
@@ -95,6 +95,27 @@ public:
     // videoRemoved says when.
     void approveVideo(qint64 videoId, qint64 trackId = 0);
     void rejectVideo(qint64 videoId);
+    // A channel the user allows is an artist's channel for every track from
+    // then on, and never ignored as a small one. Every video under review
+    // from it is judged again from its file, with nothing asked of YouTube:
+    // one that has become a candidate's own recording is accepted for that
+    // track, the others stay under review.
+    // A channel the user denies: every video the library has from it is
+    // deleted (those under review as rejected for all their candidates; the
+    // tracks that had the others are looked up again), and its uploads are
+    // dropped on sight from then on.
+    // Both are carried out on the verdicts' thread; channelListsChanged
+    // says when the list itself has changed.
+    void allowChannel(const QString &channelId, const QString &name, const QString &handle);
+    void denyChannel(const QString &channelId, const QString &name, const QString &handle);
+    // Takes a channel off either list. Nothing in the library changes.
+    void unlistChannel(const QString &channelId);
+    // What allowing a channel would do to each video under review from it,
+    // found out by listening: channelJudged for each, then
+    // channelPreviewDone. Returns a ticket that tells previews apart; a
+    // newer preview, or cancelChannelPreview, ends an older one.
+    int previewAllowChannel(const QString &channelId);
+    void cancelChannelPreview();
     // The candidate tracks of a video under review in the order they are
     // shown: first the one the upload is titled after (and no other), then
     // by how close each one's waveform is to the upload's.
@@ -151,6 +172,11 @@ signals:
     void videoAdded(qint64 videoId);
     void videoChanged(qint64 videoId);
     void videoRemoved(qint64 videoId);
+    void channelListsChanged();
+    // accept: the video would be (or was) accepted for the track named;
+    // otherwise `reason` says what else it waits for.
+    void channelJudged(int ticket, qint64 videoId, bool accept, qint64 trackId, const QString &track, const QString &reason);
+    void channelPreviewDone(int ticket);
     void activityChanged();
     void idle();
 
@@ -191,8 +217,21 @@ private:
     // before review went by video), and gives each its audio in the file.
     void prepareCandidates(const ImportSettings &cfg);
     bool measureCandidates(qint64 videoId, const ImportSettings &cfg);
-    void approveJob(qint64 videoId, qint64 trackId, const ImportSettings &cfg);
-    void rejectJob(qint64 videoId);
+    // `byChannel`: accepted because its channel was allowed, not by the
+    // user's verdict on the video itself.
+    void approveJob(qint64 videoId, qint64 trackId, const ImportSettings &cfg, bool byChannel = false);
+    void rejectJob(qint64 videoId, const QString &why = QString());
+    // A video under review judged from its file with its channel taken as an
+    // artist's: the candidate whose own recording it is (the closest fit of
+    // several), or why it still waits.
+    struct ChannelVerdict {
+        bool accept = false;
+        TrackInfo track;
+        QString reason;
+    };
+    ChannelVerdict judgeAsArtists(const VideoInfo &video, const ImportSettings &cfg, const std::atomic<bool> *stop);
+    void allowJob(const QString &channelId, const ImportSettings &cfg);
+    void denyJob(const QString &channelId);
     void requeuePending(); // any thread
     void pump();
     void onScanFinished(const LibraryScanner::Result &r);
@@ -222,6 +261,9 @@ private:
     QThreadPool m_auditPool;
     QThreadPool m_replacePool;
     QThreadPool m_verdictPool;
+    QThreadPool m_previewPool;
+    std::shared_ptr<std::atomic<bool>> m_previewStop;
+    int m_previewTicket = 0;
     bool m_settledOnce = false; // what a library from before needs was asked for, this run
     std::atomic<bool> m_replacing{false};
     // The track a replace job works for: the best file of the video's.

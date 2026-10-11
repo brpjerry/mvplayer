@@ -27,6 +27,11 @@ QtObject {
     readonly property string refresh: "M17.65 6.35C16.2 4.9 14.21 4 12 4c-4.42 0-7.99 3.58-7.99 8s3.57 8 7.99 8c3.73 0 6.84-2.55 7.73-6h-2.08c-.82 2.33-3.04 4-5.65 4-3.31 0-6-2.69-6-6s2.69-6 6-6c1.66 0 3.14.69 4.22 1.78L13 11h7V4l-2.35 2.35z"
     readonly property string download: "M19 9h-4V3H9v6H5l7 7 7-7zM5 18v2h14v-2H5z"
     readonly property string check: "M9 16.17L4.83 12l-1.42 1.41L9 19 21 7l-1.41-1.41z"
+    // The app's own, for a verdict on a whole channel: the tick with its long
+    // arm doubled, the cross with one of its arms doubled. The doubled arm of
+    // the cross is broken where the other one crosses it, as if stamped over.
+    readonly property string checkAll: "M3.29 10.84 L8.84 16.39 L7.50 17.73 L1.95 12.18zM6.16 16.39 L18.13 4.42 L19.47 5.76 L7.50 17.73zM9.37 18.26 L20.67 6.96 L22.02 8.31 L10.72 19.61z"
+    readonly property string closeAll: "M6.37 5.03 L18.97 17.63 L17.63 18.97 L5.03 6.37zM3.76 16.36 L8.68 11.43 L10.02 12.78 L5.10 17.70zM11.43 8.68 L16.36 3.76 L17.70 5.10 L12.78 10.02zM6.30 18.90 L11.22 13.98 L12.57 15.32 L7.64 20.24zM13.98 11.22 L18.90 6.30 L20.24 7.64 L15.32 12.57z"
     readonly property string person: "M12 12c2.21 0 4-1.79 4-4s-1.79-4-4-4-4 1.79-4 4 1.79 4 4 4zm0 2c-2.67 0-8 1.34-8 4v2h16v-2c0-2.66-5.33-4-8-4z"
     readonly property string sort: "M3 18h6v-2H3v2zM3 6v2h18V6H3zm0 7h12v-2H3v2z"
     readonly property string expand: "M21 11V3h-8l3.29 3.29-10 10L3 13v8h8l-3.29-3.29 10-10z"

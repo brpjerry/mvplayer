@@ -668,7 +668,7 @@ Popup {
                             }
                             Text {
                                 width: parent.width
-                                text: "Uploads from channels with fewer subscribers than this are not taken. Verified channels, and uploads listed under several channels, are."
+                                text: "Uploads from channels with fewer subscribers than this are not taken. Verified channels, channels you allowed, and uploads listed under several channels, are."
                                 color: Theme.textFaint
                                 font.pixelSize: 12
                                 wrapMode: Text.WordWrap
@@ -720,67 +720,69 @@ Popup {
                             }
                         }
                     }
-                    // A label's channel, or an artist's own, can be a small one.
+                    // The channels the user allowed and denied, each with a way back.
                     Item {
                         width: parent.width
-                        height: exceptions.implicitHeight + 14
-                        opacity: App.ignoreSmallChannels ? 1 : 0.45
+                        height: channels.implicitHeight + 14
+                        visible: App.listedChannels.length > 0
                         Column {
-                            id: exceptions
+                            id: channels
                             anchors.left: parent.left
                             anchors.right: parent.right
                             anchors.verticalCenter: parent.verticalCenter
                             spacing: 3
                             Text {
-                                text: "Except these channels"
+                                text: "Channels you allowed and denied"
                                 color: Theme.text
                                 font.pixelSize: 14
                             }
                             Text {
                                 width: parent.width
-                                text: "Never ignored as small. By handle, like “@name”, or by the address of the channel's page, with commas between them."
+                                text: "An allowed channel is an artist's channel for every track and is never ignored as a small one. A denied channel's uploads are never taken. Taken off here, a channel is judged like any other again; nothing in your library changes with that."
                                 color: Theme.textFaint
                                 font.pixelSize: 12
                                 wrapMode: Text.WordWrap
                             }
                             Item { width: 1; height: 4 }
-                            Rectangle {
-                                width: parent.width
-                                height: 34
-                                radius: Theme.radiusSmall
-                                color: Theme.hover
-                                border.width: 1
-                                border.color: exceptionsField.activeFocus ? Theme.accent : "transparent"
-                                TextInput {
-                                    id: exceptionsField
-                                    anchors.fill: parent
-                                    anchors.leftMargin: 10
-                                    anchors.rightMargin: 10
-                                    verticalAlignment: TextInput.AlignVCenter
-                                    clip: true
-                                    enabled: App.ignoreSmallChannels
-                                    color: Theme.text
-                                    selectionColor: Theme.accent
-                                    selectedTextColor: Theme.accentInk
-                                    font.pixelSize: 13
-                                    selectByMouse: true
-                                    text: App.smallChannelExceptions
-                                    // A long list shows from its start while it is not being edited.
-                                    onTextChanged: if (!activeFocus) cursorPosition = 0
-                                    onEditingFinished: {
-                                        App.smallChannelExceptions = text
-                                        text = Qt.binding(() => App.smallChannelExceptions)
-                                        focus = false
-                                        cursorPosition = 0
+                            Repeater {
+                                model: App.listedChannels
+                                Rectangle {
+                                    id: listed
+                                    required property var modelData
+                                    width: channels.width
+                                    height: 34
+                                    radius: Theme.radiusSmall
+                                    color: Theme.hover
+                                    Icon {
+                                        id: listedIcon
+                                        x: 10
+                                        anchors.verticalCenter: parent.verticalCenter
+                                        path: listed.modelData.list === "allow" ? Icons.check : Icons.close
+                                        size: 15
+                                        color: listed.modelData.list === "allow" ? "#3fbf7f" : "#ff5d5d"
                                     }
-                                }
-                                Text {
-                                    anchors.fill: exceptionsField
-                                    verticalAlignment: Text.AlignVCenter
-                                    visible: exceptionsField.text.length === 0 && !exceptionsField.activeFocus
-                                    text: "None"
-                                    color: Theme.textFaint
-                                    font.pixelSize: 13
+                                    Text {
+                                        anchors.left: listedIcon.right
+                                        anchors.leftMargin: 8
+                                        anchors.right: unlist.left
+                                        anchors.rightMargin: 8
+                                        anchors.verticalCenter: parent.verticalCenter
+                                        text: (listed.modelData.name || listed.modelData.id)
+                                              + (listed.modelData.handle ? "  ·  " + listed.modelData.handle : "")
+                                              + (listed.modelData.list === "allow" ? "  ·  allowed" : "  ·  denied")
+                                        color: Theme.text
+                                        font.pixelSize: 13
+                                        elide: Text.ElideRight
+                                    }
+                                    IconButton {
+                                        id: unlist
+                                        anchors.right: parent.right
+                                        anchors.rightMargin: 4
+                                        anchors.verticalCenter: parent.verticalCenter
+                                        icon: Icons.close
+                                        iconSize: 14
+                                        onClicked: App.unlistChannel(listed.modelData.id)
+                                    }
                                 }
                             }
                         }

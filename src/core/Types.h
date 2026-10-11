@@ -108,6 +108,10 @@ struct VideoInfo {
     // is the better audio, then YouTube's. The first candidate's audio sits
     // between these two times of the video.
     bool review = false;
+    // The user accepted this upload as its track's video: it counts as on
+    // the artist's channel, whoever's channel it is on. Never set on a video
+    // under review.
+    bool vouched = false;
     double reviewStart = 0;
     double reviewEnd = 0;
     // Which of the file's audio streams is YouTube's, from 0: the ones before

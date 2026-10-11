@@ -14,6 +14,7 @@
 #include <QSqlRecord>
 #include <QVariant>
 
+#include <algorithm>
 #include <tuple>
 
 namespace {
@@ -87,7 +88,7 @@ TrackInfo readTrack(const QSqlQuery &q)
 const char *kVideoCols =
     "id, yt_id, path, thumb, title, artist, album_artist, album, genre, year, track_no, duration, "
     "width, height, fps, vcodec, audio_source, audio_detail, yt_title, yt_channel, tags_json, added_at, yt_abr, "
-    "review, review_start, review_end, yt_stream, yt_channel_id, yt_channel_subs, yt_channel_verified, yt_channel_handle";
+    "review, review_start, review_end, yt_stream, yt_channel_id, yt_channel_subs, yt_channel_verified, yt_channel_handle, vouched";
 
 // Text that was kept, though it may be empty: never the null string, which
 // stands for "not kept".
@@ -133,6 +134,8 @@ VideoInfo readVideo(const QSqlQuery &q)
     v.ytChannelVerified = q.value(i++).toBool();
     if (!q.value(i).isNull())
         v.ytChannelHandle = keptText(q.value(i).toString());
+    ++i;
+    v.vouched = q.value(i++).toBool();
     return v;
 }
 
@@ -199,7 +202,7 @@ QSqlDatabase Database::conn()
 
 // The layout below is the one this version reads and writes. The one before
 // it is brought up to it (upgradeLayout); any other is refused.
-constexpr int kSchema = 5;
+constexpr int kSchema = 6;
 
 namespace {
 // A track is a recording: its number, or minus the file's id where it has none.
@@ -215,12 +218,49 @@ QString trackKeySql(const char *alias = "")
 // waited as options for the same tracks, each track pointing at one of them.
 // In layout 5 a video under review has candidates, and a track's video_id is
 // its video in the library and nothing else.
+namespace {
+const char *kChannelListsSql =
+    "CREATE TABLE IF NOT EXISTS channel_lists ("
+    " channel_id TEXT PRIMARY KEY, list TEXT NOT NULL, name TEXT, handle TEXT, added_at INTEGER NOT NULL DEFAULT 0)";
+}
+
 bool Database::upgradeLayout(int from, QString *error)
 {
-    if (from != 4)
+    if (from != 4 && from != 5)
         return false;
     QSqlDatabase db = conn();
-    const QStringList steps = {
+    if (from == 5) {
+        // (A column the step below reads, from before channel ids were kept.)
+        QSqlQuery q(db);
+        bool has = false;
+        if (q.exec(QStringLiteral("PRAGMA table_info(videos)"))) {
+            while (q.next())
+                has |= q.value(1).toString() == QLatin1String("yt_channel_id");
+        }
+        if (!has)
+            q.exec(QStringLiteral("ALTER TABLE videos ADD COLUMN yt_channel_id TEXT"));
+    }
+    // Layout 5 to 6: channels are allowed or denied by the user, and
+    // accepting a video vouches for that upload, no longer for its channel.
+    // The videos that are in the library on the strength of a channel
+    // vouched for that way keep it, each as an upload the user accepted.
+    const QStringList toSix = {
+        QStringLiteral("ALTER TABLE videos ADD COLUMN vouched INTEGER NOT NULL DEFAULT 0"),
+        QString::fromLatin1(kChannelListsSql),
+        QStringLiteral("CREATE TABLE IF NOT EXISTS artist_channels ("
+                       " artist TEXT NOT NULL, channel_id TEXT NOT NULL DEFAULT '', channel TEXT NOT NULL DEFAULT '',"
+                       " source TEXT, checked_until INTEGER NOT NULL DEFAULT 0,"
+                       " PRIMARY KEY (artist, channel_id, channel))"),
+        QStringLiteral(
+            "UPDATE videos SET vouched = 1 WHERE review = 0 AND EXISTS ("
+            " SELECT 1 FROM tracks t JOIN artist_channels ac ON ac.source = 'approved'"
+            "  AND ((ac.channel_id != '' AND ac.channel_id = videos.yt_channel_id) OR (ac.channel != '' AND ac.channel = videos.yt_channel))"
+            "  AND (instr(COALESCE(t.artist, ''), ac.artist) > 0 OR instr(COALESCE(t.album_artist, ''), ac.artist) > 0)"
+            " WHERE t.video_id = videos.id)"),
+        QStringLiteral("DELETE FROM artist_channels WHERE source = 'approved'"),
+        QStringLiteral("PRAGMA user_version = 6"),
+    };
+    const QStringList steps = from == 5 ? toSix : QStringList{
         QStringLiteral("CREATE TABLE candidates ("
                        " video_id INTEGER NOT NULL REFERENCES videos(id) ON DELETE CASCADE,"
                        " track_key INTEGER NOT NULL,"
@@ -272,7 +312,10 @@ bool Database::upgradeLayout(int from, QString *error)
             *error = db.lastError().text();
         return false;
     }
-    qInfo("[db] library brought up from layout 4: one track per video, review by video");
+    if (from == 5)
+        qInfo("[db] library brought up from layout 5: channels are allowed or denied by you; an accepted video vouches for itself");
+    else
+        qInfo("[db] library brought up from layout 4: one track per video, review by video");
     return true;
 }
 
@@ -291,10 +334,13 @@ bool Database::init(QString *error)
         int schema = 0;
         if (q.exec(QStringLiteral("PRAGMA user_version")) && q.next())
             schema = q.value(0).toInt();
-        if (exists && schema == kSchema - 1) {
+        // One layout at a time, from the oldest this version reads.
+        while (exists && schema >= 4 && schema < kSchema) {
             if (!upgradeLayout(schema, error))
                 return false;
-        } else if (exists && schema != kSchema) {
+            ++schema;
+        }
+        if (exists && schema != kSchema) {
             if (error) {
                 *error = QStringLiteral("%1 was written by another version of mvplayer (layout %2, this one uses %3);"
                                         " move it away or delete it to start a new library")
@@ -322,6 +368,7 @@ bool Database::init(QString *error)
             " yt_stream INTEGER NOT NULL DEFAULT 0,"
             " yt_channel_id TEXT,"
             " yt_channel_subs INTEGER, yt_channel_verified INTEGER NOT NULL DEFAULT 0, yt_channel_handle TEXT,"
+            " vouched INTEGER NOT NULL DEFAULT 0,"
             " kept INTEGER NOT NULL DEFAULT 0)"),
         QStringLiteral(
             "CREATE TABLE IF NOT EXISTS tracks ("
@@ -361,6 +408,7 @@ bool Database::init(QString *error)
                        " stream INTEGER NOT NULL DEFAULT 0, fit REAL NOT NULL DEFAULT 0, audio_detail TEXT,"
                        " PRIMARY KEY (video_id, track_key))"),
         QStringLiteral("CREATE INDEX IF NOT EXISTS candidates_track ON candidates(track_key)"),
+        QString::fromLatin1(kChannelListsSql),
         QStringLiteral("CREATE INDEX IF NOT EXISTS tracks_state ON tracks(state)"),
         QStringLiteral("CREATE INDEX IF NOT EXISTS tracks_video ON tracks(video_id)"),
         QStringLiteral("CREATE INDEX IF NOT EXISTS tracks_recording ON tracks(recording)"),
@@ -915,8 +963,8 @@ qint64 Database::insertVideo(const VideoInfo &v)
         "INSERT INTO videos (yt_id, path, thumb, title, artist, album_artist, album, genre, year,"
         " track_no, duration, width, height, fps, vcodec, audio_source, audio_detail, yt_title,"
         " yt_channel, tags_json, added_at, yt_abr, review, review_start, review_end, yt_stream, yt_channel_id,"
-        " yt_channel_subs, yt_channel_verified, yt_channel_handle)"
-        " VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)"));
+        " yt_channel_subs, yt_channel_verified, yt_channel_handle, vouched)"
+        " VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)"));
     q.addBindValue(v.ytId);
     q.addBindValue(storedPath(v.path));
     q.addBindValue(storedPath(v.thumb));
@@ -947,6 +995,7 @@ qint64 Database::insertVideo(const VideoInfo &v)
     q.addBindValue(v.ytChannelSubs > -2 ? QVariant(v.ytChannelSubs) : QVariant());
     q.addBindValue(v.ytChannelVerified);
     q.addBindValue(v.ytChannelHandle.isNull() ? QVariant() : QVariant(v.ytChannelHandle));
+    q.addBindValue(v.vouched && !v.review);
     if (!run(q))
         return 0;
     return q.lastInsertId().toLongLong();
@@ -975,7 +1024,7 @@ void Database::updateVideoMedia(const VideoInfo &v)
     QSqlQuery q(conn());
     q.prepare(QStringLiteral(
         "UPDATE videos SET duration = ?, width = ?, height = ?, fps = ?, vcodec = ?, audio_source = ?,"
-        " audio_detail = ?, yt_abr = ?, review = ?, review_start = ?, review_end = ?, yt_stream = ? WHERE id = ?"));
+        " audio_detail = ?, yt_abr = ?, review = ?, review_start = ?, review_end = ?, yt_stream = ?, vouched = ? WHERE id = ?"));
     q.addBindValue(v.duration);
     q.addBindValue(v.width);
     q.addBindValue(v.height);
@@ -988,6 +1037,8 @@ void Database::updateVideoMedia(const VideoInfo &v)
     q.addBindValue(v.reviewStart);
     q.addBindValue(v.reviewEnd);
     q.addBindValue(v.ytStream);
+    // (A video that waits for a verdict has none yet.)
+    q.addBindValue(v.vouched && !v.review);
     q.addBindValue(v.id);
     run(q);
 }
@@ -1222,6 +1273,14 @@ QVector<TrackInfo> Database::unlinkOthers(qint64 videoId, const TrackInfo &keepe
     return out;
 }
 
+void Database::unlinkAll(qint64 videoId)
+{
+    QSqlQuery q(conn());
+    q.prepare(QStringLiteral("UPDATE tracks SET state = 'pending', video_id = NULL, message = '' WHERE video_id = ?"));
+    q.addBindValue(videoId);
+    run(q);
+}
+
 void Database::setTrackReimport(qint64 trackId)
 {
     // The whole recording: the lookup runs under its best file, whichever
@@ -1300,6 +1359,144 @@ bool Database::videoRejectedFor(const TrackInfo &track, const QString &ytId)
     q.addBindValue(rejectionKey(track));
     q.addBindValue(ytId);
     return run(q) && q.next();
+}
+
+QVector<VideoInfo> Database::videosOfChannel(const QString &channelId)
+{
+    QVector<VideoInfo> out;
+    if (channelId.isEmpty())
+        return out;
+    QSqlQuery q(conn());
+    q.prepare(QStringLiteral("SELECT %1 FROM videos WHERE yt_channel_id = ? ORDER BY artist COLLATE NOCASE, title COLLATE NOCASE, id")
+                  .arg(QLatin1String(kVideoCols)));
+    q.addBindValue(channelId);
+    if (run(q)) {
+        while (q.next())
+            out << resolved(readVideo(q));
+    }
+    return out;
+}
+
+QString Database::channelList(const QString &channelId)
+{
+    if (channelId.isEmpty())
+        return {};
+    QSqlQuery q(conn());
+    q.prepare(QStringLiteral("SELECT list FROM channel_lists WHERE channel_id = ?"));
+    q.addBindValue(channelId);
+    return run(q) && q.next() ? q.value(0).toString() : QString();
+}
+
+void Database::setChannelList(const QString &channelId, const QString &list, const QString &name, const QString &handle)
+{
+    if (channelId.isEmpty())
+        return;
+    QSqlQuery q(conn());
+    q.prepare(QStringLiteral("INSERT OR REPLACE INTO channel_lists (channel_id, list, name, handle, added_at) VALUES (?, ?, ?, ?, ?)"));
+    q.addBindValue(channelId);
+    q.addBindValue(list);
+    q.addBindValue(name);
+    q.addBindValue(handle);
+    q.addBindValue(QDateTime::currentSecsSinceEpoch());
+    run(q);
+}
+
+void Database::removeChannelList(const QString &channelId)
+{
+    QSqlQuery q(conn());
+    q.prepare(QStringLiteral("DELETE FROM channel_lists WHERE channel_id = ?"));
+    q.addBindValue(channelId);
+    run(q);
+}
+
+namespace {
+// A channel's own name out of the names its uploads are listed under. An
+// upload that YouTube lists under several channels carries "Name and Other"
+// (or "Name and 2 more"), and the library keeps what the listing said.
+QString ownChannelName(const QStringList &listed)
+{
+    if (listed.isEmpty())
+        return {};
+    // One of them is the name alone: the others begin with it.
+    for (const QString &name : listed) {
+        if (std::all_of(listed.begin(), listed.end(), [&name](const QString &other) {
+                return other == name || other.startsWith(name + QStringLiteral(" and "));
+            }))
+            return name;
+    }
+    // None is: what they have in common, before the " and ".
+    QString common = listed.first();
+    for (const QString &other : listed) {
+        qsizetype n = 0;
+        while (n < common.size() && n < other.size() && common[n] == other[n])
+            ++n;
+        common.truncate(n);
+    }
+    const qsizetype cut = common.lastIndexOf(QStringLiteral(" and "));
+    return cut > 0 ? common.left(cut) : listed.first();
+}
+}
+
+Database::ListedChannel Database::knownChannel(const QString &idOrHandle)
+{
+    ListedChannel c;
+    const bool byHandle = idOrHandle.startsWith(QLatin1Char('@'));
+    if (byHandle) {
+        QSqlQuery q(conn());
+        q.prepare(QStringLiteral("SELECT yt_channel_id FROM videos WHERE yt_channel_id != '' AND lower(yt_channel_handle) = lower(?) LIMIT 1"));
+        q.addBindValue(idOrHandle);
+        if (run(q) && q.next())
+            c.id = q.value(0).toString();
+    } else {
+        c.id = idOrHandle;
+    }
+    QSqlQuery l(conn());
+    l.prepare(QStringLiteral("SELECT channel_id, list, name, handle, added_at FROM channel_lists WHERE %1")
+                  .arg(byHandle && c.id.isEmpty() ? QStringLiteral("lower(handle) = lower(?)") : QStringLiteral("channel_id = ?")));
+    l.addBindValue(c.id.isEmpty() ? idOrHandle : c.id);
+    if (run(l) && l.next()) {
+        c.id = l.value(0).toString();
+        c.list = l.value(1).toString();
+        c.name = l.value(2).toString();
+        c.handle = l.value(3).toString();
+        c.addedAt = l.value(4).toLongLong();
+    }
+    if (c.id.isEmpty())
+        return c;
+    // Its name and handle as the videos the library has of it carry them.
+    QStringList names;
+    QSqlQuery q(conn());
+    q.prepare(QStringLiteral("SELECT DISTINCT yt_channel, yt_channel_handle FROM videos WHERE yt_channel_id = ? ORDER BY length(yt_channel), yt_channel"));
+    q.addBindValue(c.id);
+    if (run(q)) {
+        while (q.next()) {
+            if (!q.value(0).toString().isEmpty() && !names.contains(q.value(0).toString()))
+                names << q.value(0).toString();
+            if (c.handle.isEmpty())
+                c.handle = q.value(1).toString();
+        }
+    }
+    if (!names.isEmpty())
+        c.name = ownChannelName(names);
+    return c;
+}
+
+QVector<Database::ListedChannel> Database::channelLists()
+{
+    QVector<ListedChannel> out;
+    QStringList ids;
+    {
+        QSqlQuery q(conn());
+        if (q.exec(QStringLiteral("SELECT channel_id FROM channel_lists ORDER BY name COLLATE NOCASE, channel_id"))) {
+            while (q.next())
+                ids << q.value(0).toString();
+        }
+    }
+    // (Each under its own name as the library knows it now, not only as it
+    // was listed on the upload the user had in front of them.)
+    for (const QString &id : std::as_const(ids))
+        out << knownChannel(id);
+    return out;
 }
 
 void Database::removeVideo(qint64 id)

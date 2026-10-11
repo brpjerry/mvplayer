@@ -325,6 +325,7 @@ ApplicationWindow {
                     onActivated: (row) => player.playRow(row)
                     onApproved: (id) => window.approveVideo(id)
                     onRejected: (id) => window.rejectVideo(id)
+                    onChannelRequested: (id, allow) => channelDialog.openFor(id, allow)
                 }
 
                 Welcome {
@@ -349,6 +350,7 @@ ApplicationWindow {
             onCloseRequested: player.stop()
             onReviewApproved: window.approveVideo(player.current.videoId)
             onReviewRejected: window.rejectVideo(player.current.videoId)
+            onReviewChannelRequested: (allow) => channelDialog.openFor(player.current.videoId, allow)
             candidates: controlBar.candidates.length
             candidateTitle: controlBar.candidate ? controlBar.candidate.title : ""
             onTogglePauseRequested: window.togglePause()
@@ -386,6 +388,14 @@ ApplicationWindow {
 
     SettingsPanel { id: settings }
     ReplaceDialog { id: replaceDialog }
+    ChannelDialog {
+        id: channelDialog
+        // A video that plays is let go of before its channel's videos change.
+        onConfirmed: (ids) => {
+            if (player.current && ids.indexOf(player.current.videoId) >= 0)
+                player.stop()
+        }
+    }
 
     // Frame rate counter (F12)
     Rectangle {
@@ -501,11 +511,24 @@ ApplicationWindow {
         case "check-quality": App.checkQuality(); return "ok"
         case "check-cookies": App.checkCookies(); return "ok"
         case "sign-in-on-bot-check": App.accountOnBotCheck = arg !== "off"; return "ok"
-        case "small-channels": // small-channels on|off, the limit: small-channels 5000, or the exceptions: small-channels except @a, @b
+        case "small-channels": // small-channels on|off, or the limit: small-channels 5000
             if (arg === "on" || arg === "off") App.ignoreSmallChannels = arg === "on"
-            else if (arg === "except" || arg.startsWith("except ")) App.smallChannelExceptions = arg.slice(7)
             else App.minSubscribers = parseInt(arg)
             return "ok"
+        // Channels: channel-actions <video id> (whether the two buttons are offered), channel-dialog <video id> allow|deny,
+        // channel-confirm, channel-cancel, channel-state (the dialog as it stands), channels (the lists), unlist-channel <id>
+        case "channel-actions": return JSON.stringify(App.channelActions(parseInt(arg)))
+        case "channel-dialog": {
+            const parts = arg.split(" ")
+            channelDialog.openFor(parseInt(parts[0]), parts[1] !== "deny")
+            return channelDialog.change.id !== undefined ? "ok" : "no channel"
+        }
+        case "channel-confirm": if (!channelDialog.opened) return "closed"; channelDialog.confirm(); return "ok"
+        case "channel-cancel": channelDialog.close(); return "ok"
+        case "channel-state": return JSON.stringify({ opened: channelDialog.opened, allow: channelDialog.allow, judging: channelDialog.judging,
+            channel: channelDialog.change, judged: channelDialog.judged, accepted: channelDialog.accepted })
+        case "channels": return JSON.stringify(App.listedChannels)
+        case "unlist-channel": App.unlistChannel(arg); return "ok"
         case "resume": App.resumeImport(); return "ok"
         case "fetch-subtitles": App.fetchSubtitles(); return "ok"
         case "delete-untracked": return "" + App.deleteUntracked()
@@ -588,7 +611,7 @@ ApplicationWindow {
                 cookiesStatus: App.cookiesStatus, checkingQuality: App.checkingQuality, reviewCount: App.reviewCount,
                 paused: App.importPaused, pauseKind: App.pauseKind, accountOnBotCheck: App.accountOnBotCheck,
                 ignoreSmallChannels: App.ignoreSmallChannels, minSubscribers: App.minSubscribers,
-                smallChannelExceptions: App.smallChannelExceptions,
+                channelDialog: channelDialog.opened,
                 facet: App.videos.facetType, facetValue: App.videos.facetValue, section: App.videos.section,
                 orphanCount: App.orphanCount, reviewLabel: controlBar.reviewLabel, trackLength: controlBar.trackLength,
                 candidates: controlBar.candidates.length, candidate: controlBar.shown,

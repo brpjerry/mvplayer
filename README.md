@@ -230,10 +230,30 @@ fits outright, and then waits for you:
   candidates' audio is taken out of the file. That track is then a candidate
   of nothing else, and a video left without a candidate is deleted. The
   video's other candidates wait on whatever else they are candidates of, or
-  have no video.
+  have no video. Your verdict vouches for that upload as the track's video,
+  so a re-import does not ask again whose channel it is on; it says nothing
+  of the channel's other uploads.
   ✗ turns it down for all of its candidates: the video is deleted, that
   upload is not offered to any of them again, and each waits on whatever
   else it is a candidate of or counts as having no video.
+- Rest the pointer on ✓ or ✗ for a second and a second button comes up under
+  it, for the upload's channel as a whole. They are offered where the
+  channel is not an artist's channel already.
+  The double tick allows the channel: it counts as an artist's channel from
+  then on, for every track (a label's channel has the videos of many), and
+  is never ignored as a small one. Its videos under review are judged again
+  at once, from their files and with nothing asked of YouTube: one that
+  waited only on whose channel it is on is accepted, and one that waits for
+  another reason (too little of the same waveform, a cut, another version)
+  stays for your verdict, the card the button was on included.
+  The double cross denies the channel: every video the library has from it
+  is deleted, the ones under review as turned down for all their candidates,
+  and its uploads are never taken again. Tracks that had one of its videos
+  are looked up again for another.
+  Either way the app first lists what would change, video by video, and
+  asks. Settings lists the channels you allowed and denied; taken off
+  there, a channel is judged like any other again, and nothing in the
+  library changes with that.
 
 In the library there is no sharing: a track has one video and a video one
 track. When a track's search turns up a video that another track has, the
@@ -257,22 +277,18 @@ listened to. A verified channel is not dropped whatever its size (an
 artist's own can be a small one), nor is an upload that YouTube lists under
 several channels ("A and B"): one of them meeting the limit is enough, and
 for such an upload the page gives no count to go by. A count that is not
-known, or that the channel hides, is no reason either. The library keeps
-what the page said for every video it brings in. Headless:
-`--min-subscribers <n>`, `0` for no limit.
-
-A label's channel, or an artist's own, can be a small one that is not
-verified. "Except these channels", below the limit in Settings, lists the
-channels that are never ignored as small: each by its handle (`@name`) or by
-the address of its page, with commas between them. A channel's name will not
-do, since two channels can have the same one; the field shows what was
-understood. An exception only keeps the rule off a channel: its uploads are
-judged like any other's. Headless: `--small-channel-exception <channel>`,
-once for each.
+known, or that the channel hides, is no reason either. Nor is a channel you
+allowed ignored: a label's channel, or an artist's own, can be a small one
+that is not verified. The library keeps what the page said for every video
+it brings in. Headless: `--min-subscribers <n>`, `0` for no limit.
 
 Headless: `--approve <youtube id>` accepts for the candidate shown first,
 `--approve <youtube id>=<music file>` for that file's track, and
-`--reject <youtube id>`.Headless: `--approve <youtube id>` and `--reject <youtube id>`.
+`--reject <youtube id>`. `--allow-channel <channel>`, `--deny-channel
+<channel>` and `--unlist-channel <channel>` take a channel's id (`UC…`), or
+its handle (`@name`) or the address of its page where the library has a
+video of it: a name will not do, since two channels can have the same one.
+Headless: `--approve <youtube id>` and `--reject <youtube id>`.
 
 Turning off "Use my library's audio" in Settings lifts all of this.
 

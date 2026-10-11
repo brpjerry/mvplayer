@@ -316,38 +316,13 @@ bool libraryIsBetter(const TrackInfo &track, double youtubeQuality)
 
 // "Ignore small channels": an upload from a channel with fewer subscribers
 // than the limit is not a track's video, unless YouTube marks the channel as
-// verified (an artist's own can be a small one). A count that is not known is
-// no reason: the channel hides it, or the upload is listed under several
-// channels and the page gives none to go by (see YtDlp::channelOf).
-//
-// Nor is a channel the user lists as an exception, by its handle or by its
-// id. Where an exception is given by handle and the library kept a count but
-// no handle (a page read before handles were kept), it is not known whether
-// the channel is one: HandleNeeded, which is no reason either until the page
-// has been read again.
-enum class Small { No, Yes, HandleNeeded };
-
-Small smallChannel(qint64 subscribers, bool verified, const QString &channelId, const QString &handle, const ImportSettings &cfg)
+// verified (an artist's own can be a small one) or the user allowed it. A
+// count that is not known is no reason: the channel hides it, or the upload
+// is listed under several channels and the page gives none to go by (see
+// YtDlp::channelOf).
+bool smallChannel(qint64 subscribers, bool verified, bool allowed, const ImportSettings &cfg)
 {
-    if (cfg.minSubscribers <= 0 || subscribers < 0 || subscribers >= cfg.minSubscribers || verified)
-        return Small::No;
-    bool byHandle = false;
-    for (const QString &e : cfg.smallChannelExceptions) {
-        if (!e.startsWith(QLatin1Char('@'))) {
-            if (!channelId.isEmpty() && e == channelId)
-                return Small::No;
-            continue;
-        }
-        byHandle = true;
-        if (e == handle.toLower())
-            return Small::No;
-    }
-    return byHandle && handle.isNull() ? Small::HandleNeeded : Small::Yes;
-}
-
-Small smallChannel(const VideoInfo &v, const ImportSettings &cfg)
-{
-    return smallChannel(v.ytChannelSubs, v.ytChannelVerified, v.ytChannelId, v.ytChannelHandle, cfg);
+    return cfg.minSubscribers > 0 && subscribers >= 0 && subscribers < cfg.minSubscribers && !verified && !allowed;
 }
 
 QString smallChannelReason(qint64 subscribers, const ImportSettings &cfg)
@@ -372,6 +347,7 @@ ImportManager::ImportManager(Database *db, QObject *parent)
     m_auditPool.setMaxThreadCount(1);
     m_replacePool.setMaxThreadCount(1);
     m_verdictPool.setMaxThreadCount(1);
+    m_previewPool.setMaxThreadCount(2);
     m_jobPool.setMaxThreadCount(2);
 
     m_debounce.setSingleShot(true);
@@ -465,6 +441,9 @@ void ImportManager::stop()
     m_jobPool.waitForDone();
     m_replacePool.waitForDone();
     m_verdictPool.waitForDone();
+    if (m_previewStop)
+        *m_previewStop = true;
+    m_previewPool.waitForDone();
     m_replacing = false;
     m_pending.clear();
     m_active = 0;
@@ -834,7 +813,7 @@ void ImportManager::rejectVideo(qint64 videoId)
     });
 }
 
-void ImportManager::approveJob(qint64 videoId, qint64 trackId, const ImportSettings &cfg)
+void ImportManager::approveJob(qint64 videoId, qint64 trackId, const ImportSettings &cfg, bool byChannel)
 {
     std::optional<VideoInfo> v = m_db->video(videoId);
     if (!v || !v->review)
@@ -918,7 +897,13 @@ void ImportManager::approveJob(qint64 videoId, qint64 trackId, const ImportSetti
         }
     }
     v->review = false;
+    // The user's verdict vouches for this upload as the track's video, so
+    // that a re-import does not ask again whose channel it is on. (Accepted
+    // because its channel was allowed, the list is what says so.)
+    v->vouched = !byChannel;
     m_db->updateVideoMedia(*v);
+    const QString how = byChannel ? QStringLiteral("“%1”, on a channel you allowed").arg(v->ytTitle)
+                                  : QStringLiteral("you accepted “%1”").arg(v->ytTitle);
     QJsonArray others;
     for (int i = 0; i < candidates.size(); ++i) {
         if (i != mine) {
@@ -930,19 +915,19 @@ void ImportManager::approveJob(qint64 videoId, qint64 trackId, const ImportSetti
     std::optional<TrackInfo> keeper;
     if (mine >= 0) {
         keeper = candidates[mine].track;
-        m_db->setTrackResult(keeper->id, QStringLiteral("done"), videoId, QStringLiteral("you accepted “%1”").arg(v->ytTitle));
-        // The user says this is the track's video: its channel is the
-        // artist's, for the artists of that track.
-        for (const QString &artist : Matcher::artistNames(*keeper))
-            m_db->addArtistChannel(artist.trimmed(), v->ytChannelId, v->ytChannelId.isEmpty() ? v->ytChannel : QString(), QStringLiteral("approved"));
+        m_db->setTrackResult(keeper->id, QStringLiteral("done"), videoId, how);
         tracks.append(QJsonObject{{QStringLiteral("trackId"), keeper->id}, {QStringLiteral("track"), keeper->title}, {QStringLiteral("album"), keeper->album}});
     }
     releaseCandidates(videoId, candidates, keeper ? &*keeper : nullptr,
-                      keeper ? QStringLiteral("you accepted “%1” for “%2” [%3]").arg(v->ytTitle, keeper->title, keeper->album)
-                             : QStringLiteral("you accepted “%1”").arg(v->ytTitle));
-    qInfo().noquote() << QStringLiteral("[review] accepted “%1” (%2)").arg(v->title, v->ytTitle);
+                      !keeper ? how
+                      : (byChannel ? QStringLiteral("“%1” is the video of “%2” [%3]: its channel is one you allowed")
+                                   : QStringLiteral("you accepted “%1” for “%2” [%3]")).arg(v->ytTitle, keeper->title, keeper->album));
+    qInfo().noquote() << (byChannel ? QStringLiteral("[channel] “%1” (%2) is accepted: its channel is one you allowed")
+                                    : QStringLiteral("[review] accepted “%1” (%2)")).arg(v->title, v->ytTitle);
     appendLog({{QStringLiteral("event"), QStringLiteral("verdict")}, {QStringLiteral("verdict"), QStringLiteral("accept")},
+               {QStringLiteral("by"), byChannel ? QStringLiteral("allowed-channel") : QStringLiteral("you")},
                {QStringLiteral("videoId"), videoId}, {QStringLiteral("id"), v->ytId}, {QStringLiteral("title"), v->ytTitle},
+               {QStringLiteral("channel"), v->ytChannel},
                {QStringLiteral("tracks"), tracks}, {QStringLiteral("otherCandidates"), others}});
     emit videoChanged(videoId);
     // The track has its video: it is a candidate of nothing else.
@@ -952,7 +937,7 @@ void ImportManager::approveJob(qint64 videoId, qint64 trackId, const ImportSetti
         withdraw(*keeper, m_db->candidacies(*keeper));
 }
 
-void ImportManager::rejectJob(qint64 videoId)
+void ImportManager::rejectJob(qint64 videoId, const QString &why)
 {
     std::optional<VideoInfo> v = m_db->video(videoId);
     if (!v || !v->review)
@@ -972,12 +957,232 @@ void ImportManager::rejectJob(qint64 videoId)
         m_db->rejectVideoFor(c.track, v->ytId);
         names.append(QJsonObject{{QStringLiteral("trackId"), c.track.id}, {QStringLiteral("track"), c.track.title}, {QStringLiteral("album"), c.track.album}});
     }
-    releaseCandidates(videoId, candidates, nullptr, QStringLiteral("you turned down “%1”").arg(v->ytTitle));
+    releaseCandidates(videoId, candidates, nullptr,
+                      why.isEmpty() ? QStringLiteral("you turned down “%1”").arg(v->ytTitle) : QStringLiteral("%1: “%2”").arg(why, v->ytTitle));
     discardVideo(*v);
-    qInfo().noquote() << QStringLiteral("[review] rejected “%1” (%2)").arg(v->title, v->ytTitle);
+    qInfo().noquote() << (why.isEmpty() ? QStringLiteral("[review] rejected “%1” (%2)")
+                                        : QStringLiteral("[channel] “%1” (%2) is deleted: its channel is one you denied")).arg(v->title, v->ytTitle);
     appendLog({{QStringLiteral("event"), QStringLiteral("verdict")}, {QStringLiteral("verdict"), QStringLiteral("reject")},
+               {QStringLiteral("by"), why.isEmpty() ? QStringLiteral("you") : QStringLiteral("denied-channel")},
                {QStringLiteral("videoId"), videoId}, {QStringLiteral("id"), v->ytId}, {QStringLiteral("title"), v->ytTitle},
-               {QStringLiteral("tracks"), names}});
+               {QStringLiteral("channel"), v->ytChannel}, {QStringLiteral("tracks"), names}});
+}
+
+ImportManager::ChannelVerdict ImportManager::judgeAsArtists(const VideoInfo &video, const ImportSettings &cfg, const std::atomic<bool> *stop)
+{
+    ChannelVerdict out;
+    // Each candidate against the upload's own audio, which the file keeps.
+    std::vector<int16_t> ytPcm;
+    QString error;
+    if (!AudioAlign::decodeMono(video.path, &ytPcm, stop, &error, video.ytStream)) {
+        out.reason = QStringLiteral("its file cannot be read");
+        return out;
+    }
+    const double ytQuality = storedYoutubeQuality(video);
+    double bestFit = -1;
+    for (const Database::Candidate &c : candidatesInOrder(m_db, video)) {
+        if (stop && *stop)
+            return out;
+        std::vector<int16_t> pcm;
+        if (!AudioAlign::decodeMono(c.track.path, &pcm, stop, &error)) {
+            if (out.reason.isEmpty())
+                out.reason = QStringLiteral("“%1” cannot be read").arg(c.track.title);
+            continue;
+        }
+        const AudioAlign::Result ar = fitted(AudioAlign::align(pcm, ytPcm), c.track, video.ytTitle, video.ytChannel);
+        // As a lookup has it for a video the track is a candidate of
+        // already (runJob), with the channel a vouched one.
+        const bool own = cfg.replaceAudio && libraryIsBetter(c.track, ytQuality);
+        const bool recording = audioMatches(ar) && ownRecording(ar, c.track, video.ytTitle, video.ytChannel, true, true);
+        if (own && recording) {
+            if (ar.likeness > bestFit) {
+                bestFit = ar.likeness;
+                out.accept = true;
+                out.track = c.track;
+            }
+            continue;
+        }
+        if (out.reason.isEmpty()) {
+            out.reason = !audioMatches(ar) ? mismatchReason(ar)
+                : !own ? QStringLiteral("the track is the lesser audio")
+                : unconfirmedReason(ar, c.track, video.ytTitle, video.ytChannel, true);
+        }
+    }
+    if (out.accept)
+        out.reason.clear();
+    else if (out.reason.isEmpty())
+        out.reason = QStringLiteral("it has no candidate track in the music folders");
+    return out;
+}
+
+int ImportManager::previewAllowChannel(const QString &channelId)
+{
+    cancelChannelPreview();
+    const int ticket = ++m_previewTicket;
+    const auto stop = std::make_shared<std::atomic<bool>>(false);
+    m_previewStop = stop;
+    const ImportSettings cfg = settings();
+    QVector<VideoInfo> waiting;
+    for (const VideoInfo &v : m_db->videosOfChannel(channelId)) {
+        if (v.review)
+            waiting << v;
+    }
+    const auto left = std::make_shared<std::atomic<int>>(waiting.size());
+    if (waiting.isEmpty()) {
+        QMetaObject::invokeMethod(this, [this, ticket] { emit channelPreviewDone(ticket); }, Qt::QueuedConnection);
+        return ticket;
+    }
+    for (const VideoInfo &was : std::as_const(waiting)) {
+        m_previewPool.start([this, was, cfg, ticket, stop, left] {
+            const auto done = qScopeGuard([&] {
+                if (--*left == 0 && !*stop)
+                    emit channelPreviewDone(ticket);
+            });
+            if (*stop || m_cancel || !claimVideo(was.ytId))
+                return;
+            const auto release = qScopeGuard([&] { releaseVideo(was.ytId); });
+            const std::optional<VideoInfo> v = m_db->video(was.id);
+            if (!v || !v->review || *stop)
+                return;
+            const ChannelVerdict verdict = judgeAsArtists(*v, cfg, stop.get());
+            if (!*stop && !m_cancel)
+                emit channelJudged(ticket, v->id, verdict.accept, verdict.track.id, verdict.track.title, verdict.reason);
+        });
+    }
+    return ticket;
+}
+
+void ImportManager::cancelChannelPreview()
+{
+    if (m_previewStop)
+        *m_previewStop = true;
+    m_previewStop.reset();
+}
+
+void ImportManager::allowChannel(const QString &channelId, const QString &name, const QString &handle)
+{
+    if (channelId.isEmpty())
+        return;
+    cancelChannelPreview();
+    m_db->setChannelList(channelId, QStringLiteral("allow"), name, handle);
+    qInfo().noquote() << QStringLiteral("[channel] allowed: “%1” [%2]").arg(name, channelId);
+    appendLog({{QStringLiteral("event"), QStringLiteral("channel")}, {QStringLiteral("list"), QStringLiteral("allow")},
+               {QStringLiteral("channelId"), channelId}, {QStringLiteral("channel"), name}, {QStringLiteral("handle"), handle}});
+    emit channelListsChanged();
+    ++m_reviewJobs;
+    emit activityChanged();
+    const ImportSettings cfg = settings();
+    m_verdictPool.start([this, channelId, cfg] {
+        allowJob(channelId, cfg);
+        --m_reviewJobs;
+        QMetaObject::invokeMethod(this, [this] {
+            emit activityChanged();
+            pump();
+        }, Qt::QueuedConnection);
+    });
+}
+
+void ImportManager::allowJob(const QString &channelId, const ImportSettings &cfg)
+{
+    for (const VideoInfo &was : m_db->videosOfChannel(channelId)) {
+        if (m_cancel)
+            return;
+        if (!was.review)
+            continue;
+        ChannelVerdict verdict;
+        {
+            if (!claimVideo(was.ytId))
+                return;
+            const auto release = qScopeGuard([&] { releaseVideo(was.ytId); });
+            const std::optional<VideoInfo> v = m_db->video(was.id);
+            if (!v || !v->review)
+                continue;
+            verdict = judgeAsArtists(*v, cfg, &m_cancel);
+        }
+        if (m_cancel)
+            return;
+        if (verdict.accept) {
+            approveJob(was.id, verdict.track.id, cfg, true);
+        } else {
+            qInfo().noquote() << QStringLiteral("[channel] “%1” stays under review: %2").arg(was.ytTitle, verdict.reason);
+            appendLog({{QStringLiteral("event"), QStringLiteral("channel-kept-in-review")}, {QStringLiteral("videoId"), was.id},
+                       {QStringLiteral("id"), was.ytId}, {QStringLiteral("title"), was.ytTitle}, {QStringLiteral("reason"), verdict.reason}});
+        }
+        emit channelJudged(0, was.id, verdict.accept, verdict.track.id, verdict.track.title, verdict.reason);
+    }
+}
+
+void ImportManager::denyChannel(const QString &channelId, const QString &name, const QString &handle)
+{
+    if (channelId.isEmpty())
+        return;
+    cancelChannelPreview();
+    m_db->setChannelList(channelId, QStringLiteral("deny"), name, handle);
+    qInfo().noquote() << QStringLiteral("[channel] denied: “%1” [%2]").arg(name, channelId);
+    appendLog({{QStringLiteral("event"), QStringLiteral("channel")}, {QStringLiteral("list"), QStringLiteral("deny")},
+               {QStringLiteral("channelId"), channelId}, {QStringLiteral("channel"), name}, {QStringLiteral("handle"), handle}});
+    emit channelListsChanged();
+    ++m_reviewJobs;
+    emit activityChanged();
+    m_verdictPool.start([this, channelId] {
+        denyJob(channelId);
+        --m_reviewJobs;
+        QMetaObject::invokeMethod(this, [this] {
+            emit activityChanged();
+            pump();
+        }, Qt::QueuedConnection);
+    });
+}
+
+void ImportManager::denyJob(const QString &channelId)
+{
+    bool requeued = false;
+    for (const VideoInfo &was : m_db->videosOfChannel(channelId)) {
+        if (m_cancel)
+            return;
+        if (was.review) {
+            // Rejected, for all its candidates.
+            rejectJob(was.id, QStringLiteral("its channel is one you denied"));
+            continue;
+        }
+        // A video that tracks have: it goes, and they are looked up again,
+        // to see whether another upload is theirs.
+        if (!claimVideo(was.ytId))
+            return;
+        const auto release = qScopeGuard([&] { releaseVideo(was.ytId); });
+        const std::optional<VideoInfo> v = m_db->video(was.id);
+        if (!v)
+            continue;
+        if (v->review) {
+            releaseVideo(was.ytId);
+            rejectJob(was.id, QStringLiteral("its channel is one you denied"));
+            if (!claimVideo(was.ytId))
+                return;
+            continue;
+        }
+        QJsonArray names;
+        for (const TrackInfo &t : m_db->tracksForVideo(v->id))
+            names.append(QJsonObject{{QStringLiteral("trackId"), t.id}, {QStringLiteral("track"), t.title}, {QStringLiteral("album"), t.album}});
+        m_db->removeAbsentTracksOf(v->id);
+        m_db->unlinkAll(v->id);
+        discardVideo(*v);
+        requeued = requeued || !names.isEmpty();
+        qInfo().noquote() << QStringLiteral("[channel] “%1” (%2) is deleted: its channel is one you denied").arg(v->title, v->ytTitle);
+        appendLog({{QStringLiteral("event"), QStringLiteral("denied-video")}, {QStringLiteral("videoId"), v->id},
+                   {QStringLiteral("id"), v->ytId}, {QStringLiteral("title"), v->ytTitle}, {QStringLiteral("channel"), v->ytChannel},
+                   {QStringLiteral("tracks"), names}});
+    }
+    if (requeued)
+        requeuePending();
+}
+
+void ImportManager::unlistChannel(const QString &channelId)
+{
+    m_db->removeChannelList(channelId);
+    qInfo().noquote() << QStringLiteral("[channel] taken off the lists: %1").arg(channelId);
+    appendLog({{QStringLiteral("event"), QStringLiteral("channel")}, {QStringLiteral("list"), QStringLiteral("none")},
+               {QStringLiteral("channelId"), channelId}});
+    emit channelListsChanged();
 }
 
 bool ImportManager::settleShared(qint64 videoId, const ImportSettings &cfg)
@@ -1491,7 +1696,7 @@ bool ImportManager::dropOutdatedOptions(const TrackInfo &track)
     bool dropped = false;
     for (const VideoInfo &was : m_db->candidacies(track)) {
         QString why = Matcher::lengthMismatch(track, was.duration);
-        if (why.isEmpty() && smallChannel(was, cfg) == Small::Yes)
+        if (why.isEmpty() && smallChannel(was.ytChannelSubs, was.ytChannelVerified, m_db->channelAllowed(was.ytChannelId), cfg))
             why = smallChannelReason(was.ytChannelSubs, cfg);
         if (why.isEmpty())
             continue;
@@ -2514,6 +2719,20 @@ void ImportManager::runJob(qint64 trackId, const ImportSettings &cfg)
     auto usable = [&](const YtCandidate &c) {
         return c.rejectReason.isEmpty() && (c.trusted || cfg.allowUnofficial);
     };
+    // On sight. Whose channel an upload is on: the artist's by its name, by
+    // MusicBrainz or because the user allowed it; and the track's own video
+    // counts as on it where the user accepted that upload. An upload from a
+    // channel the user denied is dropped.
+    const auto rankAll = [&] {
+        Matcher::rank(track, candidates, [&](const YtCandidate &c) {
+            return (prior && prior->vouched && c.id == prior->ytId)
+                || ArtistChannels::isArtistChannel(*m_db, Matcher::artistNames(track), c.channelId, c.channel);
+        });
+        for (YtCandidate &c : candidates) {
+            if (c.rejectReason.isEmpty() && m_db->channelDenied(c.channelId))
+                c.rejectReason = QStringLiteral("from a channel you denied");
+        }
+    };
     for (const QString &query : Matcher::searchQueries(track)) {
         QVector<YtCandidate> found;
         ++nSearch;
@@ -2539,9 +2758,7 @@ void ImportManager::runJob(qint64 trackId, const ImportSettings &cfg)
                 c.rank += 2; // results of fallback queries rank slightly lower
             candidates.append(c);
         }
-        Matcher::rank(track, candidates, [&](const YtCandidate &c) {
-            return ArtistChannels::isArtistChannel(*m_db, Matcher::artistNames(track), c.channelId, c.channel);
-        });
+        rankAll();
         if (std::any_of(candidates.begin(), candidates.end(), usable))
             break;
     }
@@ -2554,16 +2771,10 @@ void ImportManager::runJob(qint64 trackId, const ImportSettings &cfg)
     // upload's page, once: its channel's id, by which a channel is known as
     // the artist's whatever name the track's tags carry, and how many
     // subscribers the channel has. One request, nothing downloaded.
-    // Once more for the channel's handle, where the library kept a count
-    // that would have the video dropped as a small channel's but no handle,
-    // and an exception is given by handle.
     enum class Page { Known, Postponed, Cancelled };
-    QSet<qint64> pagesAsked; // not twice in a lookup
     const auto knowChannel = [&](VideoInfo &v) {
-        const bool never = v.ytChannelSubs == -2;
-        if ((!never && smallChannel(v, cfg) != Small::HandleNeeded) || pagesAsked.contains(v.id))
+        if (v.ytChannelSubs != -2)
             return Page::Known;
-        pagesAsked.insert(v.id);
         QJsonObject page;
         QString why;
         const int fromCache = yt.cacheHits(), signedIn = yt.accountRequests();
@@ -2573,10 +2784,8 @@ void ImportManager::runJob(qint64 trackId, const ImportSettings &cfg)
                 return Page::Cancelled;
             if (YtDlp::looksUnavailable(why)) {
                 // Gone from YouTube: there is nothing more to learn of it.
-                if (never) {
-                    v.ytChannelSubs = -1;
-                    m_db->updateVideoChannel(v);
-                }
+                v.ytChannelSubs = -1;
+                m_db->updateVideoChannel(v);
                 return Page::Known;
             }
             // Refused: the lookup waits. Anything else: judged on what is known.
@@ -2606,8 +2815,17 @@ void ImportManager::runJob(qint64 trackId, const ImportSettings &cfg)
     // it up: ranked with the results, by what was kept about it.
     bool beside = false;
     const auto putBeside = [&](const VideoInfo &v) {
-        if (seen.contains(v.ytId))
+        if (seen.contains(v.ytId)) {
+            // Whose channel it is on is what the library kept, where the
+            // search results do not say.
+            for (YtCandidate &c : candidates) {
+                if (c.id == v.ytId && c.channelId.isEmpty() && !v.ytChannelId.isEmpty()) {
+                    c.channelId = v.ytChannelId;
+                    beside = true;
+                }
+            }
             return;
+        }
         YtCandidate c;
         c.id = v.ytId;
         c.title = v.ytTitle;
@@ -2638,11 +2856,8 @@ void ImportManager::runJob(qint64 trackId, const ImportSettings &cfg)
             putBeside(v);
         }
     }
-    if (beside) {
-        Matcher::rank(track, candidates, [&](const YtCandidate &c) {
-            return ArtistChannels::isArtistChannel(*m_db, Matcher::artistNames(track), c.channelId, c.channel);
-        });
-    }
+    if (beside)
+        rankAll();
     QVector<YtCandidate> shortlisted;
     QSet<QString> shortlist;
     QStringList reasons; // why no candidate was taken, for the track's message
@@ -2794,19 +3009,23 @@ void ImportManager::runJob(qint64 trackId, const ImportSettings &cfg)
                 if (page == Page::Postponed)
                     return postpone();
             }
-            if (smallChannel(*existing, cfg) == Small::Yes) {
-                const QString small = smallChannelReason(existing->ytChannelSubs, cfg);
+            // A channel the user denied (known by now, where the library had
+            // not kept its id when it was denied), or a small one.
+            const bool denied = m_db->channelDenied(existing->ytChannelId);
+            if (denied || smallChannel(existing->ytChannelSubs, existing->ytChannelVerified, m_db->channelAllowed(existing->ytChannelId), cfg)) {
+                const QString small = denied ? QStringLiteral("its channel is one you denied") : smallChannelReason(existing->ytChannelSubs, cfg);
+                const QString result = denied ? QStringLiteral("denied-channel") : QStringLiteral("small-channel");
                 anyChecked = true;
                 if (theTracks) {
                     priorRejected = true;
                     priorReason = small;
-                    checked(c, QStringLiteral("small-channel"), QStringLiteral("the track's video until now; by today's rules %1").arg(small));
+                    checked(c, result, QStringLiteral("the track's video until now; by today's rules %1").arg(small));
                 } else if (candidateOf) {
                     // The track is no longer a candidate of it; with none left it goes.
                     m_db->removeCandidate(existing->id, track);
                     held.remove(existing->id);
                     const bool last = m_db->candidateCount(existing->id) == 0;
-                    checked(c, QStringLiteral("small-channel"), QStringLiteral("the track was a candidate of it; %1").arg(small));
+                    checked(c, result, QStringLiteral("the track was a candidate of it; %1").arg(small));
                     appendLog({{QStringLiteral("event"), QStringLiteral("outdated-option")}, {QStringLiteral("videoId"), existing->id},
                                {QStringLiteral("id"), existing->ytId}, {QStringLiteral("title"), existing->ytTitle},
                                {QStringLiteral("channel"), existing->ytChannel}, {QStringLiteral("reason"), small},
@@ -2816,9 +3035,10 @@ void ImportManager::runJob(qint64 trackId, const ImportSettings &cfg)
                     else
                         emit videoChanged(existing->id);
                 } else {
-                    checked(c, QStringLiteral("small-channel"), QStringLiteral("already in the library; %1").arg(small));
+                    checked(c, result, QStringLiteral("already in the library; %1").arg(small));
                 }
-                reasons << QStringLiteral("“%1” is from a small channel (%2 subscribers)").arg(c.title).arg(existing->ytChannelSubs);
+                reasons << (denied ? QStringLiteral("“%1” is from a channel you denied").arg(c.title)
+                                   : QStringLiteral("“%1” is from a small channel (%2 subscribers)").arg(c.title).arg(existing->ytChannelSubs));
                 continue;
             }
             if (theTracks) {
@@ -2847,7 +3067,9 @@ void ImportManager::runJob(qint64 trackId, const ImportSettings &cfg)
                     turnDown(QStringLiteral("different"), mismatchReason(ar));
                     continue;
                 }
-                const bool knownChannel = ArtistChannels::isArtistChannel(*m_db, Matcher::artistNames(track), c.channelId, c.channel);
+                // (An upload the user accepted counts as on the artist's channel.)
+                const bool knownChannel = existing->vouched
+                    || ArtistChannels::isArtistChannel(*m_db, Matcher::artistNames(track), c.channelId, c.channel);
                 const bool artistChannel = c.ownChannel || knownChannel;
                 const double ytQuality = storedYoutubeQuality(*existing);
                 const bool forReview = cfg.replaceAudio && libraryIsBetter(track, ytQuality)
@@ -3132,8 +3354,16 @@ void ImportManager::runJob(qint64 trackId, const ImportSettings &cfg)
             continue;
         }
         const YtDlp::Channel channel = YtDlp::channelOf(info, c.channel);
-        if (smallChannel(channel.subscribers, channel.verified || c.verified, c.channelId.isEmpty() ? channel.id : c.channelId,
-                         channel.handle, cfg) == Small::Yes) {
+        const QString channelId = c.channelId.isEmpty() ? channel.id : c.channelId;
+        if (m_db->channelDenied(channelId)) {
+            // (The search results did not say whose upload it is.)
+            anyChecked = true;
+            checked(c, QStringLiteral("denied-channel"), QStringLiteral("its channel is one you denied"));
+            reasons << QStringLiteral("“%1” is from a channel you denied").arg(c.title);
+            QDir(dir).removeRecursively();
+            continue;
+        }
+        if (smallChannel(channel.subscribers, channel.verified || c.verified, m_db->channelAllowed(channelId), cfg)) {
             anyChecked = true;
             checked(c, QStringLiteral("small-channel"), smallChannelReason(channel.subscribers, cfg), nullptr,
                     {{QStringLiteral("subscribers"), channel.subscribers}});
@@ -3166,7 +3396,8 @@ void ImportManager::runJob(qint64 trackId, const ImportSettings &cfg)
         // taken, for review, when no candidate fits outright. (A lossy file
         // may still be the lesser one next to the account's audio.)
         bool forReview = false;
-        const bool knownChannel = ArtistChannels::isArtistChannel(*m_db, Matcher::artistNames(track), c.channelId, c.channel);
+        // (By the channel's id as the upload's page has it, where the search results gave none.)
+        const bool knownChannel = ArtistChannels::isArtistChannel(*m_db, Matcher::artistNames(track), channelId, c.channel);
         const bool artistChannel = c.ownChannel || knownChannel;
         if (cfg.replaceAudio && libraryIsBetter(track, youtubeQuality(info))
             && !ownRecording(ar, track, c.title, c.channel, artistChannel, knownChannel)) {

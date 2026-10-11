@@ -34,6 +34,8 @@ Item {
     signal activated()
     signal approved()
     signal rejected()
+    signal allowChannelRequested()
+    signal denyChannelRequested()
 
     readonly property bool hovered: mouse.containsMouse
 
@@ -199,7 +201,10 @@ Item {
         sameTitle: root.sameTitle
         orphan: !root.review
         canDelete: root.canDelete
+        videoId: root.videoId
         onApproved: root.approved()
         onRejected: root.rejected()
+        onAllowChannelRequested: root.allowChannelRequested()
+        onDenyChannelRequested: root.denyChannelRequested()
     }
 }

@@ -60,9 +60,9 @@ class AppController : public QObject
     // ignored while ignoreSmallChannels is on; the limit stays when it is off.
     Q_PROPERTY(bool ignoreSmallChannels READ ignoreSmallChannels WRITE setIgnoreSmallChannels NOTIFY settingsChanged)
     Q_PROPERTY(int minSubscribers READ minSubscribers WRITE setMinSubscribers NOTIFY settingsChanged)
-    // The channels that are never ignored as small: "@name, @other". Typed
-    // as handles, ids or the addresses of their pages; shown as understood.
-    Q_PROPERTY(QString smallChannelExceptions READ smallChannelExceptions WRITE setSmallChannelExceptions NOTIFY settingsChanged)
+    // The channels the user allowed and denied: {id, name, handle, list}
+    // each, list "allow" or "deny".
+    Q_PROPERTY(QVariantList listedChannels READ listedChannels NOTIFY channelListsChanged)
     // Subtitles: the languages fetched with each video ("en, ja"; empty for
     // none), and whether the player shows them.
     Q_PROPERTY(QString subtitleLangs READ subtitleLangs WRITE setSubtitleLangs NOTIFY settingsChanged)
@@ -139,6 +139,19 @@ public:
     // its candidate track on show; rejected, of none of them.
     Q_INVOKABLE void approveVideo(qint64 videoId);
     Q_INVOKABLE void rejectVideo(qint64 videoId);
+    // Allowing or denying the channel of a video under review. Offered
+    // where the channel is not an artist's already for the candidate
+    // showing and the library kept its id: {offered, id, name, handle}.
+    Q_INVOKABLE QVariantMap channelActions(qint64 videoId) const;
+    // What allowing (or denying) that channel would change: {id, name,
+    // handle, allow, videos: [{videoId, ytTitle, thumb, review, tracks}]}.
+    // Allowing: every video under review from it; which of them would be
+    // accepted is found out by listening and arrives with channelJudged,
+    // then channelPreviewDone. Denying: every video the library has from it.
+    Q_INVOKABLE QVariantMap channelChange(qint64 videoId, bool allow);
+    Q_INVOKABLE void cancelChannelChange();
+    Q_INVOKABLE void applyChannelChange(const QString &channelId, bool allow);
+    Q_INVOKABLE void unlistChannel(const QString &channelId);
     // The candidate tracks of a video under review, the tracks whose video
     // it could be, in the order they are shown: each {trackId, title, artist,
     // album, length, stream, audioDetail, elsewhere}. stream: which audio
@@ -170,8 +183,7 @@ public:
     bool skipStillImages() const { return m_cfg.skipStillImages; }
     bool ignoreSmallChannels() const { return m_ignoreSmallChannels; }
     int minSubscribers() const { return m_minSubscribers; }
-    QString smallChannelExceptions() const { return m_cfg.smallChannelExceptions.join(QStringLiteral(", ")); }
-    void setSmallChannelExceptions(const QString &channels);
+    QVariantList listedChannels() const;
     QString subtitleLangs() const { return m_cfg.subtitleLangs.join(QStringLiteral(", ")); }
     void setSubtitleLangs(const QString &langs);
     bool subtitlesOn() const { return m_subtitlesOn; }
@@ -264,6 +276,9 @@ public:
     void shutdown();
 
 signals:
+    void channelListsChanged();
+    void channelJudged(qint64 videoId, bool accept, const QString &track, const QString &reason);
+    void channelPreviewDone();
     // What the videos under review have as candidates, or show of them, changed.
     void candidatesChanged();
     void facetsChanged();
@@ -293,6 +308,7 @@ private:
     QVector<TrackInfo> sourceTracks(const VideoInfo &v) const;
     void updateShown(const VideoInfo &v);
     QHash<qint64, qint64> m_shownKey; // video under review -> its candidate track on show (Database::trackKey)
+    int m_channelTicket = 0;          // the preview of a channel change that is on show; 0: none
 
     AppOptions m_options;
     std::unique_ptr<QSettings> m_settings;
