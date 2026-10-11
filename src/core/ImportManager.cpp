@@ -174,9 +174,6 @@ bool shortCut(const AudioAlign::Result &r)
     return r.trackSec > 0 && r.videoSec < kShortCut * r.trackSec;
 }
 
-constexpr double kTakeoverShare = 0.90;  // of the newcomer, against YouTube's audio
-constexpr double kTakeoverMargin = 0.08; // by which the holder has to fall short of it
-
 double waveformShare(const AudioAlign::Result &r)
 {
     return r.goodSec / qMax(1.0, std::min(r.trackSec, r.videoSec));
@@ -215,13 +212,7 @@ QString interruptedReason(const AudioAlign::Result &r)
 // and for tags and uploads in different scripts).
 //
 // All of that but whose channel it is and how much of the song the video
-// has: the track is the recording in the upload. That, or being the same
-// recording as the track whose audio the video carries (kSameTrack), is
-// what lets a track share a video with other tracks — one waiting for
-// review through another track, or one other tracks have. The song by its
-// fingerprints is not enough for that: the Japanese track joined the review
-// of the English version's video, lost its own video to it, and was given
-// the English one with the verdict meant for that track.
+// has: the track is the recording in the upload.
 bool sameRecordingAs(const AudioAlign::Result &r, const TrackInfo &track, const QString &videoTitle, const QString &channel,
                      bool artistChannel, bool knownChannel)
 {
@@ -237,13 +228,6 @@ bool ownRecording(const AudioAlign::Result &r, const TrackInfo &track, const QSt
 {
     return artistChannel && !shortCut(r) && sameRecordingAs(r, track, videoTitle, channel, artistChannel, knownChannel);
 }
-
-// Two tracks that are one recording on two releases (a single and its album
-// cut, a title in the original script and romanised) are the same waveform
-// when laid against each other: 95-100% on a real library. The same song in
-// another language over the same backing showed 63-88%, a live take against
-// the studio one 68%, another singer nothing at all.
-constexpr double kSameTrack = 0.90;
 
 // What a candidate that is not taken as the track's recording lacks.
 QString unconfirmedReason(const AudioAlign::Result &r, const TrackInfo &track, const QString &videoTitle, const QString &channel,
@@ -330,6 +314,47 @@ bool libraryIsBetter(const TrackInfo &track, double youtubeQuality)
     return trackQuality(track) > youtubeQuality * 1.15;
 }
 
+// "Ignore small channels": an upload from a channel with fewer subscribers
+// than the limit is not a track's video, unless YouTube marks the channel as
+// verified (an artist's own can be a small one). A count that is not known is
+// no reason: the channel hides it, or the upload is listed under several
+// channels and the page gives none to go by (see YtDlp::channelOf).
+//
+// Nor is a channel the user lists as an exception, by its handle or by its
+// id. Where an exception is given by handle and the library kept a count but
+// no handle (a page read before handles were kept), it is not known whether
+// the channel is one: HandleNeeded, which is no reason either until the page
+// has been read again.
+enum class Small { No, Yes, HandleNeeded };
+
+Small smallChannel(qint64 subscribers, bool verified, const QString &channelId, const QString &handle, const ImportSettings &cfg)
+{
+    if (cfg.minSubscribers <= 0 || subscribers < 0 || subscribers >= cfg.minSubscribers || verified)
+        return Small::No;
+    bool byHandle = false;
+    for (const QString &e : cfg.smallChannelExceptions) {
+        if (!e.startsWith(QLatin1Char('@'))) {
+            if (!channelId.isEmpty() && e == channelId)
+                return Small::No;
+            continue;
+        }
+        byHandle = true;
+        if (e == handle.toLower())
+            return Small::No;
+    }
+    return byHandle && handle.isNull() ? Small::HandleNeeded : Small::Yes;
+}
+
+Small smallChannel(const VideoInfo &v, const ImportSettings &cfg)
+{
+    return smallChannel(v.ytChannelSubs, v.ytChannelVerified, v.ytChannelId, v.ytChannelHandle, cfg);
+}
+
+QString smallChannelReason(qint64 subscribers, const ImportSettings &cfg)
+{
+    return QStringLiteral("its channel has %1 subscribers, under the limit of %2").arg(subscribers).arg(cfg.minSubscribers);
+}
+
 // Quality of the YouTube audio an existing video was built from (Opus).
 double storedYoutubeQuality(const VideoInfo &v)
 {
@@ -346,6 +371,7 @@ ImportManager::ImportManager(Database *db, QObject *parent)
     m_scanPool.setMaxThreadCount(1);
     m_auditPool.setMaxThreadCount(1);
     m_replacePool.setMaxThreadCount(1);
+    m_verdictPool.setMaxThreadCount(1);
     m_jobPool.setMaxThreadCount(2);
 
     m_debounce.setSingleShot(true);
@@ -404,6 +430,7 @@ void ImportManager::start()
     const ImportSettings cfg = settings();
     m_cancel = false;
     m_started = true;
+    m_settledOnce = false;
 
     // Leftovers from a previous run that was interrupted: scratch files, and
     // half-written outputs if the process was killed outright mid-mux.
@@ -437,6 +464,7 @@ void ImportManager::stop()
     m_auditPool.waitForDone();
     m_jobPool.waitForDone();
     m_replacePool.waitForDone();
+    m_verdictPool.waitForDone();
     m_replacing = false;
     m_pending.clear();
     m_active = 0;
@@ -553,7 +581,7 @@ void ImportManager::appendLog(const QJsonObject &entry)
 }
 
 bool ImportManager::putLibraryAudioIn(const VideoInfo &video, const TrackInfo &track, const AudioAlign::Result &align,
-                                      const ImportSettings &cfg, QString *error, bool review, int ytAudioStream)
+                                      const ImportSettings &cfg, QString *error, bool review)
 {
     const QString workDir = QDir(dataDir(cfg.mvDir)).filePath(QStringLiteral("tmp/audio-%1").arg(video.id));
     QDir(workDir).removeRecursively();
@@ -564,7 +592,7 @@ bool ImportManager::putLibraryAudioIn(const VideoInfo &video, const TrackInfo &t
     Muxer::Plan plan;
     plan.videoFile = video.path;
     plan.ytAudioFile = video.path;
-    plan.ytAudioStream = ytAudioStream;
+    plan.ytAudioStream = video.ytStream;
     plan.workDir = workDir;
     plan.outFile = video.path;
     plan.track = track;
@@ -582,7 +610,7 @@ bool ImportManager::putLibraryAudioIn(const VideoInfo &video, const TrackInfo &t
     v.review = review;
     v.reviewStart = span.start;
     v.reviewEnd = span.end;
-    v.reviewGroup = review ? v.id : 0;
+    v.ytStream = 1;
     m_db->updateVideoMedia(v);
     qInfo().noquote() << (review ? QStringLiteral("[audio] “%1” (%2) could not be confirmed as the track's recording: it waits for your review")
                                        .arg(video.title, video.ytTitle)
@@ -591,58 +619,201 @@ bool ImportManager::putLibraryAudioIn(const VideoInfo &video, const TrackInfo &t
     return true;
 }
 
-void ImportManager::approveVideo(qint64 videoId)
+void ImportManager::discardVideo(const VideoInfo &v)
+{
+    m_db->removeVideo(v.id);
+    removeVideoFiles(v);
+    // An artist folder left empty goes too; never the MV folder itself.
+    const QString root = QDir(settings().mvDir).absolutePath();
+    const QString dir = QFileInfo(v.path).absolutePath();
+    if (dir != root && dir.startsWith(root + QLatin1Char('/')))
+        QDir().rmdir(dir);
+    emit videoRemoved(v.id);
+}
+
+void ImportManager::requeuePending()
+{
+    QMetaObject::invokeMethod(this, [this] {
+        if (!m_started)
+            return;
+        for (const TrackInfo &t : m_db->pendingRecordings())
+            enqueue(t.id);
+        pump();
+    }, Qt::QueuedConnection);
+}
+
+QVector<Database::Candidate> ImportManager::candidatesInOrder(Database *db, const VideoInfo &video)
+{
+    QVector<Database::Candidate> all = db->candidates(video.id);
+    if (all.size() < 2)
+        return all;
+    // The upload's title says whose it is where it carries one candidate's
+    // title and no other's ("Twelve (English Ver.)" against 「十二」).
+    int named = -1, count = 0;
+    for (int i = 0; i < all.size(); ++i) {
+        if (Matcher::namesTitle(all[i].track, video.ytTitle)) {
+            named = i;
+            ++count;
+        }
+    }
+    if (count == 1)
+        all.move(named, 0);
+    // The rest, or all of them, by how close each is to the upload.
+    std::stable_sort(all.begin() + (count == 1 ? 1 : 0), all.end(),
+                     [](const Database::Candidate &a, const Database::Candidate &b) { return a.fit > b.fit; });
+    return all;
+}
+
+void ImportManager::withdraw(const TrackInfo &track, const QVector<VideoInfo> &from)
+{
+    for (const VideoInfo &was : from) {
+        if (!claimVideo(was.ytId))
+            return; // cancelled
+        const auto release = qScopeGuard([&] { releaseVideo(was.ytId); });
+        const std::optional<VideoInfo> v = m_db->video(was.id);
+        if (!v || !v->review)
+            continue;
+        m_db->removeCandidate(v->id, track);
+        const bool last = m_db->candidateCount(v->id) == 0;
+        appendLog({{QStringLiteral("event"), QStringLiteral("withdrawn")}, {QStringLiteral("videoId"), v->id},
+                   {QStringLiteral("id"), v->ytId}, {QStringLiteral("title"), v->ytTitle},
+                   {QStringLiteral("trackId"), track.id}, {QStringLiteral("track"), track.title},
+                   {QStringLiteral("album"), track.album}, {QStringLiteral("deleted"), last}});
+        if (last) {
+            qInfo().noquote() << QStringLiteral("[review] “%1” leaves the queue: “%2” [%3] was its only candidate")
+                                     .arg(v->ytTitle, track.title, track.album);
+            discardVideo(*v);
+        } else {
+            emit videoChanged(v->id);
+        }
+    }
+}
+
+void ImportManager::releaseCandidates(qint64 videoId, const QVector<Database::Candidate> &were, const TrackInfo *keeper, const QString &why)
+{
+    // (As one write: a track is not seen waiting for review with nothing to wait on.)
+    const Database::Transaction atOnce(m_db);
+    m_db->clearCandidates(videoId);
+    for (const Database::Candidate &c : were) {
+        if (keeper && Database::trackKey(c.track) == Database::trackKey(*keeper))
+            continue;
+        // One that is queued for a lookup keeps its turn; one that has a
+        // video by now is settled.
+        const std::optional<TrackInfo> now = m_db->track(c.track.id);
+        if (now && now->state == QLatin1String("review") && m_db->candidacies(*now).isEmpty())
+            m_db->setTrackResult(now->id, QStringLiteral("not_found"), 0, why);
+    }
+}
+
+bool ImportManager::addCandidate(const VideoInfo &video, const TrackInfo &track, const AudioAlign::Result &align,
+                                 const ImportSettings &cfg, QString *error)
+{
+    int stream = 0;
+    QString detail;
+    if (cfg.replaceAudio && libraryIsBetter(track, storedYoutubeQuality(video))) {
+        const AudioAlign::Result placed = placedWhole(align);
+        if (placed.byOffset) {
+            const QString workDir = QDir(dataDir(cfg.mvDir)).filePath(QStringLiteral("tmp/audio-%1").arg(video.id));
+            QDir(workDir).removeRecursively();
+            QDir().mkpath(workDir);
+            const auto cleanup = qScopeGuard([&] { QDir(workDir).removeRecursively(); });
+            Muxer::Plan plan;
+            plan.videoFile = video.path;
+            plan.ytAudioFile = video.path;
+            plan.ytAudioStream = video.ytStream;
+            plan.workDir = workDir;
+            plan.outFile = video.path;
+            plan.track = track;
+            plan.ytId = video.ytId;
+            plan.align = placed;
+            plan.replaceAudio = true;
+            if (!Muxer::addLibraryStream(plan, &m_cancel, &detail, error))
+                return false;
+            VideoInfo v = video;
+            stream = video.ytStream + 1;
+            v.ytStream = video.ytStream + 1;
+            if (video.ytStream == 0) {
+                v.audioSource = QStringLiteral("library");
+                v.audioDetail = detail;
+            }
+            m_db->updateVideoMedia(v);
+        }
+    }
+    // (A fit of nothing at all still counts as measured.)
+    m_db->addCandidate(video.id, track, stream, qMax(align.likeness, 1e-6), detail);
+    emit videoChanged(video.id);
+    return true;
+}
+
+bool ImportManager::measureCandidates(qint64 videoId, const ImportSettings &cfg)
 {
     std::optional<VideoInfo> v = m_db->video(videoId);
     if (!v || !v->review)
-        return;
-    // The user says this is the track's video: its channel is the artist's,
-    // for every artist of the tracks that waited for it.
-    for (const TrackInfo &t : m_db->tracksForVideo(videoId)) {
-        for (const QString &artist : Matcher::artistNames(t))
-            m_db->addArtistChannel(artist.trimmed(), v->ytChannelId, v->ytChannelId.isEmpty() ? v->ytChannel : QString(), QStringLiteral("approved"));
-    }
-    // The other options have served their purpose.
-    const qint64 group = v->reviewGroup > 0 ? v->reviewGroup : v->id;
-    for (const VideoInfo &other : m_db->reviewOptions(group)) {
-        if (other.id == videoId)
+        return false;
+    if (!claimVideo(v->ytId))
+        return false;
+    const auto release = qScopeGuard([&, id = v->ytId] { releaseVideo(id); });
+    v = m_db->video(videoId);
+    if (!v || !v->review)
+        return false;
+    std::vector<int16_t> ytPcm;
+    QString error;
+    bool decoded = false;
+    for (const Database::Candidate &c : m_db->candidates(videoId)) {
+        if (c.fit > 0 && (c.stream > 0 || !(cfg.replaceAudio && libraryIsBetter(c.track, storedYoutubeQuality(*v)))))
             continue;
-        m_db->relinkTracks(other.id, videoId);
-        m_db->removeVideo(other.id);
-        removeVideoFiles(other);
-        emit videoRemoved(other.id);
-    }
-    v->review = false;
-    v->reviewGroup = 0;
-    m_db->updateVideoMedia(*v);
-    // Whatever its tracks were still looking for, they have their video.
-    for (const TrackInfo &t : m_db->tracksForVideo(videoId)) {
-        if (t.state != QLatin1String("done"))
-            m_db->setTrackResult(t.id, QStringLiteral("done"), videoId, QStringLiteral("you accepted “%1”").arg(v->ytTitle));
-    }
-    qInfo().noquote() << QStringLiteral("[review] accepted “%1” (%2)").arg(v->title, v->ytTitle);
-    {
-        QJsonArray tracks;
-        for (const TrackInfo &t : m_db->tracksForVideo(videoId))
-            tracks.append(QJsonObject{{QStringLiteral("trackId"), t.id}, {QStringLiteral("track"), t.title}, {QStringLiteral("album"), t.album}});
-        appendLog({{QStringLiteral("event"), QStringLiteral("verdict")}, {QStringLiteral("verdict"), QStringLiteral("accept")},
-                   {QStringLiteral("videoId"), videoId}, {QStringLiteral("id"), v->ytId}, {QStringLiteral("title"), v->ytTitle},
-                   {QStringLiteral("tracks"), tracks}});
+        if (!decoded && !AudioAlign::decodeMono(v->path, &ytPcm, &m_cancel, &error, v->ytStream))
+            return false;
+        decoded = true;
+        std::vector<int16_t> trackPcm;
+        if (!AudioAlign::decodeMono(c.track.path, &trackPcm, &m_cancel, &error)) {
+            if (m_cancel)
+                return false;
+            continue;
+        }
+        const AudioAlign::Result ar = fitted(AudioAlign::align(trackPcm, ytPcm), c.track, v->ytTitle, v->ytChannel);
+        if (m_cancel)
+            return false;
+        if (c.stream > 0) {
+            m_db->addCandidate(videoId, c.track, c.stream, qMax(ar.likeness, 1e-6), c.audioDetail);
+        } else if (!addCandidate(*v, c.track, ar, cfg, &error)) {
+            if (!m_cancel)
+                qWarning().noquote() << "[review] could not give" << v->ytTitle << "the audio of" << c.track.title << ":" << error;
+            return false;
+        }
+        v = m_db->video(videoId); // (its streams may have changed)
+        if (!v)
+            return false;
     }
     emit videoChanged(videoId);
-    // A video from when review had a stream of its own (alternating between
-    // the two) loses it; the track's audio becomes the default.
+    return true;
+}
+
+void ImportManager::prepareCandidates(const ImportSettings &cfg)
+{
+    // Only where there is something to tell apart: a video with one
+    // candidate is that track's to accept, whatever it measures.
+    for (const VideoInfo &v : m_db->allVideos()) {
+        if (m_cancel)
+            return;
+        if (!v.review)
+            continue;
+        const QVector<Database::Candidate> all = m_db->candidates(v.id);
+        if (all.size() < 2 || std::none_of(all.begin(), all.end(), [](const Database::Candidate &c) { return c.fit <= 0; }))
+            continue;
+        measureCandidates(v.id, cfg);
+    }
+}
+
+void ImportManager::approveVideo(qint64 videoId, qint64 trackId)
+{
     ++m_reviewJobs;
     emit activityChanged();
-    const QString path = v->path;
-    m_auditPool.start([this, path] {
-        QString error;
-        if (!Muxer::dropReviewStream(path, &m_cancel, &error) && !m_cancel)
-            qWarning().noquote() << "[review] could not tidy up" << path << ":" << error;
+    const ImportSettings cfg = settings();
+    m_verdictPool.start([this, videoId, trackId, cfg] {
+        approveJob(videoId, trackId, cfg);
         --m_reviewJobs;
         QMetaObject::invokeMethod(this, [this] {
-            if (!m_started)
-                return;
             emit activityChanged();
             pump();
         }, Qt::QueuedConnection);
@@ -651,41 +822,258 @@ void ImportManager::approveVideo(qint64 videoId)
 
 void ImportManager::rejectVideo(qint64 videoId)
 {
-    const std::optional<VideoInfo> v = m_db->video(videoId);
+    ++m_reviewJobs;
+    emit activityChanged();
+    m_verdictPool.start([this, videoId] {
+        rejectJob(videoId);
+        --m_reviewJobs;
+        QMetaObject::invokeMethod(this, [this] {
+            emit activityChanged();
+            pump();
+        }, Qt::QueuedConnection);
+    });
+}
+
+void ImportManager::approveJob(qint64 videoId, qint64 trackId, const ImportSettings &cfg)
+{
+    std::optional<VideoInfo> v = m_db->video(videoId);
     if (!v || !v->review)
         return;
-    const qint64 group = v->reviewGroup > 0 ? v->reviewGroup : v->id;
-    QVector<VideoInfo> others;
-    QVector<TrackInfo> tracks;
-    for (const VideoInfo &option : m_db->reviewOptions(group)) {
-        tracks += m_db->tracksForVideo(option.id);
-        if (option.id != videoId)
-            others << option;
+    const QString ytId = v->ytId;
+    if (!claimVideo(ytId))
+        return;
+    bool holding = true;
+    const auto release = qScopeGuard([&] {
+        if (holding)
+            releaseVideo(ytId);
+    });
+    v = m_db->video(videoId);
+    if (!v || !v->review)
+        return;
+
+    // Whose video it is: the candidate named, or the one shown first.
+    QVector<Database::Candidate> candidates = candidatesInOrder(m_db, *v);
+    const std::optional<TrackInfo> named = trackId > 0 ? m_db->track(trackId) : std::nullopt;
+    int mine = candidates.isEmpty() ? -1 : 0;
+    if (trackId > 0) {
+        mine = -1;
+        for (int i = 0; named && i < candidates.size(); ++i) {
+            if (Database::trackKey(candidates[i].track) == Database::trackKey(*named))
+                mine = i;
+        }
+        if (mine < 0)
+            return; // not a candidate of it (any more)
     }
-    // This upload is not offered for these tracks again. While other options
-    // remain the tracks keep waiting on those; otherwise they have no video.
-    for (const TrackInfo &t : std::as_const(tracks))
-        m_db->rejectVideoFor(t, v->ytId);
-    if (!others.isEmpty()) {
-        m_db->relinkTracks(videoId, others.first().id);
-    } else {
-        const QString why = QStringLiteral("you turned down “%1”").arg(v->ytTitle);
-        for (const TrackInfo &t : std::as_const(tracks))
-            m_db->setTrackResult(t.id, QStringLiteral("not_found"), 0, why);
+
+    if (mine >= 0) {
+        // A candidate from before review went by video may be the better
+        // audio without having its audio in the file yet.
+        if (candidates[mine].stream <= 0 && cfg.replaceAudio && libraryIsBetter(candidates[mine].track, storedYoutubeQuality(*v))) {
+            const qint64 key = Database::trackKey(candidates[mine].track);
+            releaseVideo(ytId);
+            holding = false;
+            measureCandidates(videoId, cfg);
+            if (m_cancel || !claimVideo(ytId))
+                return;
+            holding = true;
+            v = m_db->video(videoId);
+            if (!v || !v->review)
+                return;
+            candidates = m_db->candidates(videoId);
+            mine = -1;
+            for (int i = 0; i < candidates.size(); ++i) {
+                if (Database::trackKey(candidates[i].track) == key)
+                    mine = i;
+            }
+            if (mine < 0)
+                return;
+        }
+        const Database::Candidate &c = candidates[mine];
+        // The file keeps this track's audio and YouTube's, and no other
+        // candidate's.
+        QString error;
+        if (!Muxer::keepAudio(v->path, c.stream - 1, v->ytStream, c.track, ytId, &m_cancel, &error)) {
+            if (!m_cancel)
+                qWarning().noquote() << "[review] could not accept" << v->ytTitle << ":" << error;
+            return;
+        }
+        v->title = c.track.title;
+        v->artist = c.track.artist;
+        v->albumArtist = c.track.albumArtist;
+        v->album = c.track.album;
+        v->genre = c.track.genre;
+        v->year = c.track.year;
+        v->trackNo = c.track.trackNo;
+        v->tags = c.track.tags;
+        m_db->updateVideoTags(*v);
+        if (c.stream > 0) {
+            v->audioSource = QStringLiteral("library");
+            if (!c.audioDetail.isEmpty())
+                v->audioDetail = c.audioDetail;
+            v->ytStream = 1;
+        } else {
+            v->audioSource = QStringLiteral("youtube");
+            v->audioDetail = QStringLiteral("YouTube");
+            v->ytStream = 0;
+        }
     }
-    m_db->removeVideo(videoId);
-    removeVideoFiles(*v);
+    v->review = false;
+    m_db->updateVideoMedia(*v);
+    QJsonArray others;
+    for (int i = 0; i < candidates.size(); ++i) {
+        if (i != mine) {
+            others.append(QJsonObject{{QStringLiteral("trackId"), candidates[i].track.id}, {QStringLiteral("track"), candidates[i].track.title},
+                                      {QStringLiteral("album"), candidates[i].track.album}});
+        }
+    }
+    QJsonArray tracks;
+    std::optional<TrackInfo> keeper;
+    if (mine >= 0) {
+        keeper = candidates[mine].track;
+        m_db->setTrackResult(keeper->id, QStringLiteral("done"), videoId, QStringLiteral("you accepted “%1”").arg(v->ytTitle));
+        // The user says this is the track's video: its channel is the
+        // artist's, for the artists of that track.
+        for (const QString &artist : Matcher::artistNames(*keeper))
+            m_db->addArtistChannel(artist.trimmed(), v->ytChannelId, v->ytChannelId.isEmpty() ? v->ytChannel : QString(), QStringLiteral("approved"));
+        tracks.append(QJsonObject{{QStringLiteral("trackId"), keeper->id}, {QStringLiteral("track"), keeper->title}, {QStringLiteral("album"), keeper->album}});
+    }
+    releaseCandidates(videoId, candidates, keeper ? &*keeper : nullptr,
+                      keeper ? QStringLiteral("you accepted “%1” for “%2” [%3]").arg(v->ytTitle, keeper->title, keeper->album)
+                             : QStringLiteral("you accepted “%1”").arg(v->ytTitle));
+    qInfo().noquote() << QStringLiteral("[review] accepted “%1” (%2)").arg(v->title, v->ytTitle);
+    appendLog({{QStringLiteral("event"), QStringLiteral("verdict")}, {QStringLiteral("verdict"), QStringLiteral("accept")},
+               {QStringLiteral("videoId"), videoId}, {QStringLiteral("id"), v->ytId}, {QStringLiteral("title"), v->ytTitle},
+               {QStringLiteral("tracks"), tracks}, {QStringLiteral("otherCandidates"), others}});
+    emit videoChanged(videoId);
+    // The track has its video: it is a candidate of nothing else.
+    releaseVideo(ytId);
+    holding = false;
+    if (keeper)
+        withdraw(*keeper, m_db->candidacies(*keeper));
+}
+
+void ImportManager::rejectJob(qint64 videoId)
+{
+    std::optional<VideoInfo> v = m_db->video(videoId);
+    if (!v || !v->review)
+        return;
+    const QString ytId = v->ytId;
+    if (!claimVideo(ytId))
+        return;
+    const auto release = qScopeGuard([&] { releaseVideo(ytId); });
+    v = m_db->video(videoId);
+    if (!v || !v->review)
+        return;
+    // This upload is not offered to any of its candidates again. Each waits
+    // on what else it is a candidate of; with nothing, it has no video.
+    const QVector<Database::Candidate> candidates = m_db->candidates(videoId);
+    QJsonArray names;
+    for (const Database::Candidate &c : candidates) {
+        m_db->rejectVideoFor(c.track, v->ytId);
+        names.append(QJsonObject{{QStringLiteral("trackId"), c.track.id}, {QStringLiteral("track"), c.track.title}, {QStringLiteral("album"), c.track.album}});
+    }
+    releaseCandidates(videoId, candidates, nullptr, QStringLiteral("you turned down “%1”").arg(v->ytTitle));
+    discardVideo(*v);
     qInfo().noquote() << QStringLiteral("[review] rejected “%1” (%2)").arg(v->title, v->ytTitle);
-    {
-        QJsonArray names;
-        for (const TrackInfo &t : std::as_const(tracks))
-            names.append(QJsonObject{{QStringLiteral("trackId"), t.id}, {QStringLiteral("track"), t.title}, {QStringLiteral("album"), t.album}});
-        appendLog({{QStringLiteral("event"), QStringLiteral("verdict")}, {QStringLiteral("verdict"), QStringLiteral("reject")},
-                   {QStringLiteral("videoId"), videoId}, {QStringLiteral("id"), v->ytId}, {QStringLiteral("title"), v->ytTitle},
-                   {QStringLiteral("optionsLeft"), others.size()}, {QStringLiteral("tracks"), names}});
+    appendLog({{QStringLiteral("event"), QStringLiteral("verdict")}, {QStringLiteral("verdict"), QStringLiteral("reject")},
+               {QStringLiteral("videoId"), videoId}, {QStringLiteral("id"), v->ytId}, {QStringLiteral("title"), v->ytTitle},
+               {QStringLiteral("tracks"), names}});
+}
+
+bool ImportManager::settleShared(qint64 videoId, const ImportSettings &cfg)
+{
+    std::optional<VideoInfo> v = m_db->video(videoId);
+    if (!v || v->review)
+        return false;
+    const auto recordings = [this](qint64 id) {
+        QHash<qint64, TrackInfo> best; // one file per recording: its best
+        for (const TrackInfo &t : m_db->tracksForVideo(id)) {
+            const auto it = best.find(Database::trackKey(t));
+            if (it == best.end())
+                best.insert(Database::trackKey(t), t);
+            else if (betterSource(t, *it))
+                *it = t;
+        }
+        return best;
+    };
+    if (recordings(videoId).size() < 2)
+        return false;
+    if (!claimVideo(v->ytId))
+        return false;
+    const auto release = qScopeGuard([&, id = v->ytId] { releaseVideo(id); });
+    v = m_db->video(videoId);
+    const QHash<qint64, TrackInfo> holders = recordings(videoId);
+    if (!v || v->review || holders.size() < 2)
+        return false;
+
+    // Each against the upload's own audio, which the file keeps.
+    std::vector<int16_t> ytPcm;
+    QString error;
+    if (!AudioAlign::decodeMono(v->path, &ytPcm, &m_cancel, &error, v->ytStream)) {
+        if (!m_cancel)
+            qWarning().noquote() << "[import] cannot settle whose" << v->ytTitle << "is:" << error;
+        return false;
     }
-    emit videoRemoved(videoId);
-    emit activityChanged();
+    std::optional<TrackInfo> keeper;
+    AudioAlign::Result keeperAlign;
+    QJsonArray measured;
+    QList<TrackInfo> order = holders.values();
+    std::sort(order.begin(), order.end(), [](const TrackInfo &a, const TrackInfo &b) { return a.id < b.id; });
+    for (const TrackInfo &t : std::as_const(order)) {
+        std::vector<int16_t> pcm;
+        AudioAlign::Result ar;
+        if (AudioAlign::decodeMono(t.path, &pcm, &m_cancel, &error))
+            ar = fitted(AudioAlign::align(pcm, ytPcm), t, v->ytTitle, v->ytChannel);
+        if (m_cancel)
+            return false;
+        measured.append(QJsonObject{{QStringLiteral("trackId"), t.id}, {QStringLiteral("track"), t.title}, {QStringLiteral("album"), t.album},
+                                    {QStringLiteral("fit"), std::round(ar.likeness * 1000) / 1000}});
+        if (!keeper || ar.likeness > keeperAlign.likeness) {
+            keeper = t;
+            keeperAlign = ar;
+        }
+    }
+    // The video plays its track's audio, or YouTube's: whichever of the
+    // tracks had theirs in it until now.
+    const bool own = cfg.replaceAudio && libraryIsBetter(*keeper, storedYoutubeQuality(*v)) && audioMatches(keeperAlign) && audioReplaceable(keeperAlign);
+    if (own) {
+        if (!putLibraryAudioIn(*v, *keeper, keeperAlign, cfg, &error))
+            return false;
+    } else if (v->audioSource == QLatin1String("library")) {
+        if (!Muxer::keepAudio(v->path, -1, v->ytStream, *keeper, v->ytId, &m_cancel, &error))
+            return false;
+        v->audioSource = QStringLiteral("youtube");
+        v->audioDetail = QStringLiteral("YouTube");
+        v->ytStream = 0;
+        m_db->updateVideoMedia(*v);
+    }
+    if (auto now = m_db->video(videoId)) {
+        now->title = keeper->title;
+        now->artist = keeper->artist;
+        now->albumArtist = keeper->albumArtist;
+        now->album = keeper->album;
+        now->genre = keeper->genre;
+        now->year = keeper->year;
+        now->trackNo = keeper->trackNo;
+        now->tags = keeper->tags;
+        m_db->updateVideoTags(*now);
+    }
+    QStringList names;
+    for (const TrackInfo &t : m_db->unlinkOthers(videoId, *keeper)) {
+        // They are looked up as tracks without a video.
+        m_db->setTrackReimport(t.id);
+        const QString name = QStringLiteral("“%1” [%2]").arg(t.title, t.album);
+        if (!names.contains(name))
+            names << name;
+    }
+    qInfo().noquote() << QStringLiteral("[import] “%1” is the video of “%2” [%3] alone now, the closest fit to it (%4%); back in the queue: %5")
+                             .arg(v->ytTitle, keeper->title, keeper->album).arg(100 * keeperAlign.likeness, 0, 'f', 1).arg(names.join(QStringLiteral(", ")));
+    appendLog({{QStringLiteral("event"), QStringLiteral("shared-settled")}, {QStringLiteral("videoId"), videoId},
+               {QStringLiteral("id"), v->ytId}, {QStringLiteral("title"), v->ytTitle},
+               {QStringLiteral("keeps"), keeper->id}, {QStringLiteral("measured"), measured}});
+    emit videoChanged(videoId);
+    requeuePending();
+    return true;
 }
 
 void ImportManager::checkQuality()
@@ -730,34 +1118,29 @@ bool ImportManager::dropBrokenVideos(const TrackInfo &track)
     // leave the file empty. Such a video has nothing a re-import could judge
     // and nothing to watch: it leaves the library, and its upload is found
     // and brought in again like any other.
-    const std::optional<VideoInfo> own = track.videoId > 0 ? m_db->video(track.videoId) : std::nullopt;
-    if (!own)
-        return false;
-    const QVector<VideoInfo> videos = own->review ? m_db->reviewOptions(own->reviewGroup > 0 ? own->reviewGroup : own->id)
-                                                  : QVector<VideoInfo>{*own};
-    QVector<VideoInfo> intact, broken;
-    for (const VideoInfo &v : videos)
-        (QFileInfo(v.path).size() > 0 ? intact : broken).append(v);
+    QVector<VideoInfo> videos = m_db->candidacies(track);
+    if (const std::optional<VideoInfo> own = track.videoId > 0 ? m_db->video(track.videoId) : std::nullopt)
+        videos << *own;
     QVector<qint64> orphaned;
     bool dropped = false;
-    for (const VideoInfo &v : std::as_const(broken)) {
+    for (const VideoInfo &v : std::as_const(videos)) {
+        if (QFileInfo(v.path).size() > 0)
+            continue;
         if (!claimVideo(v.ytId))
             break; // cancelled
         const bool missing = !QFile::exists(v.path);
-        const QVector<TrackInfo> holders = m_db->tracksForVideo(v.id);
-        // Its tracks keep the options that are left; with none left they
-        // have no video (the database unlinks them).
-        if (!intact.isEmpty())
-            m_db->relinkTracks(v.id, intact.first().id);
+        // Whoever else had it, or was a candidate of it, looks again.
+        QVector<TrackInfo> others = m_db->tracksForVideo(v.id);
+        for (const Database::Candidate &c : m_db->candidates(v.id))
+            others << c.track;
         m_db->removeVideo(v.id);
         removeVideoFiles(v);
         releaseVideo(v.ytId);
         dropped = true;
-        if (intact.isEmpty()) {
-            for (const TrackInfo &t : holders) {
-                if (t.id != track.id && (track.recording <= 0 || t.recording != track.recording))
-                    orphaned << t.id;
-            }
+        for (const TrackInfo &t : std::as_const(others)) {
+            if (Database::trackKey(t) != Database::trackKey(track) && !orphaned.contains(t.id)
+                && (!v.review || m_db->candidacies(t).isEmpty()))
+                orphaned << t.id;
         }
         qInfo().noquote() << QStringLiteral("[import] “%1” [%2]: deleted “%3”, whose file is %4")
                                  .arg(track.title, track.album, v.ytTitle, missing ? QStringLiteral("missing") : QStringLiteral("empty"));
@@ -768,16 +1151,9 @@ bool ImportManager::dropBrokenVideos(const TrackInfo &track)
         emit videoRemoved(v.id);
     }
     if (!orphaned.isEmpty()) {
-        // Other tracks that had only this video look for one again.
         for (qint64 id : std::as_const(orphaned))
             m_db->setTrackReimport(id);
-        QMetaObject::invokeMethod(this, [this] {
-            if (!m_started)
-                return;
-            for (const TrackInfo &t : m_db->pendingRecordings())
-                enqueue(t.id);
-            pump();
-        }, Qt::QueuedConnection);
+        requeuePending();
     }
     return dropped;
 }
@@ -1076,6 +1452,7 @@ QString ImportManager::upgradeVideo(const VideoInfo &video, const ImportSettings
         v.vcodec = pr.vcodec;
     }
     v.audioSource = plan.replaceAudio ? QStringLiteral("library") : QStringLiteral("youtube");
+    v.ytStream = plan.replaceAudio ? 1 : 0;
     v.audioDetail = audioDetail;
     v.ytAbr = YtDlp::audioKbps(audioInfo);
     m_db->updateVideoMedia(v);
@@ -1103,81 +1480,43 @@ void ImportManager::retryUnmatched()
 
 bool ImportManager::dropOutdatedOptions(const TrackInfo &track)
 {
-    // An option brought in for review under earlier rules, which today's
-    // would not examine: an upload under half the track's length, the
-    // opening of a show against the whole song. It was only ever there to
-    // be judged, and the rule has judged it. Several tracks can wait on the
-    // same options (a single and its album cut): one that still fits any of
-    // them stays.
-    const std::optional<VideoInfo> own = track.videoId > 0 ? m_db->video(track.videoId) : std::nullopt;
-    if (!own || !own->review)
-        return false;
-    const QVector<VideoInfo> options = m_db->reviewOptions(own->reviewGroup > 0 ? own->reviewGroup : own->id);
-    QVector<TrackInfo> waiting;
-    for (const VideoInfo &o : options)
-        waiting += m_db->tracksForVideo(o.id);
-    if (waiting.isEmpty())
-        return false;
-    QVector<VideoInfo> kept, outdated;
-    QHash<qint64, QString> reasons;
-    for (const VideoInfo &o : options) {
-        QString why;
-        for (const TrackInfo &t : std::as_const(waiting)) {
-            why = Matcher::lengthMismatch(t, o.duration);
-            if (why.isEmpty())
-                break;
-        }
-        if (why.isEmpty()) {
-            kept.append(o);
-        } else {
-            outdated.append(o);
-            reasons.insert(o.id, why);
-        }
-    }
+    // A video brought in for review under earlier rules, which today's
+    // would not examine for this track: an upload under half the track's
+    // length, the opening of a show against the whole song. It was only ever
+    // there to be judged, and the rule has judged it. Its other candidates
+    // keep it; with none left it goes.
+    // Likewise one from a small channel, by what the library kept of its
+    // channel.
+    const ImportSettings cfg = settings();
     bool dropped = false;
-    for (const VideoInfo &v : std::as_const(outdated)) {
-        if (!claimVideo(v.ytId))
-            break; // cancelled
-        // (Another track of the group may have been here meanwhile.)
-        if (!m_db->video(v.id)) {
-            releaseVideo(v.ytId);
+    for (const VideoInfo &was : m_db->candidacies(track)) {
+        QString why = Matcher::lengthMismatch(track, was.duration);
+        if (why.isEmpty() && smallChannel(was, cfg) == Small::Yes)
+            why = smallChannelReason(was.ytChannelSubs, cfg);
+        if (why.isEmpty())
             continue;
-        }
-        // Its tracks keep the options that are left; with none left they
-        // have no video (the database unlinks them) and look for one.
-        if (!kept.isEmpty())
-            m_db->relinkTracks(v.id, kept.first().id);
-        m_db->removeVideo(v.id);
-        removeVideoFiles(v);
-        const QString root = QDir(settings().mvDir).absolutePath();
-        const QString dir = QFileInfo(v.path).absolutePath();
-        if (dir != root && dir.startsWith(root + QLatin1Char('/')))
-            QDir().rmdir(dir);
-        releaseVideo(v.ytId);
+        if (!claimVideo(was.ytId))
+            break; // cancelled
+        const auto release = qScopeGuard([&] { releaseVideo(was.ytId); });
+        const std::optional<VideoInfo> v = m_db->video(was.id);
+        if (!v || !v->review)
+            continue;
+        m_db->removeCandidate(v->id, track);
+        const bool last = m_db->candidateCount(v->id) == 0;
         dropped = true;
-        qInfo().noquote() << QStringLiteral("[import] “%1” [%2]: let go of “%3”, which waited for review: %4 (%5 of %6)")
-                                 .arg(track.title, track.album, v.ytTitle, reasons.value(v.id), formatDuration(v.duration),
-                                      formatDuration(track.duration));
-        appendLog({{QStringLiteral("event"), QStringLiteral("outdated-option")}, {QStringLiteral("videoId"), v.id},
-                   {QStringLiteral("id"), v.ytId}, {QStringLiteral("title"), v.ytTitle}, {QStringLiteral("channel"), v.ytChannel},
-                   {QStringLiteral("duration"), qRound(v.duration)}, {QStringLiteral("reason"), reasons.value(v.id)},
+        qInfo().noquote() << QStringLiteral("[import] “%1” [%2]: no longer a candidate of “%3”, which waits for review: %4")
+                                 .arg(track.title, track.album, v->ytTitle,
+                                      why.startsWith(QLatin1String("its channel")) ? why
+                                          : QStringLiteral("%1 (%2 of %3)").arg(why, formatDuration(v->duration), formatDuration(track.duration)));
+        appendLog({{QStringLiteral("event"), QStringLiteral("outdated-option")}, {QStringLiteral("videoId"), v->id},
+                   {QStringLiteral("id"), v->ytId}, {QStringLiteral("title"), v->ytTitle}, {QStringLiteral("channel"), v->ytChannel},
+                   {QStringLiteral("duration"), qRound(v->duration)}, {QStringLiteral("reason"), why},
                    {QStringLiteral("trackId"), track.id}, {QStringLiteral("track"), track.title},
-                   {QStringLiteral("trackDuration"), qRound(track.duration)}});
-        emit videoRemoved(v.id);
-    }
-    if (dropped && kept.isEmpty()) {
-        // The other tracks that waited on them look for a video again too.
-        for (const TrackInfo &t : std::as_const(waiting)) {
-            if (t.id != track.id && (track.recording <= 0 || t.recording != track.recording))
-                m_db->setTrackReimport(t.id);
-        }
-        QMetaObject::invokeMethod(this, [this] {
-            if (!m_started)
-                return;
-            for (const TrackInfo &t : m_db->pendingRecordings())
-                enqueue(t.id);
-            pump();
-        }, Qt::QueuedConnection);
+                   {QStringLiteral("trackDuration"), qRound(track.duration)}, {QStringLiteral("deleted"), last}});
+        if (last)
+            discardVideo(*v);
+        else
+            emit videoChanged(v->id);
     }
     return dropped;
 }
@@ -1207,12 +1546,16 @@ int ImportManager::reimport(const QVector<qint64> &trackIds)
         return 0;
     // What the rules settle without asking YouTube is settled now: a lookup
     // may have to wait out a pause.
-    m_jobPool.start([this, marked] {
+    const ImportSettings cfg = settings();
+    m_jobPool.start([this, marked, cfg] {
         for (qint64 id : marked) {
             if (m_cancel)
                 break;
-            if (const std::optional<TrackInfo> t = m_db->track(id))
+            if (const std::optional<TrackInfo> t = m_db->track(id)) {
                 dropOutdatedOptions(*t);
+                if (t->videoId > 0)
+                    settleShared(t->videoId, cfg);
+            }
         }
     });
     for (const TrackInfo &t : m_db->pendingRecordings())
@@ -1228,13 +1571,12 @@ int ImportManager::reimport(const QVector<qint64> &trackIds)
 
 std::optional<TrackInfo> ImportManager::replaceTrack(const VideoInfo &video)
 {
-    QVector<TrackInfo> tracks;
+    // Of a video under review: the candidate shown first.
     if (video.review) {
-        for (const VideoInfo &option : m_db->reviewOptions(video.reviewGroup > 0 ? video.reviewGroup : video.id))
-            tracks += m_db->tracksForVideo(option.id);
-    } else {
-        tracks = m_db->tracksForVideo(video.id);
+        const QVector<Database::Candidate> candidates = candidatesInOrder(m_db, video);
+        return candidates.isEmpty() ? std::nullopt : std::optional<TrackInfo>(candidates.first().track);
     }
+    QVector<TrackInfo> tracks = m_db->tracksForVideo(video.id);
     if (tracks.isEmpty())
         return std::nullopt;
     std::sort(tracks.begin(), tracks.end(), betterSource);
@@ -1537,45 +1879,55 @@ void ImportManager::replaceWithJob(const VideoInfo &video, const TrackInfo &trac
         emit jobChanged(st);
     };
 
-    // The video the user named, if it is in the library already: the
-    // tracks go over to it, nothing is fetched.
-    QVector<VideoInfo> old;
-    if (video.review) {
-        old = m_db->reviewOptions(video.reviewGroup > 0 ? video.reviewGroup : video.id);
-    } else {
-        old << video;
-    }
+    // The upload the user chose is the track's video, accepted. The video
+    // the track had goes; and the track is no longer a candidate of any
+    // video under review (one left without a candidate goes too). A track
+    // that had the chosen video until now looks for another.
     auto takeOver = [&](qint64 newId, const QString &newTitle) {
-        for (const VideoInfo &o : std::as_const(old)) {
-            if (o.id == newId)
-                continue;
-            m_db->relinkTracks(o.id, newId);
-            m_db->removeVideo(o.id);
-            removeVideoFiles(o);
-            emit videoRemoved(o.id);
-        }
-        m_db->setTrackResult(track.id, QStringLiteral("done"), newId, QStringLiteral("you chose “%1”").arg(newTitle));
-        for (const TrackInfo &t : m_db->tracksForVideo(newId)) {
-            if (t.state != QLatin1String("done"))
-                m_db->setTrackResult(t.id, QStringLiteral("done"), newId, QStringLiteral("you chose “%1”").arg(newTitle));
-        }
         QJsonArray gone;
-        for (const VideoInfo &o : std::as_const(old))
-            gone.append(QJsonObject{{QStringLiteral("videoId"), o.id}, {QStringLiteral("id"), o.ytId}, {QStringLiteral("title"), o.ytTitle}});
+        if (!video.review && video.id != newId) {
+            m_db->removeVideo(video.id);
+            removeVideoFiles(video);
+            emit videoRemoved(video.id);
+            gone.append(QJsonObject{{QStringLiteral("videoId"), video.id}, {QStringLiteral("id"), video.ytId}, {QStringLiteral("title"), video.ytTitle}});
+        }
+        const bool requeue = !m_db->unlinkOthers(newId, track).isEmpty();
+        m_db->setTrackResult(track.id, QStringLiteral("done"), newId, QStringLiteral("you chose “%1”").arg(newTitle));
+        const QVector<VideoInfo> was = m_db->candidacies(track);
+        for (const VideoInfo &o : was) {
+            if (o.id != newId)
+                gone.append(QJsonObject{{QStringLiteral("videoId"), o.id}, {QStringLiteral("id"), o.ytId}, {QStringLiteral("title"), o.ytTitle}});
+        }
+        withdraw(track, was);
         appendLog({{QStringLiteral("event"), QStringLiteral("replace")}, {QStringLiteral("trackId"), track.id},
                    {QStringLiteral("track"), track.title}, {QStringLiteral("artist"), track.artist}, {QStringLiteral("album"), track.album},
                    {QStringLiteral("videoId"), newId}, {QStringLiteral("id"), ytId}, {QStringLiteral("title"), newTitle},
                    {QStringLiteral("replaced"), gone}});
+        if (requeue)
+            requeuePending();
     };
     if (const auto there = m_db->videoByYtId(ytId)) {
+        // In the library already: nothing is fetched.
         if (there->review) {
-            // An option waiting for review: it is the verdict.
-            VideoInfo v = *there;
-            v.review = false;
-            v.reviewGroup = 0;
-            m_db->updateVideoMedia(v);
+            // A video waiting for review: this is the verdict, for this track.
+            const QVector<Database::Candidate> candidates = m_db->candidates(there->id);
+            if (std::none_of(candidates.begin(), candidates.end(), [&](const Database::Candidate &c) {
+                    return Database::trackKey(c.track) == Database::trackKey(track); }))
+                m_db->addCandidate(there->id, track, 0, 0, QString());
+            approveJob(there->id, track.id, cfg);
+            const std::optional<TrackInfo> now = m_db->track(track.id);
+            if (!now || now->videoId != there->id) {
+                finish(false, QStringLiteral("“%1” could not be made the track's video").arg(there->ytTitle));
+                return;
+            }
+            if (!video.review && video.id != there->id) {
+                m_db->removeVideo(video.id);
+                removeVideoFiles(video);
+                emit videoRemoved(video.id);
+            }
+        } else {
+            takeOver(there->id, there->ytTitle);
         }
-        takeOver(there->id, there->ytTitle);
         emit videoChanged(there->id);
         finish(true, QStringLiteral("now “%1”, which was in the library already").arg(there->ytTitle));
         return;
@@ -1708,11 +2060,16 @@ void ImportManager::replaceWithJob(const VideoInfo &video, const TrackInfo &trac
     v.fps = pr.fps;
     v.vcodec = pr.vcodec;
     v.audioSource = plan.replaceAudio ? QStringLiteral("library") : QStringLiteral("youtube");
+    v.ytStream = plan.replaceAudio ? 1 : 0;
     v.audioDetail = audioDetail;
     v.ytAbr = YtDlp::audioKbps(ytInfo);
     v.ytTitle = title;
     v.ytChannel = channel;
     v.ytChannelId = ytInfo.value(QLatin1String("channel_id")).toString();
+    const YtDlp::Channel channelFacts = YtDlp::channelOf(ytInfo);
+    v.ytChannelSubs = channelFacts.subscribers;
+    v.ytChannelVerified = channelFacts.verified;
+    v.ytChannelHandle = channelFacts.handle;
     v.tags = track.tags;
     v.addedAt = QDateTime::currentSecsSinceEpoch();
     const qint64 newId = m_db->insertVideo(v);
@@ -1729,9 +2086,12 @@ void ImportManager::replaceWithJob(const VideoInfo &video, const TrackInfo &trac
 
 int ImportManager::reimportVideo(qint64 videoId)
 {
+    // The track that has it; or, of a video under review, its candidates.
     QVector<qint64> ids;
     for (const TrackInfo &t : m_db->tracksForVideo(videoId))
         ids << t.id;
+    for (const Database::Candidate &c : m_db->candidates(videoId))
+        ids << c.track.id;
     return reimport(ids);
 }
 
@@ -1761,11 +2121,47 @@ void ImportManager::onScanFinished(const LibraryScanner::Result &r)
         if (!add.isEmpty())
             m_watcher.addPaths(add);
 
+        // The review queue in step with the library: files that turned out
+        // to be one recording bring a video and candidacies together.
+        for (qint64 id : m_db->dropCandidaciesOfTracksWithVideos()) {
+            const std::optional<VideoInfo> v = m_db->video(id);
+            if (v && v->review && m_db->candidateCount(id) == 0)
+                discardVideo(*v);
+            else if (v)
+                emit videoChanged(id);
+        }
+        m_db->requeueTracksWithoutCandidacies();
         m_db->requeueUntriedTitles();
         for (const TrackInfo &t : m_db->pendingRecordings())
             enqueue(t.id);
         for (qint64 id : r.videosChanged)
             emit videoChanged(id);
+        if (!m_settledOnce) {
+            m_settledOnce = true;
+            // A library from before a video had one track: the videos that
+            // several tracks have are settled by a re-import of those tracks.
+            QVector<qint64> sharers;
+            for (qint64 id : m_db->sharedVideoIds()) {
+                for (const TrackInfo &t : m_db->tracksForVideo(id))
+                    sharers << t.id;
+            }
+            if (!sharers.isEmpty()) {
+                qInfo("[import] videos that several tracks have, from before one track, one video: their tracks are looked up again");
+                reimport(sharers);
+            }
+            // And one from before review went by video: its candidates are
+            // measured, and each given its audio in the file.
+            ++m_reviewJobs;
+            const ImportSettings cfg = settings();
+            m_auditPool.start([this, cfg] {
+                prepareCandidates(cfg);
+                --m_reviewJobs;
+                QMetaObject::invokeMethod(this, [this] {
+                    emit activityChanged();
+                    pump();
+                }, Qt::QueuedConnection);
+            });
+        }
     }
     if (r.unsettled)
         m_debounce.start();
@@ -1848,30 +2244,36 @@ void ImportManager::runJob(qint64 trackId, const ImportSettings &cfg)
         return;
     if (m_blocked)
         return; // stays pending; picked up again when the pause ends
-    if (maybe->reimport && (dropBrokenVideos(*maybe) | dropOutdatedOptions(*maybe))) {
-        maybe = m_db->track(trackId);
-        if (!maybe)
-            return;
+    if (maybe->reimport) {
+        // What a re-import settles before anything is judged. (Also done
+        // when it is asked for; a lookup may get here first.) A video that
+        // several tracks have goes to the closest fit of them: this track
+        // may be left without one, and is then looked up as such.
+        bool settled = dropBrokenVideos(*maybe) | dropOutdatedOptions(*maybe);
+        if (maybe->videoId > 0 && !m_cancel)
+            settled |= settleShared(maybe->videoId, cfg);
+        if (settled) {
+            maybe = m_db->track(trackId);
+            if (!maybe || maybe->state != QLatin1String("pending") || maybe->absent)
+                return;
+        }
     }
     const TrackInfo track = *maybe;
 
     QElapsedTimer clock;
     clock.start();
-    int nSearch = 0, nAudio = 0, nPreview = 0, nVideo = 0, nSubs = 0;
+    int nSearch = 0, nAudio = 0, nPreview = 0, nVideo = 0, nSubs = 0, nPage = 0;
     const YtDlp *ytForLog = nullptr;
     QJsonArray logQueries, logCandidates, logChecked;
-    qint64 heldVideoForLog = 0;
-    bool joinedReview = false; // linked to a video that waits for review through another track
     std::optional<VideoInfo> prior; // re-import: the video the track had going in (set below)
-    QString priorFate;              // and what became of it: kept | review | replaced | removed | released | unjudged
+    QString priorFate;              // and what became of it: kept | review | removed | released | unjudged
     QJsonArray logVideos; // what was brought into the library
     auto writeLog = [&](const QString &outcome, const QString &message) {
-        // accept: the track has its video. review: it has videos waiting for
-        // the user. reject: none of what was found is its video.
-        const bool reviewing = std::any_of(logVideos.begin(), logVideos.end(), [](const QJsonValue &v) {
-            return v.toObject().value(QLatin1String("review")).toBool();
-        });
-        const QString decision = outcome == QLatin1String("done") ? (reviewing || heldVideoForLog > 0 || joinedReview ? QStringLiteral("review") : QStringLiteral("accept"))
+        // accept: the track has its video. review: it is a candidate of
+        // videos waiting for the user. reject: none of what was found is
+        // its video.
+        const QString decision = outcome == QLatin1String("done") ? QStringLiteral("accept")
+            : outcome == QLatin1String("review") ? QStringLiteral("review")
             : outcome == QLatin1String("not_found") ? QStringLiteral("reject")
             : outcome == QLatin1String("skipped") ? QStringLiteral("skipped")
             : QStringLiteral("undecided");
@@ -1898,7 +2300,7 @@ void ImportManager::runJob(qint64 trackId, const ImportSettings &cfg)
             {QStringLiteral("videos"), logVideos},
             {QStringLiteral("seconds"), qRound(clock.elapsed() / 100.0) / 10.0},
             {QStringLiteral("requests"), QJsonObject{{QStringLiteral("search"), nSearch}, {QStringLiteral("audio"), nAudio},
-                                                      {QStringLiteral("preview"), nPreview}, {QStringLiteral("video"), nVideo}, {QStringLiteral("subtitles"), nSubs}, {QStringLiteral("fromCache"), ytForLog ? ytForLog->cacheHits() : 0}}},
+                                                      {QStringLiteral("preview"), nPreview}, {QStringLiteral("video"), nVideo}, {QStringLiteral("subtitles"), nSubs}, {QStringLiteral("page"), nPage}, {QStringLiteral("fromCache"), ytForLog ? ytForLog->cacheHits() : 0}}},
             {QStringLiteral("queries"), logQueries},
             {QStringLiteral("candidates"), logCandidates},
             {QStringLiteral("checked"), logChecked},
@@ -1909,9 +2311,9 @@ void ImportManager::runJob(qint64 trackId, const ImportSettings &cfg)
     auto checked = [&](const YtCandidate &c, const QString &result, const QString &reason,
                        const AudioAlign::Result *ar = nullptr, const QJsonObject &more = {}) {
         static const QHash<QString, QString> decisions = {
-            {QStringLiteral("match"), QStringLiteral("accept")}, {QStringLiteral("shared"), QStringLiteral("accept")},
+            {QStringLiteral("match"), QStringLiteral("accept")}, {QStringLiteral("takeover"), QStringLiteral("accept")},
             {QStringLiteral("unconfirmed"), QStringLiteral("review")}, {QStringLiteral("option"), QStringLiteral("review")},
-            {QStringLiteral("shared-review"), QStringLiteral("review")},
+            {QStringLiteral("candidate"), QStringLiteral("review")},
             {QStringLiteral("error"), QStringLiteral("undecided")},
         };
         QJsonObject o{
@@ -1945,43 +2347,47 @@ void ImportManager::runJob(qint64 trackId, const ImportSettings &cfg)
     const QString workDir = QDir(dataDir(cfg.mvDir)).filePath(QStringLiteral("tmp/job-%1").arg(trackId));
     auto cleanup = [&] { QDir(workDir).removeRecursively(); };
 
-    // The options this track already has waiting, from an earlier look.
-    qint64 heldGroup = 0;
-    qint64 heldVideo = 0;
-    if (track.videoId > 0) {
-        if (const auto held = m_db->video(track.videoId); held && held->review) {
-            heldVideo = held->id;
-            heldVideoForLog = held->id;
-            heldGroup = held->reviewGroup > 0 ? held->reviewGroup : held->id;
-        }
-    }
+    // The videos under review this track is a candidate of already, from an
+    // earlier look.
+    QSet<qint64> held;
+    for (const VideoInfo &v : m_db->candidacies(track))
+        held.insert(v.id);
 
-    // Re-import: the video the track has (accepted, not one waiting for
-    // review) is judged by today's rules like any candidate, on the upload's
-    // own audio and picture, which are in its file: nothing is downloaded
-    // for it. What becomes of it is settled with the track's result.
-    if (track.reimport && track.videoId > 0 && heldVideo <= 0) {
+    // Once the track has its video it is a candidate of nothing else: the
+    // videos it leaves are settled when this lookup is over and holds no
+    // video any more (see withdraw).
+    QVector<VideoInfo> leaving;
+    const auto leave = qScopeGuard([&] {
+        if (!m_cancel && !leaving.isEmpty())
+            withdraw(track, leaving);
+    });
+
+    // Re-import: the video the track has is judged by today's rules like any
+    // candidate, on the upload's own audio and picture, which are in its
+    // file: nothing is downloaded for it. What becomes of it is settled with
+    // the track's result.
+    if (track.reimport && track.videoId > 0) {
         prior = m_db->video(track.videoId);
         if (prior && (prior->review || !QFile::exists(prior->path)))
             prior.reset();
     }
     bool priorRejected = false; // today's rules turn it down
     QString priorReason;
-    bool priorKept = false;     // it is the track's video still, accepted or for review
+    bool priorKept = false;     // it is the track's video still, or one it is a candidate of
 
-    // The video the track had is not its video any more. Its file goes
-    // unless other tracks hold it.
+    // The video the track had is not its video any more, and goes. (Not
+    // where a track that has left the music folders has it too.)
     auto dropPrior = [&](const QString &why) {
         bool held = false;
         for (const TrackInfo &o : m_db->tracksForVideo(prior->id, true)) {
-            if (o.id == track.id || (track.recording > 0 && o.recording == track.recording))
+            if (Database::trackKey(o) == Database::trackKey(track))
                 continue;
             held = true;
             break;
         }
         if (held) {
             priorFate = QStringLiteral("released");
-            qInfo().noquote() << QStringLiteral("[import] “%1” [%2] lets go of “%3” (%4), which other tracks keep")
+            qInfo().noquote() << QStringLiteral("[import] “%1” [%2] lets go of “%3” (%4)")
                                      .arg(track.title, track.album, prior->ytTitle, why);
             return;
         }
@@ -1997,129 +2403,34 @@ void ImportManager::runJob(qint64 trackId, const ImportSettings &cfg)
         emit videoRemoved(prior->id);
     };
 
-    // Tracks of other recordings that have this video, or wait on it.
-    auto othersHave = [&](qint64 videoId) {
-        const QVector<TrackInfo> holders = m_db->tracksForVideo(videoId);
-        return std::any_of(holders.begin(), holders.end(), [&track](const TrackInfo &o) {
-            return o.id != track.id && (track.recording <= 0 || o.recording != track.recording);
-        });
-    };
-    auto othersWaitOn = [&](qint64 group) {
-        const QVector<VideoInfo> options = m_db->reviewOptions(group);
-        return std::any_of(options.begin(), options.end(), [&](const VideoInfo &o) { return othersHave(o.id); });
-    };
-    // How much of this track is another track's waveform, laid against each
-    // other: whether the two are one recording (kSameTrack). `heardTrack` is
-    // set once this track has been decoded.
-    const std::vector<int16_t> *heardTrack = nullptr;
-    QHash<qint64, double> likeness;
-    auto sameTrackAs = [&](const TrackInfo &o) {
-        const qint64 key = o.recording > 0 ? o.recording : -o.id;
-        if (const auto known = likeness.constFind(key); known != likeness.constEnd())
-            return *known;
-        std::vector<int16_t> other;
-        QString decodeError;
-        if (!heardTrack || !AudioAlign::decodeMono(o.path, &other, &m_cancel, &decodeError))
-            return 0.0;
-        const double share = waveformShare(AudioAlign::align(*heardTrack, other));
-        likeness.insert(key, share);
-        return share;
-    };
-    // Whether this track shares a video that other tracks have or wait on:
-    // it is the recording in the upload (`upload`: the track laid against
-    // YouTube's audio), or the same recording as one of those tracks.
-    auto sharesVideo = [&](const VideoInfo &v, const AudioAlign::Result &upload, bool artistChannel, bool knownChannel, QString *why) {
-        if (audioMatches(upload) && sameRecordingAs(upload, track, v.ytTitle, v.ytChannel, artistChannel, knownChannel)) {
-            if (why)
-                *why = QStringLiteral("%1% the waveform of the upload").arg(qRound(100 * waveformShare(upload)));
-            return true;
-        }
-        QVector<TrackInfo> theirs;
-        if (v.review) {
-            for (const VideoInfo &o : m_db->reviewOptions(v.reviewGroup > 0 ? v.reviewGroup : v.id))
-                theirs += m_db->tracksForVideo(o.id);
-        } else {
-            theirs = m_db->tracksForVideo(v.id);
-        }
-        double best = 0;
-        QString bestTitle;
-        int heard = 0;
-        for (const TrackInfo &o : std::as_const(theirs)) {
-            if (o.id == track.id || (track.recording > 0 && o.recording == track.recording))
-                continue;
-            if (!likeness.contains(o.recording > 0 ? o.recording : -o.id) && ++heard > 4)
-                break; // (a handful of recordings at most have one video)
-            const double share = sameTrackAs(o);
-            if (share > best || bestTitle.isEmpty()) {
-                best = share;
-                bestTitle = o.title;
-            }
-            if (share >= kSameTrack) {
-                if (why)
-                    *why = QStringLiteral("%1% the waveform of “%2”, which has it").arg(qRound(100 * share)).arg(o.title);
-                return true;
-            }
-        }
-        if (why) {
-            *why = QStringLiteral("%1% the waveform of the upload, %2% that of “%3” (%4% needed)")
-                       .arg(qRound(100 * waveformShare(upload))).arg(qRound(100 * best)).arg(bestTitle).arg(qRound(100 * kSameTrack));
-        }
-        return false;
-    };
-    // The options this track holds are read when its lookup starts, and a
-    // lookup takes minutes. Another one may settle them meanwhile: take one
-    // out of review for its own track, or let them go. The track then holds
-    // what the database says it holds now — a video that is no longer under
-    // review is not an option of its any more, and nothing to put new
-    // options beside or to stay linked to.
-    auto recheckHeld = [&] {
-        if (heldVideo <= 0)
-            return;
-        const std::optional<TrackInfo> now = m_db->track(trackId);
-        const std::optional<VideoInfo> v = now && now->videoId > 0 ? m_db->video(now->videoId) : std::nullopt;
-        if (v && v->review) {
-            heldVideo = v->id;
-            heldGroup = v->reviewGroup > 0 ? v->reviewGroup : v->id;
-        } else {
-            heldVideo = 0;
-            heldGroup = 0;
-        }
-        heldVideoForLog = heldVideo;
-    };
-    // The track has its video another way: it needs the options it held no
-    // longer. Other tracks may still wait on them; with none, they go.
-    auto letGoOfHeld = [&] {
-        recheckHeld();
-        if (heldGroup <= 0)
-            return;
-        if (!othersWaitOn(heldGroup)) {
-            for (const VideoInfo &old : m_db->reviewOptions(heldGroup)) {
-                m_db->removeVideo(old.id);
-                removeVideoFiles(old);
-                emit videoRemoved(old.id);
-            }
-        }
-        heldVideo = 0;
-        heldGroup = 0;
-        heldVideoForLog = 0;
-    };
+    // The track's own sound, for everything that is settled by listening.
+    std::vector<int16_t> trackPcm;
+    bool heardTrack = false;
 
     auto finish = [&](const QString &result, qint64 resultVideo, const QString &resultMessage) {
         cleanup();
         if (m_cancel)
             return; // leave the track pending for the next run
-        // A track that was only looking for more options keeps those it has.
-        if (result != QLatin1String("done"))
-            recheckHeld();
-        const bool keeps = heldVideo > 0 && result != QLatin1String("done");
-        QString outcome = keeps ? QStringLiteral("done") : result;
-        qint64 videoId = keeps ? heldVideo : resultVideo;
-        QString message = keeps ? QStringLiteral("no other video to offer for review") : resultMessage;
+        // A track that today's rules skip waits for nothing: it is no longer
+        // a candidate of any video under review, and one left with none goes
+        // (see withdraw).
+        const bool skipped = result == QLatin1String("skipped");
+        if (skipped)
+            leaving = m_db->candidacies(track);
+        // A lookup that gives the track no video leaves it waiting on the
+        // videos it is a candidate of. (Read now: a lookup takes minutes,
+        // and another one may have settled some of them meanwhile.)
+        const bool waits = result != QLatin1String("done") && result != QLatin1String("review") && !skipped
+            && !m_db->candidacies(track).isEmpty();
+        QString outcome = waits ? QStringLiteral("review") : result;
+        qint64 videoId = waits ? 0 : resultVideo;
+        QString message = waits ? QStringLiteral("no other video to offer for review") : resultMessage;
         bool dropped = false;
         if (prior) {
             if (priorKept) {
                 // Settled where it was brought in: kept, or for review.
-            } else if (outcome == QLatin1String("done") || priorRejected || outcome == QLatin1String("skipped")) {
+            } else if (outcome == QLatin1String("done") || outcome == QLatin1String("review") || priorRejected
+                       || outcome == QLatin1String("skipped")) {
                 // Another video is the track's, or the rules say this one
                 // never was. A lookup that could not finish settles nothing.
                 dropped = true;
@@ -2138,10 +2449,11 @@ void ImportManager::runJob(qint64 trackId, const ImportSettings &cfg)
                       : !priorReason.isEmpty() ? priorReason : message);
         }
         st.finished = true;
-        st.outcome = outcome;
+        st.outcome = outcome == QLatin1String("review") ? QStringLiteral("done") : outcome;
         st.progress = -1;
         st.detail = message;
         st.stage = outcome == QLatin1String("done") ? (track.reimport ? QStringLiteral("Re-imported") : QStringLiteral("Imported"))
+            : outcome == QLatin1String("review") ? QStringLiteral("For your review")
             : outcome == QLatin1String("not_found") ? QStringLiteral("No music video found")
             : outcome == QLatin1String("skipped") ? QStringLiteral("Skipped")
             : QStringLiteral("Failed");
@@ -2237,18 +2549,96 @@ void ImportManager::runJob(qint64 trackId, const ImportSettings &cfg)
         finish(QStringLiteral("failed"), 0, QStringLiteral("search failed: %1").arg(error));
         return;
     }
-    if (prior && !seen.contains(prior->ytId)) {
-        // The track's video is examined whether or not today's search turns
-        // it up: ranked with the results, by what was kept about it.
+    // Re-import: what the library did not keep about a video of the track's
+    // (its own, or one under review it is a candidate of) is read from the
+    // upload's page, once: its channel's id, by which a channel is known as
+    // the artist's whatever name the track's tags carry, and how many
+    // subscribers the channel has. One request, nothing downloaded.
+    // Once more for the channel's handle, where the library kept a count
+    // that would have the video dropped as a small channel's but no handle,
+    // and an exception is given by handle.
+    enum class Page { Known, Postponed, Cancelled };
+    QSet<qint64> pagesAsked; // not twice in a lookup
+    const auto knowChannel = [&](VideoInfo &v) {
+        const bool never = v.ytChannelSubs == -2;
+        if ((!never && smallChannel(v, cfg) != Small::HandleNeeded) || pagesAsked.contains(v.id))
+            return Page::Known;
+        pagesAsked.insert(v.id);
+        QJsonObject page;
+        QString why;
+        const int fromCache = yt.cacheHits(), signedIn = yt.accountRequests();
+        ++nPage;
+        if (!yt.pageInfo(v.ytId, &page, &why)) {
+            if (m_cancel)
+                return Page::Cancelled;
+            if (YtDlp::looksUnavailable(why)) {
+                // Gone from YouTube: there is nothing more to learn of it.
+                if (never) {
+                    v.ytChannelSubs = -1;
+                    m_db->updateVideoChannel(v);
+                }
+                return Page::Known;
+            }
+            // Refused: the lookup waits. Anything else: judged on what is known.
+            return noteFailure(why) ? Page::Postponed : Page::Known;
+        }
+        if (yt.cacheHits() == fromCache && yt.accountRequests() == signedIn)
+            noteSuccess();
+        const YtDlp::Channel channel = YtDlp::channelOf(page, v.ytChannel);
+        if (v.ytChannelId.isEmpty())
+            v.ytChannelId = channel.id;
+        v.ytChannelSubs = channel.subscribers;
+        v.ytChannelVerified = channel.verified;
+        v.ytChannelHandle = channel.handle;
+        m_db->updateVideoChannel(v);
+        return Page::Known;
+    };
+    if (prior) {
+        const Page page = knowChannel(*prior);
+        if (page == Page::Cancelled)
+            return cleanup();
+        if (page == Page::Postponed)
+            return postpone();
+    }
+    // What the search returned: the best four of these are listened to.
+    const QSet<QString> returned = seen;
+    // A video of the track's is examined whether or not today's search turns
+    // it up: ranked with the results, by what was kept about it.
+    bool beside = false;
+    const auto putBeside = [&](const VideoInfo &v) {
+        if (seen.contains(v.ytId))
+            return;
         YtCandidate c;
-        c.id = prior->ytId;
-        c.title = prior->ytTitle;
-        c.channel = prior->ytChannel;
-        c.channelId = prior->ytChannelId;
-        c.duration = prior->duration;
+        c.id = v.ytId;
+        c.title = v.ytTitle;
+        c.channel = v.ytChannel;
+        c.channelId = v.ytChannelId;
+        c.verified = v.ytChannelVerified;
+        c.duration = v.duration;
         c.rank = candidates.size();
         seen.insert(c.id);
         candidates.append(c);
+        beside = true;
+    };
+    if (prior)
+        putBeside(*prior);
+    // Re-import: so is every video under review the track is a candidate
+    // of. What today's search happens to return does not decide whether one
+    // is judged by today's rules.
+    QSet<QString> heldUploads;
+    if (track.reimport) {
+        const QVector<VideoInfo> waiting = m_db->candidacies(track);
+        for (VideoInfo v : waiting) {
+            const Page page = knowChannel(v);
+            if (page == Page::Cancelled)
+                return cleanup();
+            if (page == Page::Postponed)
+                return postpone();
+            heldUploads.insert(v.ytId);
+            putBeside(v);
+        }
+    }
+    if (beside) {
         Matcher::rank(track, candidates, [&](const YtCandidate &c) {
             return ArtistChannels::isArtistChannel(*m_db, Matcher::artistNames(track), c.channelId, c.channel);
         });
@@ -2256,15 +2646,25 @@ void ImportManager::runJob(qint64 trackId, const ImportSettings &cfg)
     QVector<YtCandidate> shortlisted;
     QSet<QString> shortlist;
     QStringList reasons; // why no candidate was taken, for the track's message
+    int best = 0; // usable search results taken
     for (const YtCandidate &c : std::as_const(candidates)) {
         const bool isPrior = prior && c.id == prior->ytId;
-        if (usable(c) && (shortlisted.size() < 4 || isPrior)) {
+        const bool result = returned.contains(c.id) && usable(c) && best < 4;
+        if (result)
+            ++best;
+        // The track's own video is listened to whether it looks official or
+        // not: that picks which search results are worth it, and this one is
+        // in the library already. A video under review the track is a
+        // candidate of is not dropped on sight at all: its length and its
+        // channel's size are what rule one out, and that was done when the
+        // re-import began (dropOutdatedOptions).
+        if (result || heldUploads.contains(c.id) || (isPrior && c.rejectReason.isEmpty())) {
             shortlisted.append(c);
             shortlist.insert(c.id);
         } else if (isPrior) {
             // Dropped on sight, as it would be today: the rules have changed under it.
             priorRejected = true;
-            priorReason = c.rejectReason.isEmpty() ? QStringLiteral("the upload does not look official") : c.rejectReason;
+            priorReason = c.rejectReason;
             checked(c, QStringLiteral("dropped"), QStringLiteral("the track's video until now; by today's rules %1").arg(priorReason));
             reasons << QStringLiteral("“%1”, the track's video until now, %2").arg(c.title, priorReason);
         }
@@ -2272,7 +2672,7 @@ void ImportManager::runJob(qint64 trackId, const ImportSettings &cfg)
                       {QStringLiteral("duration"), qRound(c.duration)}, {QStringLiteral("score"), qRound(c.score)},
                       {QStringLiteral("trusted"), c.trusted},
                       // examined by listening: the best four that look official
-                      {QStringLiteral("shortlisted"), usable(c) && shortlist.contains(c.id)}};
+                      {QStringLiteral("shortlisted"), shortlist.contains(c.id)}};
         if (!c.rejectReason.isEmpty())
             o.insert(QStringLiteral("rejected"), c.rejectReason);
         logCandidates.append(o);
@@ -2285,64 +2685,14 @@ void ImportManager::runJob(qint64 trackId, const ImportSettings &cfg)
             return c.duration <= 0 || c.duration >= 0.6 * track.duration;
         });
     }
-    // The track's own sound, for everything that is settled by listening.
-    std::vector<int16_t> trackPcm;
     const auto hearTrack = [&] {
         if (heardTrack)
             return true;
         if (!AudioAlign::decodeMono(track.path, &trackPcm, &m_cancel, &error))
             return false;
-        heardTrack = &trackPcm;
+        heardTrack = true;
         return true;
     };
-
-    // Re-import: options the track waits on together with other tracks are
-    // its options only where it is their recording (see sameRecordingAs).
-    // One that came to them as the same song lets go of them, and is looked
-    // up as a track without any. The options stay for the other tracks.
-    if (track.reimport && heldGroup > 0 && othersWaitOn(heldGroup)) {
-        if (!hearTrack()) {
-            if (m_cancel)
-                return cleanup();
-            finish(QStringLiteral("failed"), 0, QStringLiteral("cannot decode track: %1").arg(error));
-            return;
-        }
-        bool belongs = false;
-        QStringList whyNot;
-        for (const VideoInfo &o : m_db->reviewOptions(heldGroup)) {
-            std::vector<int16_t> pcm;
-            QString decodeError;
-            // (The second stream of a video under review is YouTube's audio.)
-            if (!AudioAlign::decodeMono(o.path, &pcm, &m_cancel, &decodeError, 1)) {
-                if (m_cancel)
-                    return cleanup();
-                belongs = true; // cannot tell: nothing changes
-                break;
-            }
-            const AudioAlign::Result ar = fitted(AudioAlign::align(trackPcm, pcm), track, o.ytTitle, o.ytChannel);
-            const bool known = ArtistChannels::isArtistChannel(*m_db, Matcher::artistNames(track), o.ytChannelId, o.ytChannel);
-            const bool artists = known || Matcher::isOwnChannel(track, o.ytChannel);
-            QString why;
-            if (sharesVideo(o, ar, artists, known, &why)) {
-                belongs = true;
-                break;
-            }
-            if (m_cancel)
-                return cleanup();
-            whyNot << QStringLiteral("“%1”: %2").arg(o.ytTitle, why);
-        }
-        if (!belongs) {
-            qInfo().noquote() << QStringLiteral("[import] “%1” [%2] no longer waits on the options of other tracks: %3")
-                                     .arg(track.title, track.album, whyNot.join(QStringLiteral("; ")));
-            appendLog({{QStringLiteral("event"), QStringLiteral("left-review")}, {QStringLiteral("trackId"), track.id},
-                       {QStringLiteral("track"), track.title}, {QStringLiteral("album"), track.album},
-                       {QStringLiteral("group"), heldGroup}, {QStringLiteral("reason"), whyNot.join(QStringLiteral("; "))}});
-            m_db->unlinkTrack(track.id);
-            heldVideo = 0;
-            heldGroup = 0;
-            heldVideoForLog = 0;
-        }
-    }
 
     if (shortlisted.isEmpty()) {
         finish(QStringLiteral("not_found"), 0,
@@ -2376,18 +2726,14 @@ void ImportManager::runJob(qint64 trackId, const ImportSettings &cfg)
     QVector<Pick> unconfirmed;
     bool anyChecked = false;
     bool undecided = false; // some candidate could not be examined
-    // A video waiting for review through another track, which this track is
-    // the recording of as well: joined when nothing of its own turns up.
-    std::optional<VideoInfo> joinable;
-    // A video waiting for review through a track of another recording, whose
-    // upload carries this track's title and not that one's, and is neither's
-    // recording by its waveform: the same song under two titles (the
-    // original and its English version), and the first of the two to be
-    // looked up got the other one's video. This track's to wait on, where
-    // nothing fits it outright; that one looks for a video of its own.
-    std::optional<VideoInfo> claimable;
-    AudioAlign::Result claimAlign;
-    QString claimedFrom; // the title of the track that had it, once it is this track's
+    // A video that waits for review with other tracks as its candidates,
+    // which this track is the song of as well: it becomes one more candidate
+    // of it, where nothing fits the track outright.
+    struct Join {
+        VideoInfo video;
+        AudioAlign::Result align; // the track against the upload's own audio
+    };
+    QVector<Join> joins;
 
     // Downloads fail transiently (throttling, expired stream URLs); one more
     // try after a short pause settles most of them.
@@ -2438,14 +2784,49 @@ void ImportManager::runJob(qint64 trackId, const ImportSettings &cfg)
             continue;
         }
 
-        if (const auto existing = m_db->videoByYtId(c.id)) {
-            if (prior && existing->id == prior->id) {
+        if (auto existing = m_db->videoByYtId(c.id)) {
+            const bool theTracks = prior && existing->id == prior->id;
+            const bool candidateOf = existing->review && held.contains(existing->id);
+            if (candidateOf) {
+                const Page page = knowChannel(*existing);
+                if (page == Page::Cancelled)
+                    return cleanup();
+                if (page == Page::Postponed)
+                    return postpone();
+            }
+            if (smallChannel(*existing, cfg) == Small::Yes) {
+                const QString small = smallChannelReason(existing->ytChannelSubs, cfg);
+                anyChecked = true;
+                if (theTracks) {
+                    priorRejected = true;
+                    priorReason = small;
+                    checked(c, QStringLiteral("small-channel"), QStringLiteral("the track's video until now; by today's rules %1").arg(small));
+                } else if (candidateOf) {
+                    // The track is no longer a candidate of it; with none left it goes.
+                    m_db->removeCandidate(existing->id, track);
+                    held.remove(existing->id);
+                    const bool last = m_db->candidateCount(existing->id) == 0;
+                    checked(c, QStringLiteral("small-channel"), QStringLiteral("the track was a candidate of it; %1").arg(small));
+                    appendLog({{QStringLiteral("event"), QStringLiteral("outdated-option")}, {QStringLiteral("videoId"), existing->id},
+                               {QStringLiteral("id"), existing->ytId}, {QStringLiteral("title"), existing->ytTitle},
+                               {QStringLiteral("channel"), existing->ytChannel}, {QStringLiteral("reason"), small},
+                               {QStringLiteral("trackId"), track.id}, {QStringLiteral("track"), track.title}, {QStringLiteral("deleted"), last}});
+                    if (last)
+                        discardVideo(*existing);
+                    else
+                        emit videoChanged(existing->id);
+                } else {
+                    checked(c, QStringLiteral("small-channel"), QStringLiteral("already in the library; %1").arg(small));
+                }
+                reasons << QStringLiteral("“%1” is from a small channel (%2 subscribers)").arg(c.title).arg(existing->ytChannelSubs);
+                continue;
+            }
+            if (theTracks) {
                 // Re-import: the track's own video, judged like a candidate
                 // just found. The upload's audio is in its file (second
                 // stream where the library's was put in), and so is the picture.
-                const int ytStream = existing->audioSource == QLatin1String("library") ? 1 : 0;
                 std::vector<int16_t> pcm;
-                if (!AudioAlign::decodeMono(existing->path, &pcm, &m_cancel, &error, ytStream)) {
+                if (!AudioAlign::decodeMono(existing->path, &pcm, &m_cancel, &error, existing->ytStream)) {
                     if (m_cancel)
                         return cleanup();
                     checked(c, QStringLiteral("error"), QStringLiteral("the track's video until now; its file cannot be read: %1").arg(error));
@@ -2469,25 +2850,8 @@ void ImportManager::runJob(qint64 trackId, const ImportSettings &cfg)
                 const bool knownChannel = ArtistChannels::isArtistChannel(*m_db, Matcher::artistNames(track), c.channelId, c.channel);
                 const bool artistChannel = c.ownChannel || knownChannel;
                 const double ytQuality = storedYoutubeQuality(*existing);
-                bool forReview = cfg.replaceAudio && libraryIsBetter(track, ytQuality)
+                const bool forReview = cfg.replaceAudio && libraryIsBetter(track, ytQuality)
                     && !ownRecording(ar, track, c.title, c.channel, artistChannel, knownChannel);
-                // Other tracks have this video as well. It is not made over
-                // for review on this track's account: where the track is its
-                // recording, it stays as it is, theirs and this track's;
-                // where it is only the song, it is theirs and not this
-                // track's (which got it by joining their review, or their
-                // verdict).
-                if (forReview && othersHave(existing->id)) {
-                    QString why;
-                    if (!sharesVideo(*existing, ar, artistChannel, knownChannel, &why)) {
-                        if (m_cancel)
-                            return cleanup();
-                        turnDown(QStringLiteral("different-recording"),
-                                 QStringLiteral("other tracks have it, and this track is the song but not that recording: %1").arg(why));
-                        continue;
-                    }
-                    forReview = false;
-                }
                 if (!forReview && interrupted(ar)) {
                     turnDown(QStringLiteral("different"), interruptedReason(ar));
                     continue;
@@ -2548,324 +2912,196 @@ void ImportManager::runJob(qint64 trackId, const ImportSettings &cfg)
                 keepClaim = true;
                 break;
             }
-            if (heldGroup > 0 && existing->review
-                && (existing->reviewGroup > 0 ? existing->reviewGroup : existing->id) == heldGroup) {
-                // Already one of this track's options. Judged again by the
-                // rules of the day: what has since become acceptable
-                // outright is taken, and the other options let go.
-                std::vector<int16_t> optPcm;
-                QString optError, why;
-                const bool known = c.ownChannel || ArtistChannels::isArtistChannel(*m_db, Matcher::artistNames(track), c.channelId, c.channel);
-                std::optional<AudioAlign::Result> judged;
-                if (AudioAlign::decodeMono(existing->path, &optPcm, &m_cancel, &optError, 1)) {
-                    const AudioAlign::Result ar = fitted(AudioAlign::align(trackPcm, optPcm), track, existing->ytTitle, existing->ytChannel);
-                    judged = ar;
-                    why = !audioMatches(ar) ? mismatchReason(ar)
-                        : !(cfg.replaceAudio && libraryIsBetter(track, storedYoutubeQuality(*existing))) ? QStringLiteral("the track is the lesser audio")
-                        : unconfirmedReason(ar, track, existing->ytTitle, existing->ytChannel, known);
-                    if (audioMatches(ar) && cfg.replaceAudio && libraryIsBetter(track, storedYoutubeQuality(*existing))
-                        && ownRecording(ar, track, existing->ytTitle, existing->ytChannel, known, known && !c.ownChannel)) {
-                        const qint64 group = heldGroup;
-                        // The tracks of other recordings that wait on these
-                        // options with this one.
-                        QVector<TrackInfo> waiting;
-                        for (const VideoInfo &o : m_db->reviewOptions(group)) {
-                            for (const TrackInfo &w : m_db->tracksForVideo(o.id)) {
-                                if (w.id != track.id && (track.recording <= 0 || w.recording != track.recording))
-                                    waiting << w;
-                            }
-                        }
-                        if (putLibraryAudioIn(*existing, track, ar, cfg, &error, false, 1)) {
-                            // The video is this track's, and no longer one of
-                            // the options. A track that waited on them and is
-                            // this recording too has it as well. The others
-                            // keep the options that are left — theirs to wait
-                            // on, not this track's to take with it — and with
-                            // none left, this was not their video.
-                            const QVector<VideoInfo> left = m_db->reviewOptions(group);
-                            bool stillWaited = false;
-                            for (const TrackInfo &w : std::as_const(waiting)) {
-                                if (sameTrackAs(w) >= kSameTrack) {
-                                    if (w.videoId != existing->id)
-                                        m_db->setTrackResult(w.id, w.state, existing->id, w.message);
-                                    continue;
-                                }
-                                if (m_cancel)
-                                    return cleanup();
-                                if (!left.isEmpty()) {
-                                    stillWaited = true;
-                                    if (w.videoId == existing->id)
-                                        m_db->setTrackResult(w.id, w.state, left.first().id, w.message);
-                                } else if (w.state != QLatin1String("pending")) {
-                                    // (One queued for a lookup of its own keeps its turn.)
-                                    m_db->setTrackResult(w.id, QStringLiteral("not_found"), 0,
-                                                         QStringLiteral("“%1” is the video of “%2” [%3]").arg(c.title, track.title, track.album));
-                                }
-                            }
-                            if (!stillWaited) {
-                                for (const VideoInfo &other : left) {
-                                    m_db->removeVideo(other.id);
-                                    removeVideoFiles(other);
-                                    emit videoRemoved(other.id);
-                                }
-                            }
-                            checked(c, QStringLiteral("match"),
-                                    QStringLiteral("was one of the track's options for review; it now fits outright: %1% of it is demonstrably the same waveform")
-                                        .arg(qRound(100 * waveformShare(ar))),
-                                    &ar);
-                            heldVideo = 0;
-                            heldGroup = 0;
-                            heldVideoForLog = 0;
-                            finish(QStringLiteral("done"), existing->id, QStringLiteral("%1 (from review)").arg(c.title));
-                            return;
-                        }
-                        if (m_cancel)
-                            return cleanup();
+            // Whose channel: by its name, by MusicBrainz, or by the user's verdicts.
+            const bool knownExisting = ArtistChannels::isArtistChannel(*m_db, Matcher::artistNames(track), c.channelId, c.channel);
+            const bool vouchedExisting = c.ownChannel || knownExisting;
+            // Heard on the upload's own audio, which every file keeps.
+            std::vector<int16_t> pcm;
+            if (!QFile::exists(existing->path) || !AudioAlign::decodeMono(existing->path, &pcm, &m_cancel, &error, existing->ytStream)) {
+                if (m_cancel)
+                    return cleanup();
+                checked(c, QStringLiteral("error"), QStringLiteral("already in the library, but its file cannot be read: %1").arg(error));
+                reasons << QStringLiteral("“%1”: its file cannot be read").arg(c.title);
+                continue;
+            }
+            anyChecked = true;
+            const AudioAlign::Result ar = fitted(AudioAlign::align(trackPcm, pcm), track, existing->ytTitle, existing->ytChannel);
+            qInfo().noquote() << QStringLiteral("[align] %1 ~ “%2” [%3] (in the library): %4").arg(track.title, c.title, c.id, ar.summary());
+            // The track is the better audio: the video would have to play it.
+            const bool own = cfg.replaceAudio && libraryIsBetter(track, storedYoutubeQuality(*existing));
+            const bool recording = audioMatches(ar) && ownRecording(ar, track, existing->ytTitle, existing->ytChannel, vouchedExisting, knownExisting);
+
+            if (existing->review) {
+                const bool mine = held.contains(existing->id);
+                if (!audioMatches(ar)) {
+                    checked(c, mine ? QStringLiteral("option") : QStringLiteral("different"),
+                            mine ? QStringLiteral("the track is a candidate of it already; still: %1").arg(mismatchReason(ar))
+                                 : QStringLiteral("waits for review with other tracks as its candidates; %1").arg(mismatchReason(ar)),
+                            &ar);
+                    if (!mine)
+                        reasons << QStringLiteral("“%1” is a different recording").arg(c.title);
+                    continue;
+                }
+                if (own && recording) {
+                    // It waits for a verdict as the video of tracks that are
+                    // only the song (a live take, looked up first; or this
+                    // track, under yesterday's rules). This track is
+                    // demonstrably its recording: the video is this track's,
+                    // and no longer a question.
+                    const QVector<Database::Candidate> were = m_db->candidates(existing->id);
+                    if (putLibraryAudioIn(*existing, track, ar, cfg, &error)) {
+                        releaseCandidates(existing->id, were, &track,
+                                          QStringLiteral("“%1” is the video of “%2” [%3]").arg(c.title, track.title, track.album));
+                        checked(c, QStringLiteral("match"),
+                                (mine ? QStringLiteral("the track was a candidate of it; it now fits outright: %1% of it is demonstrably the same waveform")
+                                      : QStringLiteral("was waiting for review with other tracks as its candidates; this one is its recording (%1% the same waveform) and takes it"))
+                                    .arg(qRound(100 * waveformShare(ar))),
+                                &ar);
+                        leaving = m_db->candidacies(track);
+                        finish(QStringLiteral("done"), existing->id,
+                               mine ? QStringLiteral("%1 (from review)").arg(c.title) : QStringLiteral("takes “%1” out of review").arg(c.title));
+                        return;
+                    }
+                    if (m_cancel)
+                        return cleanup();
+                }
+                if (mine) {
+                    checked(c, QStringLiteral("option"),
+                            QStringLiteral("the track is a candidate of it already; still: %1")
+                                .arg(!own ? QStringLiteral("the track is the lesser audio")
+                                          : unconfirmedReason(ar, track, existing->ytTitle, existing->ytChannel, vouchedExisting)),
+                            &ar);
+                    continue;
+                }
+                // Whose video it is, of its candidates, is for the user to
+                // say: this track is one more of them, where nothing fits it
+                // outright.
+                QStringList theirs;
+                for (const Database::Candidate &o : m_db->candidates(existing->id))
+                    theirs << o.track.title;
+                checked(c, QStringLiteral("candidate"),
+                        QStringLiteral("waits for review with “%1” as its candidate, and this track is the song too: one more candidate of it if nothing fits this track outright")
+                            .arg(theirs.join(QStringLiteral("”, “"))),
+                        &ar);
+                reasons << QStringLiteral("“%1” waits for your review").arg(c.title);
+                joins.append({*existing, ar});
+                continue;
+            }
+
+            // In the library: another track has it, and a video has one
+            // track. This one takes it only as the closer fit to the upload.
+            if (!audioMatches(ar)) {
+                checked(c, QStringLiteral("different"),
+                        QStringLiteral("already in the library as the video of “%1”; %2").arg(existing->title, mismatchReason(ar)), &ar);
+                reasons << QStringLiteral("“%1” is a different recording").arg(c.title);
+                continue;
+            }
+            QHash<qint64, TrackInfo> holders; // one file per recording: its best
+            for (const TrackInfo &o : m_db->tracksForVideo(existing->id)) {
+                if (Database::trackKey(o) == Database::trackKey(track))
+                    continue;
+                const auto it = holders.find(Database::trackKey(o));
+                if (it == holders.end())
+                    holders.insert(Database::trackKey(o), o);
+                else if (betterSource(o, *it))
+                    *it = o;
+            }
+            double theirFit = -1;
+            QString theirTitle = existing->title;
+            for (const TrackInfo &o : std::as_const(holders)) {
+                std::vector<int16_t> oPcm;
+                QString oError;
+                // A track that cannot be read keeps what it has.
+                const double fit = AudioAlign::decodeMono(o.path, &oPcm, &m_cancel, &oError) ? AudioAlign::align(oPcm, pcm).likeness : 1.0;
+                if (m_cancel)
+                    return cleanup();
+                if (fit > theirFit) {
+                    theirFit = fit;
+                    theirTitle = o.title;
+                }
+            }
+            // Not a video its length rules out for this track, nor a cut of the song.
+            QString unfit = Matcher::lengthMismatch(track, existing->duration);
+            if (unfit.isEmpty() && shortCut(ar))
+                unfit = QStringLiteral("the video is a cut of the song: %1 s of %2 s").arg(qRound(ar.videoSec)).arg(qRound(ar.trackSec));
+            // One that no track in the music folders has is this track's on
+            // the terms of an upload just found, short of asking the user.
+            const bool takes = unfit.isEmpty() && (holders.isEmpty() ? (!own || recording) : ar.likeness > theirFit);
+            if (takes) {
+                // The video plays this track's audio where it is the better
+                // one and demonstrably the recording; otherwise YouTube's.
+                bool ok = true;
+                if (own && audioReplaceable(ar)) {
+                    ok = putLibraryAudioIn(*existing, track, ar, cfg, &error);
+                } else if (existing->audioSource == QLatin1String("library")) {
+                    ok = Muxer::keepAudio(existing->path, -1, existing->ytStream, track, existing->ytId, &m_cancel, &error);
+                    if (ok) {
+                        VideoInfo v = *existing;
+                        v.audioSource = QStringLiteral("youtube");
+                        v.audioDetail = QStringLiteral("YouTube");
+                        v.ytStream = 0;
+                        m_db->updateVideoMedia(v);
                     }
                 }
                 if (m_cancel)
                     return cleanup();
-                checked(c, QStringLiteral("option"),
-                        QStringLiteral("already waiting for review as one of the track's options; still: %1").arg(why.isEmpty() ? optError : why),
-                        judged ? &*judged : nullptr);
-                continue;
-            }
-            // Already in the MV library through another track (a single and
-            // its album cut, say). It still has to be this recording.
-            // What the video sounds like: a video under review carries the
-            // track it waits for, YouTube's audio, and the review stream; an
-            // accepted one plays its track's audio where that was put in.
-            // Whose channel: by its name, by MusicBrainz, or by the user's verdicts.
-            const bool knownExisting = ArtistChannels::isArtistChannel(*m_db, Matcher::artistNames(track), c.channelId, c.channel);
-            const bool vouchedExisting = c.ownChannel || knownExisting;
-            const int heard = existing->review ? 1 : 0;
-            std::vector<int16_t> pcm;
-            if (QFile::exists(existing->path) && AudioAlign::decodeMono(existing->path, &pcm, &m_cancel, &error, heard)) {
-                anyChecked = true;
-                const AudioAlign::Result ar = fitted(AudioAlign::align(trackPcm, pcm), track, existing->ytTitle, existing->ytChannel);
-
-                // Whose video is it? Asked where the video plays another
-                // track's audio and this one is not plainly that recording.
-                if (!existing->review && existing->audioSource == QLatin1String("library") && cfg.replaceAudio
-                    && libraryIsBetter(track, storedYoutubeQuality(*existing)) && waveformShare(ar) < kOwnWaveformOtherVersion) {
-                    std::vector<int16_t> ytPcm;
-                    QString ytError;
-                    // The second stream of such a file is YouTube's audio.
-                    if (AudioAlign::decodeMono(existing->path, &ytPcm, &m_cancel, &ytError, 1)) {
-                        const AudioAlign::Result own = AudioAlign::align(trackPcm, ytPcm);
-                        if (audioMatches(own) && ownRecording(own, track, existing->ytTitle, existing->ytChannel, vouchedExisting, knownExisting)
-                            && waveformShare(own) >= kTakeoverShare && waveformShare(own) >= waveformShare(ar) + kTakeoverMargin) {
-                            // The tracks that hold it, one measurement per recording.
-                            QVector<TrackInfo> losing;
-                            QHash<qint64, double> shareOf;
-                            double holderShare = 0;
-                            QString holderTitle;
-                            for (const TrackInfo &o : m_db->tracksForVideo(existing->id)) {
-                                const qint64 key = o.recording > 0 ? o.recording : -o.id;
-                                if (!shareOf.contains(key)) {
-                                    std::vector<int16_t> oPcm;
-                                    QString oError;
-                                    // A holder that cannot be read keeps what it has.
-                                    shareOf.insert(key, AudioAlign::decodeMono(o.path, &oPcm, &m_cancel, &oError)
-                                                            ? waveformShare(AudioAlign::align(oPcm, ytPcm)) : 1.0);
-                                }
-                                if (m_cancel)
-                                    return cleanup();
-                                if (shareOf.value(key) + kTakeoverMargin <= waveformShare(own)) {
-                                    if (losing.isEmpty()) {
-                                        holderShare = shareOf.value(key);
-                                        holderTitle = o.title;
-                                    }
-                                    losing << o;
-                                }
-                            }
-                            if (!losing.isEmpty() && putLibraryAudioIn(*existing, track, own, cfg, &error, false, 1)) {
-                                // The tracks that held it keep it. Whether a
-                                // track at 70% is another master of the same
-                                // performance (which shares) or another
-                                // language's version (which should not) the
-                                // waveform cannot say, and some hold their
-                                // video by the user's own verdict. What
-                                // changes is whose audio the video plays.
-                                checked(c, QStringLiteral("takeover"),
-                                        QStringLiteral("already in the library through “%1”, but this track is the video's own audio: %2% of it the same waveform, against %3% for “%1”. The video now plays this track; “%1” keeps it too")
-                                            .arg(holderTitle).arg(qRound(100 * waveformShare(own))).arg(qRound(100 * holderShare)),
-                                        &own);
-                                qInfo().noquote() << QStringLiteral("[import] “%1” [%2] is the audio of “%3” now, not “%4”: %5% against %6% of the video's own audio")
-                                                         .arg(track.title, track.album, c.title, holderTitle)
-                                                         .arg(qRound(100 * waveformShare(own))).arg(qRound(100 * holderShare));
-                                letGoOfHeld();
-                                finish(QStringLiteral("done"), existing->id,
-                                       QStringLiteral("shares the video of “%1”, which now plays this track").arg(holderTitle));
-                                return;
-                            }
-                            if (m_cancel)
-                                return cleanup();
-                        }
-                    }
-                    if (m_cancel)
-                        return cleanup();
-                }
-
-                if (audioMatches(ar)) {
-                    // The video belongs to another track already. This one
-                    // joins it when it is demonstrably the same recording (a
-                    // single and its album cut) — measured against the audio
-                    // the video plays, which is that other track's where the
-                    // library's was put in. Being the same song is not
-                    // enough: a live take does not get the studio video.
-                    // A track of lesser quality than YouTube's audio has no
-                    // audio of its own at stake and shares on the song alone
-                    // (a video in the library, not one waiting for review).
-                    const bool own = cfg.replaceAudio && libraryIsBetter(track, storedYoutubeQuality(*existing));
-                    const bool recording = ownRecording(ar, track, existing->ytTitle, existing->ytChannel, vouchedExisting, knownExisting);
-                    if (existing->review && own && recording) {
-                        // It waits for a verdict on behalf of a track that is
-                        // only the song (a live take, looked up first). This
-                        // track is demonstrably its recording: the video is
-                        // this track's, and no longer a question.
-                        const qint64 group = existing->reviewGroup > 0 ? existing->reviewGroup : existing->id;
-                        const QVector<TrackInfo> waiting = m_db->tracksForVideo(existing->id);
-                        if (putLibraryAudioIn(*existing, track, ar, cfg, &error, false, heard)) {
-                            // Those tracks keep whatever other options they
-                            // had; with none left, this was not their video.
-                            QVector<VideoInfo> left = m_db->reviewOptions(group);
-                            if (!left.isEmpty()) {
-                                m_db->relinkTracks(existing->id, left.first().id);
-                            } else {
-                                for (const TrackInfo &w : waiting) {
-                                    // One already queued for a new lookup keeps its turn.
-                                    if (w.state == QLatin1String("pending"))
-                                        continue;
-                                    m_db->setTrackResult(w.id, QStringLiteral("not_found"), 0,
-                                                         QStringLiteral("“%1” is the video of “%2” [%3]").arg(c.title, track.title, track.album));
-                                }
-                            }
-                            checked(c, QStringLiteral("shared"),
-                                    QStringLiteral("was waiting for review for another track; this one is its recording (%1% the same waveform) and takes it")
-                                        .arg(qRound(100 * ar.goodSec / qMax(1.0, std::min(ar.trackSec, ar.videoSec)))),
-                                    &ar);
-                            letGoOfHeld();
-                            finish(QStringLiteral("done"), existing->id, QStringLiteral("takes “%1” out of review").arg(c.title));
-                            return;
-                        }
-                        if (m_cancel)
-                            return cleanup();
-                    }
-                    if (existing->review) {
-                        // It waits for the user's verdict on behalf of another
-                        // track. That verdict is this track's too where this
-                        // track is the recording in the video; the song by
-                        // its fingerprints is another version of it, or a
-                        // live take, with a video of its own to find. And
-                        // even its recording only joins when the rest of the
-                        // search has nothing for it: its own video, kept or
-                        // found, comes first.
-                        QString why;
-                        if (sharesVideo(*existing, ar, vouchedExisting, knownExisting, &why)) {
-                            checked(c, QStringLiteral("shared-review"),
-                                    QStringLiteral("already waiting for review through “%1”, and this track is that recording too (%2): one more track for that verdict if nothing of its own turns up")
-                                        .arg(existing->title, why),
-                                    &ar);
-                            if (!joinable)
-                                joinable = *existing;
-                        } else {
-                            if (m_cancel)
-                                return cleanup();
-                            // Whose is it, then? The upload's title says,
-                            // where it carries this track's and none of
-                            // theirs — unless one of them is the recording
-                            // in it, which no title outweighs.
-                            bool mine = own && !claimable && Matcher::namesTitle(track, existing->ytTitle);
-                            // An upload marked as a version ("Live ver.") is
-                            // the video of the track that is that version. A
-                            // version none of them is marked as ("English
-                            // Ver.", for a track by its English title) does
-                            // not tell them apart, and the title does.
-                            const bool myVersion = Matcher::sameVersion(track, existing->ytTitle, vouchedExisting);
-                            QString theirs;
-                            if (mine) {
-                                // (Everyone who waits on its group: they
-                                // point at one of the options.)
-                                QVector<TrackInfo> waiting;
-                                for (const VideoInfo &o : m_db->reviewOptions(existing->reviewGroup > 0 ? existing->reviewGroup : existing->id))
-                                    waiting += m_db->tracksForVideo(o.id);
-                                QSet<qint64> heardThem;
-                                for (const TrackInfo &w : waiting) {
-                                    if (w.id == track.id || (track.recording > 0 && w.recording == track.recording))
-                                        continue;
-                                    const qint64 key = w.recording > 0 ? w.recording : -w.id;
-                                    if (heardThem.contains(key))
-                                        continue;
-                                    heardThem.insert(key);
-                                    theirs = w.title;
-                                    std::vector<int16_t> wPcm;
-                                    QString wError;
-                                    if (Matcher::namesTitle(w, existing->ytTitle)
-                                        || (!myVersion && Matcher::sameVersion(w, existing->ytTitle, vouchedExisting))
-                                        || !AudioAlign::decodeMono(w.path, &wPcm, &m_cancel, &wError)
-                                        || audioReplaceable(AudioAlign::align(wPcm, pcm))) {
-                                        mine = false;
-                                        break;
-                                    }
-                                }
-                                mine = mine && !heardThem.isEmpty();
-                                if (m_cancel)
-                                    return cleanup();
-                            }
-                            if (mine) {
-                                checked(c, QStringLiteral("claimed"),
-                                        QStringLiteral("already waiting for review through “%1”, another recording of the song; the upload carries this track's title and not that one's, and is neither's waveform: this track's to wait on if nothing fits it outright")
-                                            .arg(theirs),
-                                        &ar);
-                                claimable = *existing;
-                                claimAlign = ar;
-                            } else {
-                                checked(c, QStringLiteral("different-recording"),
-                                        QStringLiteral("already waiting for review through “%1”; this track is the song but not that recording: %2")
-                                            .arg(existing->title, why),
-                                        &ar);
-                                reasons << QStringLiteral("“%1” waits for review as the video of another recording of the song").arg(c.title);
-                            }
-                        }
-                        continue;
-                    }
-                    if (!own) {
-                        checked(c, QStringLiteral("shared"),
-                                QStringLiteral("already in the library through “%1”, and the song by its fingerprints").arg(existing->title), &ar);
-                        letGoOfHeld();
-                        finish(QStringLiteral("done"), existing->id, QStringLiteral("shares the video of “%1”").arg(existing->title));
-                        return;
-                    }
-                    if (recording
-                        && (existing->audioSource == QLatin1String("library") || putLibraryAudioIn(*existing, track, ar, cfg, &error))) {
-                        checked(c, QStringLiteral("shared"),
-                                QStringLiteral("already in the library through “%1”, and the same recording: %2% of it is demonstrably the same waveform")
-                                    .arg(existing->title)
-                                    .arg(qRound(100 * ar.goodSec / qMax(1.0, std::min(ar.trackSec, ar.videoSec)))),
-                                &ar);
-                        letGoOfHeld();
-                        finish(QStringLiteral("done"), existing->id,
-                               QStringLiteral("shares the video of “%1”").arg(existing->title));
-                        return;
-                    }
-                    if (m_cancel)
-                        return cleanup();
-                    checked(c, QStringLiteral("different-recording"),
-                            QStringLiteral("already in the library as the video of “%1”; this track is the song but not that recording: %2")
-                                .arg(existing->title, unconfirmedReason(ar, track, existing->ytTitle, existing->ytChannel, vouchedExisting)),
-                            &ar);
-                    reasons << QStringLiteral("“%1” is the video of another recording of the song").arg(c.title);
+                if (!ok) {
+                    checked(c, QStringLiteral("error"), QStringLiteral("this track is the closer fit to it, but its file could not be made over: %1").arg(error), &ar);
+                    undecided = true;
+                    reasons << QStringLiteral("“%1”: %2").arg(c.title, error);
                     continue;
                 }
-                checked(c, QStringLiteral("different"),
-                        QStringLiteral("already in the library through “%1”; %2").arg(existing->title, mismatchReason(ar)), &ar);
-            } else if (!m_cancel) {
-                checked(c, QStringLiteral("error"), QStringLiteral("already in the library, but its file cannot be read: %1").arg(error));
+                // It is listed under the track that has it.
+                if (auto v = m_db->video(existing->id)) {
+                    v->title = track.title;
+                    v->artist = track.artist;
+                    v->albumArtist = track.albumArtist;
+                    v->album = track.album;
+                    v->genre = track.genre;
+                    v->year = track.year;
+                    v->trackNo = track.trackNo;
+                    v->tags = track.tags;
+                    m_db->updateVideoTags(*v);
+                }
+                // The track that had it has no video, and is looked up again.
+                const QVector<TrackInfo> out = m_db->unlinkOthers(existing->id, track);
+                const QString fits = holders.isEmpty() ? QString()
+                    : QStringLiteral("%1% against %2%").arg(100 * ar.likeness, 0, 'f', 1).arg(100 * theirFit, 0, 'f', 1);
+                checked(c, QStringLiteral("takeover"),
+                        holders.isEmpty() ? QStringLiteral("already in the library, and no track in the music folders has it: this track's")
+                                          : QStringLiteral("already in the library as the video of “%1”, but this track is the closer fit to the upload: %2. “%1” goes back to the queue")
+                                                .arg(theirTitle, fits),
+                        &ar, {{QStringLiteral("fit"), std::round(ar.likeness * 1000) / 1000},
+                              {QStringLiteral("holderFit"), std::round(theirFit * 1000) / 1000}});
+                if (!holders.isEmpty()) {
+                    qInfo().noquote() << QStringLiteral("[import] “%1” [%2] takes “%3” from “%4”: the closer fit, %5")
+                                             .arg(track.title, track.album, c.title, theirTitle, fits);
+                    QJsonArray names;
+                    for (const TrackInfo &o : out)
+                        names.append(QJsonObject{{QStringLiteral("trackId"), o.id}, {QStringLiteral("track"), o.title}, {QStringLiteral("album"), o.album}});
+                    appendLog({{QStringLiteral("event"), QStringLiteral("takeover")}, {QStringLiteral("videoId"), existing->id},
+                               {QStringLiteral("id"), existing->ytId}, {QStringLiteral("title"), existing->ytTitle},
+                               {QStringLiteral("trackId"), track.id}, {QStringLiteral("track"), track.title}, {QStringLiteral("album"), track.album},
+                               {QStringLiteral("fit"), std::round(ar.likeness * 1000) / 1000},
+                               {QStringLiteral("holderFit"), std::round(theirFit * 1000) / 1000}, {QStringLiteral("requeued"), names}});
+                }
+                emit videoChanged(existing->id);
+                leaving = m_db->candidacies(track);
+                finish(QStringLiteral("done"), existing->id,
+                       holders.isEmpty() ? c.title : QStringLiteral("takes “%1” from “%2”: the closer fit (%3)").arg(c.title, theirTitle, fits));
+                if (!out.isEmpty())
+                    requeuePending();
+                return;
             }
-            if (m_cancel)
-                return cleanup();
-            reasons << QStringLiteral("“%1” is a different recording").arg(c.title);
+            checked(c, QStringLiteral("has-its-track"),
+                    !unfit.isEmpty() ? QStringLiteral("already in the library as the video of “%1”, and not one for this track: %2").arg(theirTitle, unfit)
+                    : holders.isEmpty() ? QStringLiteral("already in the library; this track is the song but cannot be confirmed as its recording: %1")
+                                              .arg(unconfirmedReason(ar, track, existing->ytTitle, existing->ytChannel, vouchedExisting))
+                    : QStringLiteral("already in the library as the video of “%1”, which is the closer fit to the upload: %2% against this track's %3%")
+                          .arg(theirTitle).arg(100 * theirFit, 0, 'f', 1).arg(100 * ar.likeness, 0, 'f', 1),
+                    &ar, {{QStringLiteral("fit"), std::round(ar.likeness * 1000) / 1000},
+                          {QStringLiteral("holderFit"), std::round(theirFit * 1000) / 1000}});
+            reasons << QStringLiteral("“%1” is the video of “%2”").arg(c.title, theirTitle);
             continue;
         }
 
@@ -2893,6 +3129,16 @@ void ImportManager::runJob(qint64 trackId, const ImportSettings &cfg)
             // Could not listen to it: that says nothing about the video.
             undecided = true;
             reasons << QStringLiteral("%1: %2").arg(c.id, error);
+            continue;
+        }
+        const YtDlp::Channel channel = YtDlp::channelOf(info, c.channel);
+        if (smallChannel(channel.subscribers, channel.verified || c.verified, c.channelId.isEmpty() ? channel.id : c.channelId,
+                         channel.handle, cfg) == Small::Yes) {
+            anyChecked = true;
+            checked(c, QStringLiteral("small-channel"), smallChannelReason(channel.subscribers, cfg), nullptr,
+                    {{QStringLiteral("subscribers"), channel.subscribers}});
+            reasons << QStringLiteral("“%1” is from a small channel (%2 subscribers)").arg(c.title).arg(channel.subscribers);
+            QDir(dir).removeRecursively();
             continue;
         }
         std::vector<int16_t> mvPcm;
@@ -2942,7 +3188,7 @@ void ImportManager::runJob(qint64 trackId, const ImportSettings &cfg)
                 forReview = true;
         }
 
-        // Where nothing is at stake for the library's audio there is no
+        // Where the track is not the better audio there is no
         // review either: such a video is simply not the song's.
         if (!forReview && interrupted(ar)) {
             checked(c, QStringLiteral("different"), interruptedReason(ar), &ar);
@@ -3030,144 +3276,22 @@ void ImportManager::runJob(qint64 trackId, const ImportSettings &cfg)
         break;
     }
 
-    if (chosen.id.isEmpty() && claimable) {
-        // Made over for this track: its audio put to the video in place of
-        // the other track's, a group of its own (or this track's, where it
-        // holds options already). The tracks that waited on it keep their
-        // other options; with none, they go back to the queue.
-        if (!claimVideo(claimable->ytId))
-            return cleanup();
-        const auto unclaim = qScopeGuard([&] { releaseVideo(claimable->ytId); });
-        const std::optional<VideoInfo> there = m_db->video(claimable->id);
-        const AudioAlign::Result placed = placedWhole(claimAlign);
-        if (there && there->review && placed.byOffset) {
-            const qint64 from = there->reviewGroup > 0 ? there->reviewGroup : there->id;
-            // The tracks that point at it, of all that wait on its group.
-            QVector<TrackInfo> waiting;
-            QStringList names;
-            for (const VideoInfo &o : m_db->reviewOptions(from)) {
-                for (const TrackInfo &w : m_db->tracksForVideo(o.id)) {
-                    if (w.id == track.id || (track.recording > 0 && w.recording == track.recording))
-                        continue;
-                    if (!names.contains(w.title))
-                        names << w.title;
-                    if (o.id == there->id)
-                        waiting << w;
-                }
-            }
-            report(QStringLiteral("Preparing for review"), -1, there->ytTitle);
-            if (putLibraryAudioIn(*there, track, placed, cfg, &error, true, 1)) {
-                recheckHeld();
-                // (The video is a group by itself now: see putLibraryAudioIn.)
-                QVector<VideoInfo> left;
-                for (const VideoInfo &o : m_db->reviewOptions(from)) {
-                    if (o.id != there->id)
-                        left << o;
-                }
-                // What it leaves behind is a group without it, also where it
-                // gave that group its number.
-                if (from == there->id) {
-                    for (VideoInfo o : std::as_const(left)) {
-                        o.reviewGroup = left.first().id;
-                        m_db->updateVideoMedia(o);
-                    }
-                }
-                for (const TrackInfo &w : std::as_const(waiting)) {
-                    if (!left.isEmpty())
-                        m_db->linkTrack(w.id, left.first().id);
-                    else
-                        m_db->unlinkTrack(w.id);
-                }
-                // It is listed under the track it waits for.
-                if (auto mine = m_db->video(there->id)) {
-                    mine->title = track.title;
-                    mine->artist = track.artist;
-                    mine->albumArtist = track.albumArtist;
-                    mine->album = track.album;
-                    mine->genre = track.genre;
-                    mine->year = track.year;
-                    mine->trackNo = track.trackNo;
-                    mine->tags = track.tags;
-                    m_db->updateVideoTags(*mine);
-                }
-                if (heldGroup > 0) {
-                    if (auto mine = m_db->video(there->id)) {
-                        mine->reviewGroup = heldGroup;
-                        m_db->updateVideoMedia(*mine);
-                    }
-                } else {
-                    m_db->linkTrack(trackId, there->id);
-                    heldVideo = there->id;
-                    heldGroup = there->id;
-                    heldVideoForLog = there->id;
-                }
-                claimedFrom = QStringLiteral("“%1”, which “%2” was waiting on").arg(there->ytTitle, names.join(QStringLiteral("”, “")));
-                const QString theirs = names.join(QStringLiteral("”, “"));
-                qInfo().noquote() << QStringLiteral("[import] “%1” [%2] has “%3” to wait on now, which carries its title: “%4” %5")
-                                         .arg(track.title, track.album, there->ytTitle, theirs,
-                                              left.isEmpty() ? QStringLiteral("looks for a video of its own") : QStringLiteral("keeps its other options"));
-                appendLog({{QStringLiteral("event"), QStringLiteral("review-moved")}, {QStringLiteral("videoId"), there->id},
-                           {QStringLiteral("id"), there->ytId}, {QStringLiteral("title"), there->ytTitle},
-                           {QStringLiteral("trackId"), track.id}, {QStringLiteral("track"), track.title},
-                           {QStringLiteral("from"), theirs}, {QStringLiteral("requeued"), left.isEmpty()}});
-                logVideos.append(QJsonObject{{QStringLiteral("videoId"), there->id}, {QStringLiteral("id"), there->ytId},
-                                             {QStringLiteral("title"), there->ytTitle}, {QStringLiteral("review"), true},
-                                             {QStringLiteral("summary"), QStringLiteral("was waiting for “%1”").arg(theirs)}});
-                emit videoChanged(there->id);
-                if (left.isEmpty()) {
-                    QMetaObject::invokeMethod(this, [this] {
-                        if (!m_started)
-                            return;
-                        for (const TrackInfo &t : m_db->pendingRecordings())
-                            enqueue(t.id);
-                        pump();
-                    }, Qt::QueuedConnection);
-                }
-            } else if (m_cancel) {
-                return cleanup();
-            }
-        }
-    }
-
     QVector<Pick> picks;
     const bool forReview = chosen.id.isEmpty();
     if (!forReview) {
         picks.append({chosen, chosenDir, ytAudio, ytInfo, alignment, prior && chosen.id == prior->ytId});
     } else {
         picks = unconfirmed;
-        // The track's own video first: it is an option whatever else turns
-        // up, and a lookup that ends early on another track's option (below)
-        // must not leave it out.
+        // The track's own video first: it is a candidate whatever else turns up.
         std::stable_partition(picks.begin(), picks.end(), [](const Pick &p) { return p.existing; });
     }
 
-    if (picks.isEmpty()) {
-        recheckHeld();
-        if (heldVideo > 0) {
-            // Nothing new: the track keeps the options it has.
-            finish(QStringLiteral("done"), heldVideo,
-                   claimedFrom.isEmpty() ? QStringLiteral("no other video to offer for review")
-                                         : QStringLiteral("for your review: %1").arg(claimedFrom));
-            return;
-        }
-        if (joinable) {
-            // Nothing of its own, and it is the recording in a video that
-            // waits for review through another track: one verdict for both.
-            const std::optional<VideoInfo> there = m_db->video(joinable->id);
-            if (there && there->review) {
-                joinedReview = true;
-                logVideos.append(QJsonObject{{QStringLiteral("videoId"), there->id}, {QStringLiteral("id"), there->ytId},
-                                             {QStringLiteral("title"), there->ytTitle}, {QStringLiteral("review"), true},
-                                             {QStringLiteral("summary"), QStringLiteral("with “%1”").arg(there->title)}});
-                finish(QStringLiteral("done"), there->id, QStringLiteral("for your review, with “%1”").arg(there->title));
-                return;
-            }
-            // Settled by another lookup meanwhile: this one looks again.
-            undecided = true;
-        }
-        // "Not found" is a verdict and is not revisited for weeks. If any
-        // candidate could not be examined (a download error, typically
-        // YouTube throttling), the answer is still open: retry later.
+    if (picks.isEmpty() && joins.isEmpty()) {
+        // Nothing new: the track stays a candidate of the videos it was one
+        // of (finish sees to that). Otherwise "not found" is a verdict and
+        // is not revisited for weeks. If any candidate could not be examined
+        // (a download error, typically YouTube throttling), the answer is
+        // still open: retry later.
         const bool open = undecided || !anyChecked;
         finish(open ? QStringLiteral("failed") : QStringLiteral("not_found"), 0, reasons.join(QStringLiteral("; ")));
         return;
@@ -3176,13 +3300,14 @@ void ImportManager::runJob(qint64 trackId, const ImportSettings &cfg)
     // Brings one video into the library. Stopped: cancelled or postponed, and
     // already dealt with.
     enum class Got { Ok, Failed, Stopped };
-    const auto bringIn = [&](Pick pick, bool needsReview, qint64 group, qint64 *videoIdOut, QString *summary) -> Got {
+    // `review`: whether it came in for review, or (out) in the end did not.
+    const auto bringIn = [&](Pick pick, bool *review, qint64 *videoIdOut, QString *summary) -> Got {
+    bool needsReview = *review;
     if (pick.existing) {
         // Re-import: the track's video is what today's rules would bring in.
         // Its file stays; what may change is whether it waits for review,
         // and whether the track's audio is in it.
         const VideoInfo v = *prior;
-        const int ytStream = v.audioSource == QLatin1String("library") ? 1 : 0;
         const double ytQuality = storedYoutubeQuality(v);
         AudioAlign::Result al = pick.align;
         needsReview = needsReview && libraryIsBetter(track, ytQuality);
@@ -3192,25 +3317,24 @@ void ImportManager::runJob(qint64 trackId, const ImportSettings &cfg)
         }
         const bool replace = cfg.replaceAudio && audioReplaceable(pick.align) && libraryIsBetter(track, ytQuality);
         if (needsReview) {
+            // It goes back to the queue, with this track as its candidate.
             report(QStringLiteral("Preparing for review"), -1, pick.c.title);
-            if (!putLibraryAudioIn(v, track, al, cfg, &error, true, ytStream)) {
+            if (!putLibraryAudioIn(v, track, al, cfg, &error, true)) {
                 if (m_cancel) {
                     cleanup();
                     return Got::Stopped;
                 }
                 return Got::Failed;
             }
-            if (group > 0 && group != v.id) {
-                // One of the options brought in before it: the same group.
-                if (auto u = m_db->video(v.id)) {
-                    u->reviewGroup = group;
-                    m_db->updateVideoMedia(*u);
-                }
-            }
+            const std::optional<VideoInfo> now = m_db->video(v.id);
+            m_db->addCandidate(v.id, track, 1, qMax(pick.align.likeness, 1e-6), now ? now->audioDetail : QString());
+            // (A track that has left the music folders may have had it too.)
+            if (!m_db->unlinkOthers(v.id, track).isEmpty())
+                requeuePending();
             priorFate = QStringLiteral("review");
         } else if (replace && v.audioSource != QLatin1String("library")) {
             report(QStringLiteral("Muxing library audio"), -1, pick.c.title);
-            if (!putLibraryAudioIn(v, track, pick.align, cfg, &error, false, ytStream)) {
+            if (!putLibraryAudioIn(v, track, pick.align, cfg, &error, false)) {
                 if (m_cancel) {
                     cleanup();
                     return Got::Stopped;
@@ -3222,6 +3346,7 @@ void ImportManager::runJob(qint64 trackId, const ImportSettings &cfg)
             priorFate = QStringLiteral("kept");
         }
         priorKept = true;
+        *review = needsReview;
         *videoIdOut = v.id;
         *summary = QStringLiteral("%1 · kept%2").arg(pick.c.title, needsReview ? QStringLiteral(", now for review") : QString());
         return Got::Ok;
@@ -3363,15 +3488,19 @@ void ImportManager::runJob(qint64 trackId, const ImportSettings &cfg)
     v.fps = pr.fps;
     v.vcodec = pr.vcodec;
     v.audioSource = plan.replaceAudio ? QStringLiteral("library") : QStringLiteral("youtube");
+    v.ytStream = plan.replaceAudio ? 1 : 0;
     v.audioDetail = audioDetail;
     v.ytAbr = YtDlp::audioKbps(ytInfo);
     v.review = needsReview;
     v.reviewStart = span.start;
     v.reviewEnd = span.end;
-    v.reviewGroup = needsReview ? group : 0;
     v.ytTitle = chosen.title;
     v.ytChannel = chosen.channel;
-    v.ytChannelId = chosen.channelId;
+    const YtDlp::Channel channel = YtDlp::channelOf(ytInfo, chosen.channel);
+    v.ytChannelId = chosen.channelId.isEmpty() ? channel.id : chosen.channelId;
+    v.ytChannelSubs = channel.subscribers;
+    v.ytChannelVerified = channel.verified || chosen.verified;
+    v.ytChannelHandle = channel.handle;
     v.tags = track.tags;
     v.addedAt = QDateTime::currentSecsSinceEpoch();
 
@@ -3388,11 +3517,10 @@ void ImportManager::runJob(qint64 trackId, const ImportSettings &cfg)
         error = QStringLiteral("could not record the video in the library");
         return Got::Failed;
     }
-    if (needsReview && group <= 0) {
-        v.id = videoId;
-        v.reviewGroup = videoId;
-        m_db->updateVideoMedia(v);
-    }
+    // Under review it is a card of its own, with this track as its candidate.
+    if (needsReview)
+        m_db->addCandidate(videoId, track, 1, qMax(alignment.likeness, 1e-6), audioDetail);
+    *review = needsReview;
     *videoIdOut = videoId;
     *summary = QStringLiteral("%1 · %2×%3 · %4").arg(chosen.title).arg(pr.width).arg(pr.height).arg(audioDetail);
     return Got::Ok;
@@ -3400,12 +3528,9 @@ void ImportManager::runJob(qint64 trackId, const ImportSettings &cfg)
 
     QVector<qint64> added;
     QString firstSummary, lastError;
-    recheckHeld();
-    qint64 group = heldGroup;
     // The videos stay claimed until this track's result is recorded. Released
-    // sooner, another track could act on one of them in between — take an
-    // option out of review before the track waiting for it was linked to it,
-    // which left that track with the wrong video and an option with none.
+    // sooner, another track could act on one of them in between: take a
+    // video out of review before this track was made its candidate.
     QStringList claimed;
     const auto release = qScopeGuard([&] {
         for (const QString &id : std::as_const(claimed))
@@ -3413,10 +3538,14 @@ void ImportManager::runJob(qint64 trackId, const ImportSettings &cfg)
     });
     if (forReview) {
         // All of them first, in one order for every track: two tracks that
-        // each hold one option and wait for the other's would wait for ever.
+        // each hold one video and wait for the other's would wait for ever.
         QStringList ids;
         for (const Pick &pick : std::as_const(picks))
             ids << pick.c.id;
+        for (const Join &j : std::as_const(joins)) {
+            if (!ids.contains(j.video.ytId))
+                ids << j.video.ytId;
+        }
         ids.sort();
         for (const QString &id : std::as_const(ids)) {
             if (!claimVideo(id))
@@ -3427,51 +3556,45 @@ void ImportManager::runJob(qint64 trackId, const ImportSettings &cfg)
         // The outright match still holds its claim from the examination.
         claimed << picks.first().c.id;
     }
+    // What was brought in goes again when the lookup is cut short: half of
+    // what a track could have is no use, and it looks again later. (Its own
+    // video stays, as it was before: in review, or not.)
+    const auto abandon = [&] {
+        for (qint64 id : std::as_const(added)) {
+            if (prior && id == prior->id)
+                continue;
+            if (const auto v = m_db->video(id)) {
+                m_db->removeVideo(id);
+                removeVideoFiles(*v);
+            }
+        }
+    };
+    qint64 outright = 0; // the video that is the track's, accepted
     for (const Pick &pick : std::as_const(picks)) {
         if (forReview && !pick.existing) {
-            // Another track brought it in meanwhile. Waiting for review
-            // through that track, it is one more verdict for this one too.
+            // Another track brought it in meanwhile. Under review, this
+            // track is one more candidate of it; in the library by now, it
+            // is that track's.
             if (const auto there = m_db->videoByYtId(pick.c.id)) {
-                const bool known = ArtistChannels::isArtistChannel(*m_db, Matcher::artistNames(track), pick.c.channelId, pick.c.channel);
-                if (there->review && added.isEmpty() && heldVideo <= 0
-                    && sharesVideo(*there, pick.align, pick.c.ownChannel || known, known, nullptr)) {
-                    joinedReview = true;
-                    logVideos.append(QJsonObject{{QStringLiteral("videoId"), there->id}, {QStringLiteral("id"), pick.c.id},
-                                                 {QStringLiteral("title"), pick.c.title}, {QStringLiteral("review"), true},
-                                                 {QStringLiteral("summary"), QStringLiteral("with “%1”").arg(there->title)}});
-                    finish(QStringLiteral("done"), there->id, QStringLiteral("for your review, with “%1”").arg(there->title));
-                    return;
-                }
+                if (there->review)
+                    joins.append({*there, pick.align});
                 continue;
             }
         }
         qint64 videoId = 0;
         QString summary;
-        const Got got = bringIn(pick, forReview, group, &videoId, &summary);
+        bool review = forReview;
+        const Got got = bringIn(pick, &review, &videoId, &summary);
         if (got == Got::Stopped) {
-            // Half a set of options is no use: the track looks again later.
-            // (Its own video stays, as it was before: in review, or not.)
-            for (qint64 id : std::as_const(added)) {
-                if (prior && id == prior->id)
-                    continue;
-                if (const auto v = m_db->video(id)) {
-                    m_db->removeVideo(id);
-                    removeVideoFiles(*v);
-                }
-            }
+            abandon();
             return;
         }
         if (got == Got::Failed && pick.existing) {
             // The track's own video could not be made over for review. That
-            // says nothing about it, and the options brought in beside it
+            // says nothing about it, and the videos brought in beside it
             // would stand in its place: the lookup is left unfinished, and
             // the track keeps its video as it was.
-            for (qint64 id : std::as_const(added)) {
-                if (const auto v = m_db->video(id)) {
-                    m_db->removeVideo(id);
-                    removeVideoFiles(*v);
-                }
-            }
+            abandon();
             logVideos = QJsonArray();
             finish(QStringLiteral("failed"), 0, QStringLiteral("could not rebuild its video for review: %1").arg(error));
             return;
@@ -3485,45 +3608,65 @@ void ImportManager::runJob(qint64 trackId, const ImportSettings &cfg)
         if (added.isEmpty())
             firstSummary = summary;
         logVideos.append(QJsonObject{{QStringLiteral("videoId"), videoId}, {QStringLiteral("id"), pick.c.id},
-                                     {QStringLiteral("title"), pick.c.title}, {QStringLiteral("review"), forReview},
+                                     {QStringLiteral("title"), pick.c.title}, {QStringLiteral("review"), review},
                                      {QStringLiteral("summary"), summary}});
-        if (forReview && group <= 0)
-            group = videoId;
         added << videoId;
-    }
-    if (m_cancel)
-        return;
-    if (added.isEmpty()) {
-        if (heldVideo > 0)
-            finish(QStringLiteral("done"), heldVideo, QStringLiteral("no other video to offer for review"));
-        else
-            finish(QStringLiteral("failed"), 0, lastError.isEmpty() ? QStringLiteral("could not bring the video in") : lastError);
-        return;
-    }
-    if (!forReview) {
-        // A video that fits outright settles it: the options are not needed
-        // (by this track; others that wait on them keep them).
-        letGoOfHeld();
-    } else {
-        // The options the track held may have been settled while its new
-        // ones were brought in: those are then a group of their own, and
-        // what the track waits on.
-        const qint64 was = heldGroup;
-        recheckHeld();
-        if (heldGroup != was) {
-            group = heldGroup > 0 ? heldGroup : added.first();
-            for (qint64 id : std::as_const(added)) {
-                if (auto v = m_db->video(id); v && v->review && v->reviewGroup != group) {
-                    v->reviewGroup = group;
-                    m_db->updateVideoMedia(*v);
-                }
-            }
+        if (!review) {
+            // It fits after all (with the account's audio the track is the
+            // lesser one): the track's video, and nothing else is needed.
+            outright = videoId;
+            firstSummary = summary;
+            break;
         }
     }
-    const int options = forReview ? int(m_db->reviewOptions(group).size()) : 0;
-    finish(QStringLiteral("done"), forReview && heldVideo > 0 ? heldVideo : added.first(),
-           forReview ? QStringLiteral("for your review (%1 %2): %3").arg(options).arg(options == 1 ? QStringLiteral("option") : QStringLiteral("options"), firstSummary)
-                     : firstSummary);
+    int joined = 0;
+    if (forReview && outright <= 0) {
+        for (const Join &j : std::as_const(joins)) {
+            if (m_cancel) {
+                abandon();
+                return cleanup();
+            }
+            // (Settled by another lookup meanwhile: not a question any more.)
+            const std::optional<VideoInfo> there = m_db->video(j.video.id);
+            if (!there || !there->review)
+                continue;
+            report(QStringLiteral("Preparing for review"), -1, there->ytTitle);
+            if (!addCandidate(*there, track, j.align, cfg, &error)) {
+                if (m_cancel) {
+                    abandon();
+                    return cleanup();
+                }
+                lastError = error;
+                logVideos.append(QJsonObject{{QStringLiteral("id"), there->ytId}, {QStringLiteral("title"), there->ytTitle},
+                                             {QStringLiteral("failed"), error}});
+                continue;
+            }
+            ++joined;
+            if (firstSummary.isEmpty())
+                firstSummary = there->ytTitle;
+            logVideos.append(QJsonObject{{QStringLiteral("videoId"), there->id}, {QStringLiteral("id"), there->ytId},
+                                         {QStringLiteral("title"), there->ytTitle}, {QStringLiteral("review"), true},
+                                         {QStringLiteral("summary"), QStringLiteral("one more candidate of it")}});
+        }
+    }
+    if (m_cancel) {
+        abandon();
+        return cleanup();
+    }
+    if (outright > 0) {
+        // A video that fits outright settles it: the track is a candidate
+        // of nothing else.
+        leaving = m_db->candidacies(track);
+        finish(QStringLiteral("done"), outright, firstSummary);
+    } else if (added.isEmpty() && joined == 0) {
+        // (finish keeps the track waiting on what it is a candidate of.)
+        finish(QStringLiteral("failed"), 0, lastError.isEmpty() ? QStringLiteral("could not bring the video in") : lastError);
+        return;
+    } else {
+        const int waiting = int(m_db->candidacies(track).size());
+        finish(QStringLiteral("review"), 0,
+               QStringLiteral("for your review (%1 %2): %3").arg(waiting).arg(waiting == 1 ? QStringLiteral("video") : QStringLiteral("videos"), firstSummary));
+    }
     for (qint64 id : std::as_const(added)) {
         if (prior && id == prior->id)
             emit videoChanged(id);

@@ -41,11 +41,53 @@ public:
     void setTrackAbsent(qint64 id, bool absent);
     // Records the outcome of a lookup, for every file of the track's recording.
     void setTrackResult(qint64 id, const QString &state, qint64 videoId, const QString &message);
-    // The track's recording has no video any more and waits for a lookup:
-    // it let go of one it had, or waited on, without a verdict of its own.
-    void unlinkTrack(qint64 id);
-    // The track's recording waits on, or has, this video; its state stays.
-    void linkTrack(qint64 id, qint64 videoId);
+    // A video has one track: every other track that has this one, in the
+    // music folders or gone from them, has no video any more and waits for
+    // a lookup. Returns the ones in the music folders.
+    QVector<TrackInfo> unlinkOthers(qint64 videoId, const TrackInfo &keeper);
+
+    // The review queue: a video that waits for the user's verdict has
+    // candidates, the tracks whose video it could be, and a track can be a
+    // candidate of several videos. A track is a recording here as everywhere:
+    // every file of it is the same candidate.
+    struct Candidate {
+        TrackInfo track;     // the best of the recording's files in the music folders
+        int stream = 0;      // which audio stream of the video's file is this track's audio, from 1; 0: none
+        double fit = 0;      // how close its waveform is to the upload's (AudioAlign likeness); 0: not measured
+        QString audioDetail; // what that stream is, e.g. "FLAC 24/48"
+    };
+    static qint64 trackKey(const TrackInfo &t) { return t.recording > 0 ? t.recording : -t.id; }
+    // Several writes of the calling thread as one: nothing another thread
+    // writes comes between them.
+    class Transaction
+    {
+    public:
+        explicit Transaction(Database *db);
+        ~Transaction();
+        Transaction(const Transaction &) = delete;
+        Transaction &operator=(const Transaction &) = delete;
+
+    private:
+        Database *m_db;
+        bool m_open = false;
+    };
+    void addCandidate(qint64 videoId, const TrackInfo &track, int stream, double fit, const QString &audioDetail);
+    void removeCandidate(qint64 videoId, const TrackInfo &track);
+    void clearCandidates(qint64 videoId);
+    // In the order they became candidates. Tracks that have left the music
+    // folders stay on record and are not listed; candidateCount counts them.
+    QVector<Candidate> candidates(qint64 videoId);
+    int candidateCount(qint64 videoId);
+    // The videos under review the track is a candidate of.
+    QVector<VideoInfo> candidacies(const TrackInfo &track);
+    // Keeping the queue in step with the library after the music folders
+    // were read: a track that has a video is no candidate (returns the
+    // videos it was one of), and a track that waits for review without
+    // being anyone's candidate waits for a lookup instead (returns how many).
+    QVector<qint64> dropCandidaciesOfTracksWithVideos();
+    int requeueTracksWithoutCandidacies();
+    // Videos in the library that tracks of several recordings have.
+    QVector<qint64> sharedVideoIds();
     // Starts a recording of its own for the track.
     void setRecording(qint64 trackId, qint64 recording);
     // Makes the track one more file of the recording `memberId` belongs to.
@@ -96,10 +138,8 @@ public:
     void updateVideoTags(const VideoInfo &v);
     // After a video's file was rebuilt from better streams.
     void updateVideoMedia(const VideoInfo &v);
-    // The videos that wait for review as options for the same tracks.
-    QVector<VideoInfo> reviewOptions(qint64 group);
-    // Points the tracks of one video at another.
-    void relinkTracks(qint64 fromVideoId, qint64 toVideoId);
+    // What is known of the upload's channel: its id, subscribers, verified mark.
+    void updateVideoChannel(const VideoInfo &v);
     // Makes a track look for (more) videos again; what it has stays with it.
     void setTrackPending(qint64 trackId);
     // Makes the track's recording pending for a re-import (TrackInfo::reimport),
@@ -131,6 +171,8 @@ private:
     QString storedPath(const QString &path) const;
     QString resolvedPath(const QString &stored) const;
     VideoInfo resolved(VideoInfo v) const;
+    bool upgradeLayout(int from, QString *error);
+    void rekeyCandidates(qint64 fromKey, qint64 toKey);
 
     QString m_file;
     QString m_mvDir;

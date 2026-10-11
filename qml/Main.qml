@@ -62,14 +62,12 @@ ApplicationWindow {
         mpv.togglePause()
     }
 
-    // Another option for the same track comes on show; if the one it replaces
-    // was playing, the new one plays.
-    function stepReview(id, delta) {
-        const wasPlaying = player.current && player.current.videoId === id
-        const shown = App.videos.stepReview(id, delta)
-        if (wasPlaying && shown !== id)
-            player.playRow(App.videos.rowOfVideo(shown))
-        return shown
+    // Another video under review that a candidate track of this one is a
+    // candidate of as well: its card comes into view.
+    function revealVideo(id) {
+        if (window.view !== "grid")
+            showGrid()
+        return grid.reveal(id)
     }
 
     // An accepted video leaves the review list; it stops rather than play on
@@ -122,6 +120,8 @@ ApplicationWindow {
         function load(i) {
             index = i
             current = queue[i]
+            // (Under review it starts on the audio of its candidate on show.)
+            mpv.firstAudioTrack = App.firstAudioTrack(current.videoId)
             playerView.beginLoad(current.path)
         }
 
@@ -325,7 +325,6 @@ ApplicationWindow {
                     onActivated: (row) => player.playRow(row)
                     onApproved: (id) => window.approveVideo(id)
                     onRejected: (id) => window.rejectVideo(id)
-                    onStepped: (id, delta) => window.stepReview(id, delta)
                 }
 
                 Welcome {
@@ -350,7 +349,8 @@ ApplicationWindow {
             onCloseRequested: player.stop()
             onReviewApproved: window.approveVideo(player.current.videoId)
             onReviewRejected: window.rejectVideo(player.current.videoId)
-            onReviewStepped: (delta) => window.stepReview(player.current.videoId, delta)
+            candidates: controlBar.candidates.length
+            candidateTitle: controlBar.candidate ? controlBar.candidate.title : ""
             onTogglePauseRequested: window.togglePause()
             onToggleFullscreenRequested: window.setFullscreen(!window.fullscreen)
         }
@@ -358,6 +358,7 @@ ApplicationWindow {
         ControlBar {
             id: controlBar
             onReplaceRequested: (videoId) => replaceDialog.openFor(videoId)
+            onRevealRequested: (videoId) => window.revealVideo(videoId)
             width: parent.width
             readonly property bool revealed: !window.fullscreen || playerView.pointerActive || hovered || window.mpv.paused
             y: parent.height - height + (revealed ? 0 : height)
@@ -500,6 +501,11 @@ ApplicationWindow {
         case "check-quality": App.checkQuality(); return "ok"
         case "check-cookies": App.checkCookies(); return "ok"
         case "sign-in-on-bot-check": App.accountOnBotCheck = arg !== "off"; return "ok"
+        case "small-channels": // small-channels on|off, the limit: small-channels 5000, or the exceptions: small-channels except @a, @b
+            if (arg === "on" || arg === "off") App.ignoreSmallChannels = arg === "on"
+            else if (arg === "except" || arg.startsWith("except ")) App.smallChannelExceptions = arg.slice(7)
+            else App.minSubscribers = parseInt(arg)
+            return "ok"
         case "resume": App.resumeImport(); return "ok"
         case "fetch-subtitles": App.fetchSubtitles(); return "ok"
         case "delete-untracked": return "" + App.deleteUntracked()
@@ -535,10 +541,10 @@ ApplicationWindow {
             if (arg === "on" || arg === "off") App.subtitlesOn = arg === "on"
             else App.subtitleLangs = arg
             return "ok"
-        case "step": { // step <video id> <delta>
-            const sp = arg.split(" ")
-            return "" + window.stepReview(parseInt(sp[0]), parseInt(sp[1] || "1"))
-        }
+        case "candidate": controlBar.stepCandidate(parseInt(arg || "1")); return "ok" // the next (1) or previous (-1) candidate track of the playing video
+        case "candidates": return JSON.stringify(App.candidates(parseInt(arg)))
+        case "elsewhere": return "" + controlBar.showElsewhere() // as the button in the panel does: the video it went to
+        case "reveal": return "" + window.revealVideo(parseInt(arg))
         case "approve": window.approveVideo(parseInt(arg)); return "ok"
         case "reject": window.rejectVideo(parseInt(arg)); return "ok"
         case "grab": // grab <file>: a picture of the settings panel when open, else of the window (grab-window: with popups)
@@ -581,8 +587,13 @@ ApplicationWindow {
                 fetchingSubtitles: App.fetchingSubtitles, cookies: App.hasCookies, checkingCookies: App.checkingCookies, cookiesState: App.cookiesState,
                 cookiesStatus: App.cookiesStatus, checkingQuality: App.checkingQuality, reviewCount: App.reviewCount,
                 paused: App.importPaused, pauseKind: App.pauseKind, accountOnBotCheck: App.accountOnBotCheck,
+                ignoreSmallChannels: App.ignoreSmallChannels, minSubscribers: App.minSubscribers,
+                smallChannelExceptions: App.smallChannelExceptions,
                 facet: App.videos.facetType, facetValue: App.videos.facetValue, section: App.videos.section,
                 orphanCount: App.orphanCount, reviewLabel: controlBar.reviewLabel, trackLength: controlBar.trackLength,
+                candidates: controlBar.candidates.length, candidate: controlBar.shown,
+                candidateTitle: controlBar.candidate ? controlBar.candidate.title : null,
+                elsewhere: controlBar.candidate ? controlBar.candidate.elsewhere.length : 0, nowTitle: controlBar.nowTitle,
                 replacing: App.replacing, replaceStage: App.replaceStage, replaceDialog: replaceDialog.opened, replaceOptions: replaceDialog.options.length, replaceMode: replaceDialog.mode,
                 accent: "" + Theme.accent, accentMode: App.accent, theme: App.themeMode, dark: Theme.dark,
                 systemDark: App.systemDark, bg: "" + Theme.bg, musicDirs: App.musicDirs, frameColor: "" + mpv.frameColor,

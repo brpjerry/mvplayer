@@ -36,6 +36,14 @@ struct Result {
     QVector<Segment> segments; // regions where the waveforms line up
     double pcmMatchedSec = 0;  // length of the segments
     double goodSec = 0;        // of that, where the two demonstrably are the same audio
+    // How close the two waveforms are, as one figure: their correlation with
+    // the track laid where the segments put it, over the whole of both. 1
+    // would be the same samples from end to end. Whatever one has and the
+    // other has not counts against it: another master, another singer, a
+    // longer or a shorter cut of the song. It says which of two tracks is the
+    // closer fit to one upload, which `goodSec` cannot: two masters of one
+    // recording both come out as all the same there.
+    double likeness = 0;
     double gain = 1.0;         // track level relative to the video's audio
     bool inverted = false;     // the video's audio has the opposite polarity
     // Where the track sits going by loudness alone: the offset (in samples at

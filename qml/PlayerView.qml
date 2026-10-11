@@ -26,11 +26,13 @@ Item {
     signal closeRequested()
     signal togglePauseRequested()
     signal toggleFullscreenRequested()
-    // The verdict on, or a step among the options of, the video under review
-    // (or the orphan, among the orphans) that is playing in its thumbnail.
+    // The verdict on the video under review (or the orphan, among the
+    // orphans) that is playing in its thumbnail.
     signal reviewApproved()
     signal reviewRejected()
-    signal reviewStepped(int delta)
+    // Its candidate tracks: how many, and the title of the one on show.
+    property int candidates: 1
+    property string candidateTitle
 
     // ---- Geometry ----------------------------------------------------------
     readonly property real videoAspect: {
@@ -349,14 +351,13 @@ Item {
         y: root.restRect.y
         width: root.restRect.width
         height: root.restRect.height
-        option: wanted ? root.current.reviewOption : 1
-        options: wanted ? root.current.reviewOptions : 1
+        candidates: wanted && root.current.review === true ? root.candidates : 1
+        candidateTitle: wanted && root.current.review === true ? root.candidateTitle : ""
         sameTitle: wanted ? root.current.sameTitle : ({})
         orphan: wanted && root.current.review !== true
         canDelete: !App.scanning
         onApproved: root.reviewApproved()
         onRejected: root.reviewRejected()
-        onStepped: (delta) => root.reviewStepped(delta)
     }
 
     // Pause / play flash in the middle of the video

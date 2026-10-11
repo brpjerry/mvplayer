@@ -63,7 +63,7 @@ bool sameVersion(const TrackInfo &track, const QString &videoTitle, bool artistC
 
 // Why an upload of this length is not examined for the track, or nothing:
 // under half of it (the ninety seconds used as a show's opening, against the
-// whole song), or several times its length.
+// whole song), or over twice its length or four minutes longer.
 QString lengthMismatch(const TrackInfo &track, double seconds);
 
 // Scores every candidate against the track and sorts best-first.

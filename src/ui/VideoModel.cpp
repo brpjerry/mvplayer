@@ -69,8 +69,11 @@ QVariant VideoModel::data(const QModelIndex &index, int role) const
     case YtTitleRole: return v.ytTitle;
     case YtChannelRole: return v.ytChannel;
     case ReviewRole: return v.review;
-    case ReviewOptionRole: return int(reviewOptions(v).indexOf(v.id)) + 1;
-    case ReviewOptionsRole: return int(reviewOptions(v).size());
+    case CandidateTitleRole: return m_shown.value(v.id).title;
+    case CandidateArtistRole: return m_shown.value(v.id).artist;
+    case CandidateRole: return m_shown.value(v.id).index;
+    case CandidatesRole: return m_shown.value(v.id).count;
+    case YtStreamRole: return v.ytStream;
     case SameTitleRole: {
         const VideoInfo *o = sameTitle(v);
         return o ? QVariantMap{{QStringLiteral("album"), o->album}, {QStringLiteral("ytTitle"), o->ytTitle}} : QVariantMap();
@@ -102,18 +105,27 @@ QHash<int, QByteArray> VideoModel::roleNames() const
         {YtTitleRole, "ytTitle"},
         {YtChannelRole, "ytChannel"},
         {ReviewRole, "review"},
-        {ReviewOptionRole, "reviewOption"},
-        {ReviewOptionsRole, "reviewOptions"},
+        {CandidateTitleRole, "candidateTitle"},
+        {CandidateArtistRole, "candidateArtist"},
+        {CandidateRole, "candidate"},
+        {CandidatesRole, "candidates"},
+        {YtStreamRole, "ytStream"},
         {SameTitleRole, "sameTitle"},
         {OrphanRole, "orphan"},
     };
 }
 
-QVector<qint64> VideoModel::reviewOptions(const VideoInfo &v) const
+void VideoModel::setShown(qint64 videoId, const Shown &shown)
 {
-    if (!v.review)
-        return {};
-    return m_groups.value(v.reviewGroup > 0 ? v.reviewGroup : v.id);
+    if (m_shown.value(videoId) == shown)
+        return;
+    m_shown.insert(videoId, shown);
+    for (int i = 0; i < m_videos.size(); ++i) {
+        if (m_videos[i].id == videoId) {
+            emit dataChanged(index(i, 0), index(i, 0), {CandidateTitleRole, CandidateArtistRole, CandidateRole, CandidatesRole});
+            return;
+        }
+    }
 }
 
 QString VideoModel::foldedTitle(const QString &title)
@@ -149,17 +161,13 @@ void VideoModel::setUntracked(const QSet<qint64> &ids)
 
 void VideoModel::reindex()
 {
-    m_groups.clear();
     m_titles.clear();
     for (const VideoInfo &v : std::as_const(m_videos)) {
-        if (v.review) {
-            m_groups[v.reviewGroup > 0 ? v.reviewGroup : v.id] << v.id;
-        } else if (const QString t = foldedTitle(v.title); !t.isEmpty()) {
+        if (v.review)
+            continue;
+        if (const QString t = foldedTitle(v.title); !t.isEmpty())
             m_titles[t] << v.id;
-        }
     }
-    for (QVector<qint64> &ids : m_groups)
-        std::sort(ids.begin(), ids.end());
 }
 
 QVariantMap VideoModel::toMap(int row) const
@@ -188,6 +196,7 @@ void VideoModel::reset(const QVector<VideoInfo> &videos)
 {
     beginResetModel();
     m_videos = videos;
+    m_shown.clear();
     m_search.clear();
     m_search.reserve(videos.size());
     for (const VideoInfo &v : videos)
@@ -205,7 +214,6 @@ void VideoModel::upsert(const VideoInfo &video)
             m_search[i] = buildSearchText(video);
             reindex();
             emit dataChanged(index(i, 0), index(i, 0));
-            reviewOptionsChanged();
             // Accepted now: a card waiting on a video of this title says so.
             if (wasReview != video.review)
                 reviewRowsChanged({SameTitleRole});
@@ -217,17 +225,8 @@ void VideoModel::upsert(const VideoInfo &video)
     m_search << buildSearchText(video);
     reindex();
     endInsertRows();
-    if (video.review)
-        reviewOptionsChanged();
-    else
+    if (!video.review)
         reviewRowsChanged({SameTitleRole});
-}
-
-// A group gained or lost an option: its other cards show a different count,
-// and possibly a different one of them is on show.
-void VideoModel::reviewOptionsChanged()
-{
-    reviewRowsChanged({ReviewOptionRole, ReviewOptionsRole});
 }
 
 void VideoModel::reviewRowsChanged(const QVector<int> &roles)
@@ -247,11 +246,10 @@ void VideoModel::remove(qint64 videoId)
         beginRemoveRows(QModelIndex(), i, i);
         m_videos.removeAt(i);
         m_search.removeAt(i);
+        m_shown.remove(videoId);
         reindex();
         endRemoveRows();
-        if (review)
-            reviewOptionsChanged();
-        else
+        if (!review)
             reviewRowsChanged({SameTitleRole});
         return;
     }
@@ -346,13 +344,6 @@ bool VideoFilterModel::filterAcceptsRow(int sourceRow, const QModelIndex &) cons
     const VideoInfo &v = m_source->at(sourceRow);
     if (!inSection(v, m_section))
         return false;
-    if (v.review) {
-        // One card per group of options: the one on show, the first by default.
-        const QVector<qint64> options = m_source->reviewOptions(v);
-        const qint64 shown = m_reviewShown.value(v.reviewGroup > 0 ? v.reviewGroup : v.id, 0);
-        if (v.id != (options.contains(shown) ? shown : options.value(0)))
-            return false;
-    }
     if (!matchesFacet(v))
         return false;
     const QString &text = m_source->searchText(sourceRow);
@@ -438,24 +429,6 @@ QVariantList VideoFilterModel::snapshot() const
     for (int i = 0; i < n; ++i)
         list << m_source->toMap(mapToSource(index(i, 0)).row());
     return list;
-}
-
-qint64 VideoFilterModel::stepReview(qint64 videoId, int delta)
-{
-    for (const VideoInfo &v : m_source->videos()) {
-        if (v.id != videoId)
-            continue;
-        const QVector<qint64> options = m_source->reviewOptions(v);
-        if (options.size() < 2)
-            return videoId;
-        const int n = int(options.size());
-        const int next = ((int(options.indexOf(videoId)) + delta) % n + n) % n;
-        beginFilterEdit();
-        m_reviewShown.insert(v.reviewGroup > 0 ? v.reviewGroup : v.id, options.at(next));
-        endFilterEdit();
-        return options.at(next);
-    }
-    return videoId;
 }
 
 int VideoFilterModel::rowOfVideo(qint64 videoId) const

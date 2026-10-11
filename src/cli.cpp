@@ -59,12 +59,16 @@ int main(int argc, char **argv)
         {QStringLiteral("allow-unofficial"), QStringLiteral("Accept uploads that do not look official.")},
         {QStringLiteral("keep-youtube-audio"), QStringLiteral("Never replace the video's audio with the library track.")},
         {QStringLiteral("allow-still-images"), QStringLiteral("Accept videos whose picture never changes.")},
+        {QStringLiteral("min-subscribers"), QStringLiteral("Ignore uploads from channels with fewer subscribers, unless the channel is verified or one of several the upload is listed under; 0 ignores none."),
+         QStringLiteral("n"), QStringLiteral("5000")},
+        {QStringLiteral("small-channel-exception"), QStringLiteral("A channel that is never ignored as a small one, by its handle (@name), its id (UC…) or the address of its page (repeatable)."),
+         QStringLiteral("channel")},
         {QStringLiteral("retry"), QStringLiteral("Retry tracks that previously failed or had no video.")},
         {QStringLiteral("ytdlp-arg"), QStringLiteral("Extra argument passed to yt-dlp (repeatable)."), QStringLiteral("arg")},
         {QStringLiteral("cookies"), QStringLiteral("cookies.txt of a YouTube Premium account, for its higher audio bitrate."), QStringLiteral("file")},
         {QStringLiteral("sign-in-on-bot-check"), QStringLiteral("Where YouTube refuses a guest (\"Sign in to confirm you're not a bot\"), make the request with the account (needs --cookies).")},
-        {QStringLiteral("approve"), QStringLiteral("Accept a video that waits for review, by its YouTube id (repeatable)."), QStringLiteral("id")},
-        {QStringLiteral("reject"), QStringLiteral("Turn down a video that waits for review, by its YouTube id: it is deleted and its tracks have no video (repeatable)."), QStringLiteral("id")},
+        {QStringLiteral("approve"), QStringLiteral("Accept a video that waits for review, by its YouTube id, for the candidate track shown first; or for the track of a music file, as <id>=<file> (repeatable)."), QStringLiteral("id")},
+        {QStringLiteral("reject"), QStringLiteral("Turn down a video that waits for review, by its YouTube id: it is deleted and not offered to any of its candidate tracks again (repeatable)."), QStringLiteral("id")},
         {QStringLiteral("subtitles"), QStringLiteral("Languages of the subtitles to fetch with each video, e.g. \"en,ja\"."), QStringLiteral("languages")},
         {QStringLiteral("fetch-subtitles"), QStringLiteral("Fetch the subtitles that the videos already imported lack (needs --subtitles).")},
         {QStringLiteral("delete-untracked"), QStringLiteral("After reading the music folders, delete the videos that none of their tracks has.")},
@@ -236,6 +240,16 @@ int main(int argc, char **argv)
     cfg.allowUnofficial = parser.isSet(QStringLiteral("allow-unofficial"));
     cfg.replaceAudio = !parser.isSet(QStringLiteral("keep-youtube-audio"));
     cfg.skipStillImages = !parser.isSet(QStringLiteral("allow-still-images"));
+    cfg.minSubscribers = qMax(0, parser.value(QStringLiteral("min-subscribers")).toInt());
+    for (const QString &typed : parser.values(QStringLiteral("small-channel-exception"))) {
+        const QString channel = YtDlp::channelRef(typed);
+        if (channel.isEmpty()) {
+            out << "error: --small-channel-exception " << typed << ": not a channel's handle (@name), id (UC…) or address" << Qt::endl;
+            return 1;
+        }
+        if (!cfg.smallChannelExceptions.contains(channel))
+            cfg.smallChannelExceptions << channel;
+    }
     cfg.ytdlpArgs = parser.values(QStringLiteral("ytdlp-arg"));
     cfg.subtitleLangs = parser.value(QStringLiteral("subtitles")).split(QRegularExpression(QStringLiteral("[,\\s]+")), Qt::SkipEmptyParts);
     if (parser.isSet(QStringLiteral("fetch-subtitles")) && cfg.subtitleLangs.isEmpty()) {
@@ -346,9 +360,24 @@ int main(int argc, char **argv)
         const int n = mgr.reimport(db.trackIdsImportedBefore(reimportBefore.toSecsSinceEpoch()));
         out << "re-importing " << n << " tracks last looked up before " << reimportBefore.toString(Qt::ISODate) << Qt::endl;
     }
-    for (const QString &id : parser.values(QStringLiteral("approve"))) {
-        if (const auto v = db.videoByYtId(id))
-            mgr.approveVideo(v->id);
+    for (const QString &arg : parser.values(QStringLiteral("approve"))) {
+        // (A YouTube id has no "=" in it.)
+        const qsizetype eq = arg.indexOf(QLatin1Char('='));
+        const auto v = db.videoByYtId(eq < 0 ? arg : arg.left(eq));
+        if (!v) {
+            out << "no video " << arg.left(eq < 0 ? arg.size() : eq) << " in the library" << Qt::endl;
+            continue;
+        }
+        qint64 trackId = 0;
+        if (eq >= 0) {
+            const QVector<qint64> ids = db.trackIdsUnder(QFileInfo(arg.mid(eq + 1)).absoluteFilePath());
+            if (ids.isEmpty()) {
+                out << "no track at " << arg.mid(eq + 1) << Qt::endl;
+                continue;
+            }
+            trackId = ids.first();
+        }
+        mgr.approveVideo(v->id, trackId);
     }
     for (const QString &id : parser.values(QStringLiteral("reject"))) {
         if (const auto v = db.videoByYtId(id))

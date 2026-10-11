@@ -23,6 +23,8 @@ struct ImportSettings {
     bool replaceAudio = true;      // mux in library audio when it beats YouTube's
     bool allowUnofficial = false;  // accept uploads that do not look official
     bool skipStillImages = true;   // reject videos whose picture never changes
+    int minSubscribers = 5000;     // ignore uploads from channels with fewer subscribers; 0: none are ignored
+    QStringList smallChannelExceptions; // channels that are never ignored as small: "@handle" or "UC…" (YtDlp::channelRef)
     int concurrency = 2;
     QStringList ytdlpArgs;         // extra yt-dlp arguments (cookies, proxies, ...)
     QString cookiesFile;           // cookies.txt of a YouTube Premium account; empty: none
@@ -84,10 +86,19 @@ public:
     bool replaceWith(qint64 videoId, const QString &ytId);
     bool replacing() const { return m_replacing; }
 
-    // The user's verdict on a video that waits for review: it joins the
-    // library, or its tracks have no video and it is deleted.
-    void approveVideo(qint64 videoId);
+    // The user's verdict on a video that waits for review. Accepted, it joins
+    // the library as the video of one of its candidate tracks: `trackId`
+    // (any file of it), or the candidate shown first. Rejected, it is deleted
+    // and not offered to any of its candidates again. Either way its other
+    // candidates wait on what else they are candidates of, or have no video.
+    // The verdict is carried out on a thread of its own: videoChanged or
+    // videoRemoved says when.
+    void approveVideo(qint64 videoId, qint64 trackId = 0);
     void rejectVideo(qint64 videoId);
+    // The candidate tracks of a video under review in the order they are
+    // shown: first the one the upload is titled after (and no other), then
+    // by how close each one's waveform is to the upload's.
+    static QVector<Database::Candidate> candidatesInOrder(Database *db, const VideoInfo &video);
 
     // Looks at every video in the library again with the account's cookies
     // and rebuilds those YouTube now offers in better quality.
@@ -121,6 +132,8 @@ public:
     int queuedCount() const { return m_queue.size(); }
     int activeCount() const { return m_active; }
     bool busy() const { return m_scanning || m_upgrading || m_reviewJobs > 0 || m_blocked || m_active > 0 || !m_queue.isEmpty() || m_replacing; }
+    // Verdicts and the like that are being carried out.
+    bool settling() const { return m_reviewJobs > 0; }
 
     static QString dataDir(const QString &mvDir);
     // What is remembered about candidate videos between tracks.
@@ -145,21 +158,49 @@ private:
     void enqueue(qint64 trackId);
     // Deletes an untracked video with what is kept beside it.
     void removeUntracked(const VideoInfo &v);
-    // Re-import: deletes the track's videos (its own, or the options it has
-    // waiting) whose file is empty or missing. True when there were any.
+    // Re-import: deletes the track's videos (its own, and those under review
+    // it is a candidate of) whose file is empty or missing. True when there
+    // were any.
     bool dropBrokenVideos(const TrackInfo &track);
-    // Re-import: deletes the options the track has waiting for review that
-    // today's rules rule out by their length for every track waiting on
-    // them. Needs no request. True when there were any.
+    // Re-import: the track is no longer a candidate of the videos under
+    // review that today's rules rule out for it by their length. Needs no
+    // request. True when there were any.
     bool dropOutdatedOptions(const TrackInfo &track);
+    // Re-import: a video that tracks of several recordings have, from before
+    // a video had one track, stays with the one that is the closest fit to
+    // its upload; the others have no video and are looked up. Needs no
+    // request. True when the video was such a one.
+    bool settleShared(qint64 videoId, const ImportSettings &cfg);
+    // Deletes a video with what is kept beside it.
+    void discardVideo(const VideoInfo &v);
+    // The track is no longer a candidate of these videos under review; one
+    // left without a candidate is deleted. Claims each video in turn: not
+    // to be called with a claim held.
+    void withdraw(const TrackInfo &track, const QVector<VideoInfo> &from);
+    // A video has left the review queue, accepted for `keeper` or deleted:
+    // the tracks that were its candidates wait on what else they are
+    // candidates of; one with nothing left has no video.
+    void releaseCandidates(qint64 videoId, const QVector<Database::Candidate> &were, const TrackInfo *keeper, const QString &why);
+    // The track becomes one more candidate of a video under review; where it
+    // is the better audio, its audio is put in the file beside the others'.
+    // `align`: the track against the upload's own audio. Call with the
+    // video claimed.
+    bool addCandidate(const VideoInfo &video, const TrackInfo &track, const AudioAlign::Result &align,
+                      const ImportSettings &cfg, QString *error);
+    // Measures the candidates that have not been (those of a library from
+    // before review went by video), and gives each its audio in the file.
+    void prepareCandidates(const ImportSettings &cfg);
+    bool measureCandidates(qint64 videoId, const ImportSettings &cfg);
+    void approveJob(qint64 videoId, qint64 trackId, const ImportSettings &cfg);
+    void rejectJob(qint64 videoId);
+    void requeuePending(); // any thread
     void pump();
     void onScanFinished(const LibraryScanner::Result &r);
     void onJobFinished(qint64 trackId);
     void runJob(qint64 trackId, const ImportSettings &cfg);
     // Rebuilds a video's file with the track's audio as its main audio.
     bool putLibraryAudioIn(const VideoInfo &video, const TrackInfo &track, const AudioAlign::Result &align,
-                           const ImportSettings &cfg, QString *error, bool review = false,
-                           int ytAudioStream = 0);
+                           const ImportSettings &cfg, QString *error, bool review = false);
     void upgradeVideos(const ImportSettings &cfg);
     void subtitleVideos(const ImportSettings &cfg);
     // "done" when the video was rebuilt, "skipped" when it is as good as it gets.
@@ -180,6 +221,8 @@ private:
     QThreadPool m_scanPool;
     QThreadPool m_auditPool;
     QThreadPool m_replacePool;
+    QThreadPool m_verdictPool;
+    bool m_settledOnce = false; // what a library from before needs was asked for, this run
     std::atomic<bool> m_replacing{false};
     // The track a replace job works for: the best file of the video's.
     std::optional<TrackInfo> replaceTrack(const VideoInfo &video);

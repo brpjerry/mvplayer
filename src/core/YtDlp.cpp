@@ -15,6 +15,8 @@
 #include <QFile>
 #include <QJsonArray>
 #include <QJsonDocument>
+#include <QRegularExpression>
+#include <QUrl>
 #include <QTemporaryFile>
 
 #include <algorithm>
@@ -510,6 +512,91 @@ bool YtDlp::premiumInfo(const QString &id, QJsonObject *info, QString *error)
         return false;
     }
     return true;
+}
+
+bool YtDlp::pageInfo(const QString &id, QJsonObject *info, QString *error)
+{
+    // What came with its audio says the same, however long ago.
+    const QString entry = cacheEntry(id);
+    if (!entry.isEmpty()) {
+        QFile jf(QDir(entry).filePath(QStringLiteral("audio.info.json")));
+        if (jf.open(QIODevice::ReadOnly)) {
+            const QJsonObject cached = QJsonDocument::fromJson(jf.readAll()).object();
+            if (cached.contains(QLatin1String("channel"))) {
+                *info = cached;
+                ++m_cacheHits;
+                return true;
+            }
+        }
+    }
+    ProcOptions opts;
+    opts.cancel = m_cancel;
+    opts.timeoutMs = 120000;
+    const ProcResult r = run({QStringLiteral("-J"), url(id)}, opts);
+    if (!r.ok()) {
+        if (error)
+            *error = r.errorText();
+        return false;
+    }
+    *info = QJsonDocument::fromJson(r.out).object();
+    if (info->isEmpty()) {
+        if (error)
+            *error = QStringLiteral("yt-dlp said nothing about the upload");
+        return false;
+    }
+    return true;
+}
+
+YtDlp::Channel YtDlp::channelOf(const QJsonObject &info, const QString &listedAs)
+{
+    Channel c;
+    c.id = info.value(QLatin1String("channel_id")).toString();
+    c.name = info.value(QLatin1String("channel")).toString();
+    if (c.name.isEmpty())
+        c.name = info.value(QLatin1String("uploader")).toString();
+    c.verified = info.value(QLatin1String("channel_is_verified")).toBool();
+    // Several channels: yt-dlp names them as the upload's creators, the one
+    // it was uploaded to first; the search results call it "A and B" (or
+    // "A and 2 more").
+    const QJsonArray creators = info.value(QLatin1String("creators")).toArray();
+    c.several = (creators.size() >= 2 && !c.name.isEmpty() && creators.first().toString() == c.name)
+        || (!c.name.isEmpty() && listedAs != c.name && listedAs.startsWith(c.name + QStringLiteral(" and ")));
+    const QJsonValue count = info.value(QLatin1String("channel_follower_count"));
+    if (!c.several && count.isDouble())
+        c.subscribers = qint64(count.toDouble());
+    // The handle: what yt-dlp calls the uploader's id, and the end of the
+    // uploader's address.
+    c.handle = info.value(QLatin1String("uploader_id")).toString();
+    if (!c.handle.startsWith(QLatin1Char('@')))
+        c.handle = channelRef(info.value(QLatin1String("uploader_url")).toString());
+    if (!c.handle.startsWith(QLatin1Char('@')))
+        c.handle = QStringLiteral("");
+    return c;
+}
+
+QString YtDlp::channelRef(const QString &typed)
+{
+    QString s = typed.trimmed();
+    // An address: what follows the site's name, without what follows a "?".
+    static const QRegularExpression site(QStringLiteral("^(?:https?://)?(?:www\\.|m\\.|music\\.)?youtube\\.com/"),
+                                         QRegularExpression::CaseInsensitiveOption);
+    const QRegularExpressionMatch at = site.match(s);
+    const bool address = at.hasMatch();
+    if (address)
+        s = QUrl::fromPercentEncoding(s.mid(at.capturedLength()).section(QLatin1Char('?'), 0, 0).section(QLatin1Char('#'), 0, 0).toUtf8());
+    if (s.startsWith(QLatin1String("channel/")))
+        s = s.mid(8);
+    else if (address && !s.startsWith(QLatin1Char('@')))
+        return {}; // youtube.com/c/Name, /user/Name, a video's address: none of them is the handle
+    s = s.section(QLatin1Char('/'), 0, 0);
+    static const QRegularExpression id(QStringLiteral("^UC[A-Za-z0-9_-]{22}$"));
+    if (id.match(s).hasMatch())
+        return s;
+    // Letters and digits of any script, with ". _ - ·" between them. A word
+    // without the "@" may as well be a channel's name.
+    static const QRegularExpression handle(QStringLiteral("^@[\\p{L}\\p{N}._\\-\\x{00B7}]{3,}$"),
+                                           QRegularExpression::UseUnicodePropertiesOption);
+    return handle.match(s).hasMatch() ? s.toLower() : QString();
 }
 
 YtDlp::Account YtDlp::checkAccount(const QString &id, double *kbps, QString *error)

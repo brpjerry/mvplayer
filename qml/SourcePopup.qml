@@ -26,6 +26,16 @@ Popup {
         flick.contentY = 0
     }
     onAboutToShow: refresh()
+    // Under review it shows the music file of the candidate track on show:
+    // another one comes on show while it is open.
+    Connections {
+        target: App
+        enabled: root.visible
+        function onCandidatesChanged() {
+            root.info = root.videoId >= 0 ? App.videoSources(root.videoId) : ({})
+            root.fileIndex = 0
+        }
+    }
     onVideoIdChanged: {
         if (videoId < 0)
             close()

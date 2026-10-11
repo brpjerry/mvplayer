@@ -87,7 +87,14 @@ TrackInfo readTrack(const QSqlQuery &q)
 const char *kVideoCols =
     "id, yt_id, path, thumb, title, artist, album_artist, album, genre, year, track_no, duration, "
     "width, height, fps, vcodec, audio_source, audio_detail, yt_title, yt_channel, tags_json, added_at, yt_abr, "
-    "review, review_start, review_end, review_group, yt_channel_id";
+    "review, review_start, review_end, yt_stream, yt_channel_id, yt_channel_subs, yt_channel_verified, yt_channel_handle";
+
+// Text that was kept, though it may be empty: never the null string, which
+// stands for "not kept".
+QString keptText(const QString &s)
+{
+    return s.isNull() ? QStringLiteral("") : s;
+}
 
 VideoInfo readVideo(const QSqlQuery &q)
 {
@@ -119,8 +126,13 @@ VideoInfo readVideo(const QSqlQuery &q)
     v.review = q.value(i++).toBool();
     v.reviewStart = q.value(i++).toDouble();
     v.reviewEnd = q.value(i++).toDouble();
-    v.reviewGroup = q.value(i++).toLongLong();
+    v.ytStream = q.value(i++).toInt();
     v.ytChannelId = q.value(i++).toString();
+    v.ytChannelSubs = q.value(i).isNull() ? -2 : q.value(i).toLongLong();
+    ++i;
+    v.ytChannelVerified = q.value(i++).toBool();
+    if (!q.value(i).isNull())
+        v.ytChannelHandle = keptText(q.value(i).toString());
     return v;
 }
 
@@ -185,9 +197,84 @@ QSqlDatabase Database::conn()
     return db;
 }
 
-// The layout below is the only one this version reads. A database written
-// with another layout is refused, not converted.
-constexpr int kSchema = 4;
+// The layout below is the one this version reads and writes. The one before
+// it is brought up to it (upgradeLayout); any other is refused.
+constexpr int kSchema = 5;
+
+namespace {
+// A track is a recording: its number, or minus the file's id where it has none.
+const char *kTrackKeySql = "CASE WHEN %1recording > 0 THEN %1recording ELSE -%1id END";
+
+QString trackKeySql(const char *alias = "")
+{
+    return QString::fromLatin1(kTrackKeySql).arg(QLatin1String(alias));
+}
+} // namespace
+
+// Layout 4 had tracks share videos, and had review "groups": videos that
+// waited as options for the same tracks, each track pointing at one of them.
+// In layout 5 a video under review has candidates, and a track's video_id is
+// its video in the library and nothing else.
+bool Database::upgradeLayout(int from, QString *error)
+{
+    if (from != 4)
+        return false;
+    QSqlDatabase db = conn();
+    const QStringList steps = {
+        QStringLiteral("CREATE TABLE candidates ("
+                       " video_id INTEGER NOT NULL REFERENCES videos(id) ON DELETE CASCADE,"
+                       " track_key INTEGER NOT NULL,"
+                       " stream INTEGER NOT NULL DEFAULT 0, fit REAL NOT NULL DEFAULT 0, audio_detail TEXT,"
+                       " PRIMARY KEY (video_id, track_key))"),
+        QStringLiteral("ALTER TABLE videos ADD COLUMN yt_stream INTEGER NOT NULL DEFAULT 0"),
+        // Where the library's audio was put in, YouTube's is the stream after it.
+        QStringLiteral("UPDATE videos SET yt_stream = CASE WHEN audio_source = 'library' THEN 1 ELSE 0 END"),
+        // Every option of a group becomes a video with the group's tracks as
+        // its candidates. Its file was made with the audio of the track it
+        // is listed under: that candidate has the stream.
+        QStringLiteral(
+            "INSERT INTO candidates (video_id, track_key, stream, fit, audio_detail)"
+            " SELECT v.id, %1,"
+            "  MAX(CASE WHEN v.audio_source = 'library' AND t.title IS v.title AND t.album IS v.album THEN 1 ELSE 0 END), 0, ''"
+            " FROM videos v"
+            " JOIN videos o ON o.review = 1 AND COALESCE(NULLIF(o.review_group, 0), o.id) = COALESCE(NULLIF(v.review_group, 0), v.id)"
+            " JOIN tracks t ON t.video_id = o.id"
+            " WHERE v.review = 1 GROUP BY v.id, %1").arg(trackKeySql("t.")),
+        // (Tags may have changed since: a video's only candidate is the one.)
+        QStringLiteral(
+            "UPDATE candidates SET stream = 1 WHERE stream = 0"
+            " AND video_id IN (SELECT id FROM videos WHERE review = 1 AND audio_source = 'library')"
+            " AND (SELECT COUNT(*) FROM candidates c WHERE c.video_id = candidates.video_id) = 1"),
+        QStringLiteral(
+            "UPDATE candidates SET audio_detail = (SELECT audio_detail FROM videos WHERE id = candidates.video_id) WHERE stream = 1"),
+        QStringLiteral(
+            "UPDATE tracks SET state = CASE WHEN state = 'done' THEN 'review' ELSE state END, video_id = NULL"
+            " WHERE video_id IN (SELECT id FROM videos WHERE review = 1)"),
+        QStringLiteral("CREATE INDEX candidates_track ON candidates(track_key)"),
+        QStringLiteral("PRAGMA user_version = 5"),
+    };
+    if (!db.transaction()) {
+        if (error)
+            *error = db.lastError().text();
+        return false;
+    }
+    for (const QString &sql : steps) {
+        QSqlQuery q(db);
+        if (!q.exec(sql)) {
+            if (error)
+                *error = QStringLiteral("could not bring %1 up to this version: %2").arg(m_file, q.lastError().text());
+            db.rollback();
+            return false;
+        }
+    }
+    if (!db.commit()) {
+        if (error)
+            *error = db.lastError().text();
+        return false;
+    }
+    qInfo("[db] library brought up from layout 4: one track per video, review by video");
+    return true;
+}
 
 bool Database::init(QString *error)
 {
@@ -204,7 +291,10 @@ bool Database::init(QString *error)
         int schema = 0;
         if (q.exec(QStringLiteral("PRAGMA user_version")) && q.next())
             schema = q.value(0).toInt();
-        if (exists && schema != kSchema) {
+        if (exists && schema == kSchema - 1) {
+            if (!upgradeLayout(schema, error))
+                return false;
+        } else if (exists && schema != kSchema) {
             if (error) {
                 *error = QStringLiteral("%1 was written by another version of mvplayer (layout %2, this one uses %3);"
                                         " move it away or delete it to start a new library")
@@ -228,8 +318,10 @@ bool Database::init(QString *error)
             " tags_json TEXT,"
             " added_at INTEGER,"
             " yt_abr REAL,"
-            " review INTEGER NOT NULL DEFAULT 0, review_start REAL, review_end REAL, review_group INTEGER,"
+            " review INTEGER NOT NULL DEFAULT 0, review_start REAL, review_end REAL,"
+            " yt_stream INTEGER NOT NULL DEFAULT 0,"
             " yt_channel_id TEXT,"
+            " yt_channel_subs INTEGER, yt_channel_verified INTEGER NOT NULL DEFAULT 0, yt_channel_handle TEXT,"
             " kept INTEGER NOT NULL DEFAULT 0)"),
         QStringLiteral(
             "CREATE TABLE IF NOT EXISTS tracks ("
@@ -261,6 +353,14 @@ bool Database::init(QString *error)
                        " artist TEXT NOT NULL, channel_id TEXT NOT NULL DEFAULT '', channel TEXT NOT NULL DEFAULT '',"
                        " source TEXT, checked_until INTEGER NOT NULL DEFAULT 0,"
                        " PRIMARY KEY (artist, channel_id, channel))"),
+        // The tracks a video under review could belong to: by recording, or
+        // by minus the track's id where the recording is not known.
+        QStringLiteral("CREATE TABLE IF NOT EXISTS candidates ("
+                       " video_id INTEGER NOT NULL REFERENCES videos(id) ON DELETE CASCADE,"
+                       " track_key INTEGER NOT NULL,"
+                       " stream INTEGER NOT NULL DEFAULT 0, fit REAL NOT NULL DEFAULT 0, audio_detail TEXT,"
+                       " PRIMARY KEY (video_id, track_key))"),
+        QStringLiteral("CREATE INDEX IF NOT EXISTS candidates_track ON candidates(track_key)"),
         QStringLiteral("CREATE INDEX IF NOT EXISTS tracks_state ON tracks(state)"),
         QStringLiteral("CREATE INDEX IF NOT EXISTS tracks_video ON tracks(video_id)"),
         QStringLiteral("CREATE INDEX IF NOT EXISTS tracks_recording ON tracks(recording)"),
@@ -311,6 +411,23 @@ bool Database::init(QString *error)
                 has |= q.value(1).toString() == QLatin1String("kept");
         }
         if (!has && !q.exec(QStringLiteral("ALTER TABLE videos ADD COLUMN kept INTEGER NOT NULL DEFAULT 0"))) {
+            if (error)
+                *error = q.lastError().text();
+            return false;
+        }
+    }
+    // What an upload's page says of its channel, kept since small channels
+    // can be ignored: its subscribers and its verified mark, and its handle,
+    // by which an exception names it.
+    for (const char *column : {"yt_channel_subs INTEGER", "yt_channel_verified INTEGER NOT NULL DEFAULT 0", "yt_channel_handle TEXT"}) {
+        QSqlQuery q(db);
+        const QString name = QString::fromLatin1(column).section(QLatin1Char(' '), 0, 0);
+        bool has = false;
+        if (q.exec(QStringLiteral("PRAGMA table_info(videos)"))) {
+            while (q.next())
+                has |= q.value(1).toString() == name;
+        }
+        if (!has && !q.exec(QStringLiteral("ALTER TABLE videos ADD COLUMN ") + QLatin1String(column))) {
             if (error)
                 *error = q.lastError().text();
             return false;
@@ -478,16 +595,17 @@ void Database::setTrackAbsent(qint64 id, bool absent)
     run(q);
 }
 
-// Of the options that wait for review for a track, the track is linked to
-// one: the others are its videos as well. Written so that the indexes
-// serve: the linked videos and their review groups are gathered once, not
-// searched for again per video (that took seconds on a large library, on
-// the main thread, every time the importer's activity changed).
+// A video in the library is tracked by the track that has it, one under
+// review by its candidates. Written so that the indexes serve: the videos
+// that are had and those with a candidate are gathered once, not searched
+// for again per video (that took seconds on a large library, on the main
+// thread, every time the importer's activity changed).
 const char *kUntrackedSql =
     "WITH linked AS (SELECT DISTINCT video_id AS id FROM tracks WHERE absent = 0 AND video_id IS NOT NULL),"
-    " groups AS (SELECT DISTINCT COALESCE(NULLIF(v.review_group, 0), v.id) AS g FROM videos v JOIN linked ON linked.id = v.id WHERE v.review = 1)"
-    " %1 FROM videos WHERE kept = 0 AND id NOT IN (SELECT id FROM linked)"
-    " AND NOT (review = 1 AND COALESCE(NULLIF(review_group, 0), id) IN (SELECT g FROM groups))";
+    " wanted AS (SELECT DISTINCT c.video_id AS id FROM candidates c WHERE"
+    "  (c.track_key > 0 AND EXISTS (SELECT 1 FROM tracks t WHERE t.recording = c.track_key AND t.absent = 0))"
+    "  OR (c.track_key < 0 AND EXISTS (SELECT 1 FROM tracks t WHERE t.id = -c.track_key AND t.absent = 0)))"
+    " %1 FROM videos WHERE kept = 0 AND id NOT IN (SELECT id FROM linked) AND id NOT IN (SELECT id FROM wanted)";
 
 QVector<VideoInfo> Database::untrackedVideos()
 {
@@ -544,7 +662,7 @@ void Database::setTrackResult(qint64 id, const QString &state, qint64 videoId, c
     run(q);
 
     // The search ran under this file's title.
-    if (state == QLatin1String("done") || state == QLatin1String("not_found")) {
+    if (state == QLatin1String("done") || state == QLatin1String("review") || state == QLatin1String("not_found")) {
         QSqlQuery t(conn());
         t.prepare(QStringLiteral("UPDATE tracks SET searched_title = title WHERE id = ?"));
         t.addBindValue(id);
@@ -594,11 +712,40 @@ int Database::requeueUntriedTitles()
 
 void Database::setRecording(qint64 trackId, qint64 recording)
 {
+    const std::optional<TrackInfo> before = track(trackId);
     QSqlQuery q(conn());
     q.prepare(QStringLiteral("UPDATE tracks SET recording = ? WHERE id = ?"));
     q.addBindValue(recording);
     q.addBindValue(trackId);
     run(q);
+    // What the track is a candidate of goes with it, unless other files of
+    // the recording it leaves are still there to be that candidate.
+    if (!before)
+        return;
+    const qint64 from = trackKey(*before), to = recording > 0 ? recording : -trackId;
+    if (from == to)
+        return;
+    if (from > 0) {
+        QSqlQuery left(conn());
+        left.prepare(QStringLiteral("SELECT 1 FROM tracks WHERE recording = ? LIMIT 1"));
+        left.addBindValue(from);
+        if (run(left) && left.next())
+            return;
+    }
+    rekeyCandidates(from, to);
+}
+
+void Database::rekeyCandidates(qint64 fromKey, qint64 toKey)
+{
+    QSqlQuery move(conn());
+    move.prepare(QStringLiteral("UPDATE OR IGNORE candidates SET track_key = ? WHERE track_key = ?"));
+    move.addBindValue(toKey);
+    move.addBindValue(fromKey);
+    run(move);
+    QSqlQuery rest(conn());
+    rest.prepare(QStringLiteral("DELETE FROM candidates WHERE track_key = ?"));
+    rest.addBindValue(fromKey);
+    run(rest);
 }
 
 void Database::joinRecording(qint64 trackId, qint64 memberId, bool trackLeads)
@@ -767,8 +914,9 @@ qint64 Database::insertVideo(const VideoInfo &v)
     q.prepare(QStringLiteral(
         "INSERT INTO videos (yt_id, path, thumb, title, artist, album_artist, album, genre, year,"
         " track_no, duration, width, height, fps, vcodec, audio_source, audio_detail, yt_title,"
-        " yt_channel, tags_json, added_at, yt_abr, review, review_start, review_end, review_group, yt_channel_id)"
-        " VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)"));
+        " yt_channel, tags_json, added_at, yt_abr, review, review_start, review_end, yt_stream, yt_channel_id,"
+        " yt_channel_subs, yt_channel_verified, yt_channel_handle)"
+        " VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)"));
     q.addBindValue(v.ytId);
     q.addBindValue(storedPath(v.path));
     q.addBindValue(storedPath(v.thumb));
@@ -794,8 +942,11 @@ qint64 Database::insertVideo(const VideoInfo &v)
     q.addBindValue(v.review);
     q.addBindValue(v.reviewStart);
     q.addBindValue(v.reviewEnd);
-    q.addBindValue(v.reviewGroup > 0 ? QVariant(v.reviewGroup) : QVariant());
+    q.addBindValue(v.ytStream);
     q.addBindValue(v.ytChannelId);
+    q.addBindValue(v.ytChannelSubs > -2 ? QVariant(v.ytChannelSubs) : QVariant());
+    q.addBindValue(v.ytChannelVerified);
+    q.addBindValue(v.ytChannelHandle.isNull() ? QVariant() : QVariant(v.ytChannelHandle));
     if (!run(q))
         return 0;
     return q.lastInsertId().toLongLong();
@@ -824,7 +975,7 @@ void Database::updateVideoMedia(const VideoInfo &v)
     QSqlQuery q(conn());
     q.prepare(QStringLiteral(
         "UPDATE videos SET duration = ?, width = ?, height = ?, fps = ?, vcodec = ?, audio_source = ?,"
-        " audio_detail = ?, yt_abr = ?, review = ?, review_start = ?, review_end = ?, review_group = ? WHERE id = ?"));
+        " audio_detail = ?, yt_abr = ?, review = ?, review_start = ?, review_end = ?, yt_stream = ? WHERE id = ?"));
     q.addBindValue(v.duration);
     q.addBindValue(v.width);
     q.addBindValue(v.height);
@@ -836,19 +987,113 @@ void Database::updateVideoMedia(const VideoInfo &v)
     q.addBindValue(v.review);
     q.addBindValue(v.reviewStart);
     q.addBindValue(v.reviewEnd);
-    q.addBindValue(v.reviewGroup > 0 ? QVariant(v.reviewGroup) : QVariant());
+    q.addBindValue(v.ytStream);
     q.addBindValue(v.id);
     run(q);
 }
 
-QVector<VideoInfo> Database::reviewOptions(qint64 group)
+void Database::updateVideoChannel(const VideoInfo &v)
+{
+    QSqlQuery q(conn());
+    q.prepare(QStringLiteral("UPDATE videos SET yt_channel_id = ?, yt_channel_subs = ?, yt_channel_verified = ?,"
+                             " yt_channel_handle = ? WHERE id = ?"));
+    q.addBindValue(keptText(v.ytChannelId));
+    q.addBindValue(v.ytChannelSubs > -2 ? QVariant(v.ytChannelSubs) : QVariant());
+    q.addBindValue(v.ytChannelVerified);
+    q.addBindValue(v.ytChannelHandle.isNull() ? QVariant() : QVariant(v.ytChannelHandle));
+    q.addBindValue(v.id);
+    run(q);
+}
+
+void Database::addCandidate(qint64 videoId, const TrackInfo &track, int stream, double fit, const QString &audioDetail)
+{
+    QSqlQuery q(conn());
+    q.prepare(QStringLiteral("INSERT INTO candidates (video_id, track_key, stream, fit, audio_detail) VALUES (?, ?, ?, ?, ?)"
+                             " ON CONFLICT(video_id, track_key) DO UPDATE SET stream = excluded.stream, fit = excluded.fit,"
+                             " audio_detail = excluded.audio_detail"));
+    q.addBindValue(videoId);
+    q.addBindValue(trackKey(track));
+    q.addBindValue(stream);
+    q.addBindValue(fit);
+    q.addBindValue(QString(audioDetail.isNull() ? QStringLiteral("") : audioDetail));
+    run(q);
+}
+
+void Database::removeCandidate(qint64 videoId, const TrackInfo &track)
+{
+    QSqlQuery q(conn());
+    q.prepare(QStringLiteral("DELETE FROM candidates WHERE video_id = ? AND track_key = ?"));
+    q.addBindValue(videoId);
+    q.addBindValue(trackKey(track));
+    run(q);
+}
+
+Database::Transaction::Transaction(Database *db)
+    : m_db(db)
+{
+    QSqlQuery q(m_db->conn());
+    m_open = q.exec(QStringLiteral("BEGIN IMMEDIATE"));
+}
+
+Database::Transaction::~Transaction()
+{
+    if (!m_open)
+        return;
+    QSqlQuery q(m_db->conn());
+    q.exec(QStringLiteral("COMMIT"));
+}
+
+void Database::clearCandidates(qint64 videoId)
+{
+    QSqlQuery q(conn());
+    q.prepare(QStringLiteral("DELETE FROM candidates WHERE video_id = ?"));
+    q.addBindValue(videoId);
+    run(q);
+}
+
+QVector<Database::Candidate> Database::candidates(qint64 videoId)
+{
+    QVector<Candidate> out;
+    QSqlQuery q(conn());
+    q.prepare(QStringLiteral("SELECT track_key, stream, fit, audio_detail FROM candidates WHERE video_id = ? ORDER BY rowid"));
+    q.addBindValue(videoId);
+    if (!run(q))
+        return out;
+    while (q.next()) {
+        const qint64 key = q.value(0).toLongLong();
+        QSqlQuery t(conn());
+        t.prepare(QStringLiteral("SELECT %1 FROM tracks WHERE absent = 0 AND %2 = ?")
+                      .arg(QLatin1String(kTrackCols), key > 0 ? QStringLiteral("recording") : QStringLiteral("id")));
+        t.addBindValue(key > 0 ? key : -key);
+        if (!run(t))
+            continue;
+        std::optional<TrackInfo> best;
+        while (t.next()) {
+            const TrackInfo file = readTrack(t);
+            if (!best || betterSource(file, *best))
+                best = file;
+        }
+        if (best)
+            out << Candidate{*best, q.value(1).toInt(), q.value(2).toDouble(), q.value(3).toString()};
+    }
+    return out;
+}
+
+int Database::candidateCount(qint64 videoId)
+{
+    QSqlQuery q(conn());
+    q.prepare(QStringLiteral("SELECT COUNT(*) FROM candidates WHERE video_id = ?"));
+    q.addBindValue(videoId);
+    return run(q) && q.next() ? q.value(0).toInt() : 0;
+}
+
+QVector<VideoInfo> Database::candidacies(const TrackInfo &track)
 {
     QVector<VideoInfo> out;
     QSqlQuery q(conn());
-    q.prepare(QStringLiteral("SELECT %1 FROM videos WHERE review = 1 AND (review_group = ? OR id = ?) ORDER BY id")
+    q.prepare(QStringLiteral("SELECT %1 FROM videos WHERE review = 1 AND id IN (SELECT video_id FROM candidates WHERE track_key = ?) ORDER BY id")
                   .arg(QLatin1String(kVideoCols)));
-    q.addBindValue(group);
-    q.addBindValue(group);
+    q.addBindValue(trackKey(track));
     if (run(q)) {
         while (q.next())
             out << resolved(readVideo(q));
@@ -856,13 +1101,45 @@ QVector<VideoInfo> Database::reviewOptions(qint64 group)
     return out;
 }
 
-void Database::relinkTracks(qint64 fromVideoId, qint64 toVideoId)
+QVector<qint64> Database::dropCandidaciesOfTracksWithVideos()
+{
+    QVector<qint64> videos;
+    const QString settled = QStringLiteral(
+        "track_key IN (SELECT %1 FROM tracks WHERE absent = 0 AND state = 'done' AND video_id IS NOT NULL)").arg(trackKeySql());
+    QSqlQuery q(conn());
+    q.prepare(QStringLiteral("SELECT DISTINCT video_id FROM candidates WHERE ") + settled);
+    if (run(q)) {
+        while (q.next())
+            videos << q.value(0).toLongLong();
+    }
+    if (!videos.isEmpty()) {
+        QSqlQuery d(conn());
+        d.prepare(QStringLiteral("DELETE FROM candidates WHERE ") + settled);
+        run(d);
+    }
+    return videos;
+}
+
+int Database::requeueTracksWithoutCandidacies()
 {
     QSqlQuery q(conn());
-    q.prepare(QStringLiteral("UPDATE tracks SET video_id = ? WHERE video_id = ?"));
-    q.addBindValue(toVideoId);
-    q.addBindValue(fromVideoId);
-    run(q);
+    q.prepare(QStringLiteral("UPDATE tracks SET state = 'pending', message = '' WHERE state = 'review' AND absent = 0"
+                             " AND NOT EXISTS (SELECT 1 FROM candidates c JOIN videos v ON v.id = c.video_id AND v.review = 1"
+                             "  WHERE c.track_key = %1)").arg(trackKeySql("tracks.")));
+    return run(q) ? q.numRowsAffected() : 0;
+}
+
+QVector<qint64> Database::sharedVideoIds()
+{
+    QVector<qint64> out;
+    QSqlQuery q(conn());
+    q.prepare(QStringLiteral("SELECT video_id FROM tracks WHERE absent = 0 AND video_id IS NOT NULL"
+                             " GROUP BY video_id HAVING COUNT(DISTINCT %1) > 1 ORDER BY video_id").arg(trackKeySql()));
+    if (run(q)) {
+        while (q.next())
+            out << q.value(0).toLongLong();
+    }
+    return out;
 }
 
 bool Database::isArtistChannel(const QString &artist, const QString &channelId, const QString &channelName)
@@ -929,25 +1206,20 @@ void Database::setTrackPending(qint64 trackId)
     run(q);
 }
 
-void Database::unlinkTrack(qint64 id)
+QVector<TrackInfo> Database::unlinkOthers(qint64 videoId, const TrackInfo &keeper)
 {
+    QVector<TrackInfo> out;
+    for (const TrackInfo &t : tracksForVideo(videoId)) {
+        if (trackKey(t) != trackKey(keeper))
+            out << t;
+    }
     QSqlQuery q(conn());
     q.prepare(QStringLiteral("UPDATE tracks SET state = 'pending', video_id = NULL, message = ''"
-                             " WHERE id = ? OR (recording > 0 AND recording = (SELECT recording FROM tracks WHERE id = ?))"));
-    q.addBindValue(id);
-    q.addBindValue(id);
-    run(q);
-}
-
-void Database::linkTrack(qint64 id, qint64 videoId)
-{
-    QSqlQuery q(conn());
-    q.prepare(QStringLiteral("UPDATE tracks SET video_id = ?"
-                             " WHERE id = ? OR (recording > 0 AND recording = (SELECT recording FROM tracks WHERE id = ?))"));
+                             " WHERE video_id = ? AND %1 != ?").arg(trackKeySql()));
     q.addBindValue(videoId);
-    q.addBindValue(id);
-    q.addBindValue(id);
+    q.addBindValue(trackKey(keeper));
     run(q);
+    return out;
 }
 
 void Database::setTrackReimport(qint64 trackId)
@@ -995,7 +1267,7 @@ QVector<qint64> Database::trackIdsImportedBefore(qint64 secs)
 {
     QVector<qint64> out;
     QSqlQuery q(conn());
-    q.prepare(QStringLiteral("SELECT id FROM tracks WHERE absent = 0 AND state = 'done' AND video_id IS NOT NULL"
+    q.prepare(QStringLiteral("SELECT id FROM tracks WHERE absent = 0 AND ((state = 'done' AND video_id IS NOT NULL) OR state = 'review')"
                              " AND last_attempt < ? ORDER BY path"));
     q.addBindValue(secs);
     if (run(q)) {

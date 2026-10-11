@@ -204,30 +204,75 @@ fits outright, and then waits for you:
   they are shown, the sidebar lists the tags of the videos waiting and
   narrows them as it does the library; the tag picked stays when you go
   between the two, unless the other side has nothing under it.
+- A card is one video, and it has candidate tracks: the tracks whose video
+  it could be. Mostly that is one. A second track whose search turns up a
+  video that already waits for review becomes one more candidate of it,
+  where it is the song too (the original and its English version, a single
+  and a live take of it); and a track can be a candidate of several videos,
+  when several uploads could be its video. The thumbnail says how many
+  candidates a video has when it is more than one.
 - Playing one, you hear your track's audio put to the video. `A`, or a click
-  on the chip in the bottom bar, changes over to YouTube's own audio and
-  back at the same place; the chip says which of the two is playing and
-  carries the key.
-- When several uploads could be the track's video, they are options on one
-  card: the arrows on the thumbnail step through them. Accepting one drops the
-  others; turning one down leaves the rest to choose from.
-- ✓ on its thumbnail accepts it: it joins the library with your track's audio.
-  ✗ turns it down: the video is deleted, its track counts as having no video,
-  and that upload is not offered for it again.
-- One verdict can be for several tracks: a track whose search turns up a
-  video that already waits for review through another track waits on it too,
-  where it is the same recording — the same waveform as the upload, or 90%
-  the waveform of that other track (the single and its album cut; the same
-  song in another language measures 63-88%, a live take 68%). And only when
-  the search has nothing for it alone: its own video, kept or found, comes
-  first. The same song as another recording has no part in that verdict,
-  and looks for a video of its own — unless the upload carries that
-  track's title and not the title of the track it waits for, and is the
-  waveform of neither (the original and its English version, and the first
-  to be looked up got the other one's video): then the video is made over
-  for the track it is titled after, and the other goes back to the queue.
+  on the chip in the bottom bar, goes on to the next audio the file has and
+  round again at the same place: each candidate's that is better than
+  YouTube's, then YouTube's own. The chip says which is playing — "Library
+  audio 1/2 (FLAC 24/96)", "YouTube audio" — and carries the key.
+- The bottom bar's corner shows one candidate at a time: its title, artist
+  and length, and its music file in the popup. With several, arrows there
+  go to the next one and back, and the audio goes with them; while
+  YouTube's audio plays the corner stays on the candidate it showed. First
+  comes the candidate the upload is titled after (and no other), then the
+  ones whose waveform is closest to the upload's. A candidate that is a
+  candidate of other videos as well carries a "+1" button, which
+  brings the next of those into view; the queue is ordered by track, so they
+  are mostly side by side.
+- ✓ on its thumbnail accepts it for the candidate on show: it joins the
+  library as that track's video, with that track's audio, and the other
+  candidates' audio is taken out of the file. That track is then a candidate
+  of nothing else, and a video left without a candidate is deleted. The
+  video's other candidates wait on whatever else they are candidates of, or
+  have no video.
+  ✗ turns it down for all of its candidates: the video is deleted, that
+  upload is not offered to any of them again, and each waits on whatever
+  else it is a candidate of or counts as having no video.
 
-Headless: `--approve <youtube id>` and `--reject <youtube id>`.
+In the library there is no sharing: a track has one video and a video one
+track. When a track's search turns up a video that another track has, the
+two are laid against the upload's own audio (the file keeps it) and the one
+whose waveform is the closer fit has the video — by however little,
+whichever came first, and however it came to have it. The correlation of
+the two waveforms over the whole of both decides: another master, another
+singer, a longer or shorter cut all count against a track. The video is not
+taken where its length rules it out for the newcomer (under half the track,
+over twice it or four minutes longer, or a cut under 90% of it). The track
+that had the video goes back to the queue, to see whether another video is
+its; the same recording in another master, on another release, has no
+video unless another upload is found for it.
+
+Somebody's re-upload of a song comes from a small channel. With "Ignore
+small channels" on in Settings (it is, to start with), an upload from a
+channel with fewer subscribers than the limit there — 5,000 unless you set
+another — is not taken. The count is on the upload's page, not in the search
+results, so the upload is dropped once its audio has arrived, before it is
+listened to. A verified channel is not dropped whatever its size (an
+artist's own can be a small one), nor is an upload that YouTube lists under
+several channels ("A and B"): one of them meeting the limit is enough, and
+for such an upload the page gives no count to go by. A count that is not
+known, or that the channel hides, is no reason either. The library keeps
+what the page said for every video it brings in. Headless:
+`--min-subscribers <n>`, `0` for no limit.
+
+A label's channel, or an artist's own, can be a small one that is not
+verified. "Except these channels", below the limit in Settings, lists the
+channels that are never ignored as small: each by its handle (`@name`) or by
+the address of its page, with commas between them. A channel's name will not
+do, since two channels can have the same one; the field shows what was
+understood. An exception only keeps the rule off a channel: its uploads are
+judged like any other's. Headless: `--small-channel-exception <channel>`,
+once for each.
+
+Headless: `--approve <youtube id>` accepts for the candidate shown first,
+`--approve <youtube id>=<music file>` for that file's track, and
+`--reject <youtube id>`.Headless: `--approve <youtube id>` and `--reject <youtube id>`.
 
 Turning off "Use my library's audio" in Settings lifts all of this.
 
@@ -242,32 +287,50 @@ already, so nothing is downloaded for it:
 
 - Where it still fits outright, it is kept as it is. Where the track's audio
   was not in it and now belongs there, it is put in.
-- Where it is the song but can no longer be taken outright, it goes to
-  review, its file rebuilt with your track's audio put in, alongside whatever other
-  options the search turns up.
+- Where it is the song but can no longer be taken outright, it goes back to
+  the review queue with the track as its candidate, its file rebuilt with
+  your track's audio put in, alongside whatever else the search turns up.
 - Where another upload fits outright and ranks above it, that one is
-  imported in its place, and the old file is deleted unless other tracks
-  hold it.
+  imported in its place, and the old file is deleted.
 - Where today's rules turn it down — a still image, a different recording,
   a title that marks it as another version — it is deleted likewise, and
   the track counts as having no video.
 - A lookup that could not finish (YouTube refusing requests, the file
   unreadable) changes nothing: the track keeps its video.
+- It is listened to whether or not it looks official: that test picks which
+  search results are worth listening to, and this video is in the library
+  already. Its length and a version word in its title still count.
+- What the library did not keep about its channel — the channel's id, by
+  which it is known as the artist's whatever name the track's tags carry,
+  and its subscribers — is read from the upload's page, once (one request,
+  nothing downloaded). That goes for videos from before these were kept,
+  and for the ones under review the track is a candidate of. A video from
+  a channel that turns out to be a small one goes like any other that
+  today's rules turn down.
+- A track that waits for your verdict has every video it is a candidate of
+  judged again, beside the best four of the search and whether or not the
+  search returns it: what today's search happens to return does not decide
+  whether a video is judged by today's rules. One that has become the
+  track's own recording (its channel is known as the artist's now, say) is
+  accepted; the others stay for your verdict, unless their length or their
+  channel's size rules them out.
 - A video whose file is empty or missing — a machine that goes down while
   a video is being written can leave it empty — is deleted first, whether it
-  is the track's video or one of the options waiting for review. Its upload
-  is then found and downloaded again like any other.
+  is the track's video or one under review that it is a candidate of. Its
+  upload is then found and downloaded again like any other.
 
-A track that shares its video with other tracks, or waits for review with
-them, does so as the same recording (see above). Looked up again, one that
-is only the same song lets go: of the options, which stay for the other
-tracks, or of the video, which stays theirs and is not made over for review
-on its account.
+A video under review that today's rules rule out for the track by its
+length — under half the track — or by its channel's size, where the library
+kept the count, loses that track as a candidate as soon as the re-import is
+asked for, without a request to YouTube; with no candidate left, it is
+deleted.
 
-An option waiting for review that today's rules rule out by its length —
-under half the track — is deleted as soon as the re-import is asked for,
-without a request to YouTube; its tracks keep the options that are left, or
-look for a video again.
+A library from before a video had one track is brought in line when this
+version first opens it, by itself: the tracks of every video that several
+tracks have are re-imported. The one that is the closest fit to the upload
+keeps the video (and the video plays that track's audio, or YouTube's); the
+others go back to the queue. Videos that waited for review as several
+options for one track are a card each from then on.
 
 Tracks without a video are simply looked up again. Re-import one video
 from the Re-import button in the music-file popup (the bottom bar's
@@ -277,8 +340,8 @@ the music files in a folder or one file from Settings. Headless:
 for every track with a video whose last lookup was before then (ISO 8601:
 `2026-10-05T16:35` or `2026-10-05`). The import log's `lookup` entries
 carry `reimport: true` and, under `prior`, the video the track had and its
-fate: `kept`, `review`, `replaced`, `removed`, `released` (other tracks
-keep it) or `unjudged`.
+fate: `kept`, `review`, `removed`, `released` (a track that has left the
+music folders has it too) or `unjudged`.
 
 ### Replacing a video
 
@@ -291,8 +354,8 @@ is the same. You can also paste a YouTube link or id. An upload that does
 not sound like the track asks "Are you sure?" first; taken all the same,
 it keeps its own audio. The chosen upload is downloaded and built like any
 import (your track's audio goes in where it is the same recording), it
-counts as accepted, and the old video goes, with its review options if it
-had any. Headless: there is no equivalent. The import log records a
+counts as accepted, the old video goes, and the track is no longer a
+candidate of any video under review. Headless: there is no equivalent. The import log records a
 `replace` event.
 
 The music folders are watched; added tracks are picked up within a few
@@ -337,14 +400,16 @@ Everything the importer decides is recorded in
 - `reimport`: tracks queued for a lookup by today's rules (see Re-importing).
 - `broken-video`: a video deleted at a re-import because its file was empty
   or missing.
-- `left-review`: at a re-import, a track that waited on the options of other
-  tracks without being their recording no longer does.
-- `review-moved`: a video under review made over for the track its upload
-  is titled after; the track it waited for keeps its other options or is
-  queued again (`requeued`).
-- `outdated-option`: a video that waited for review deleted at a re-import
-  because today's rules rule it out by its length for every track waiting on
-  it (under half the track, say).
+- `takeover`: a video in the library that changed hands — a track that is
+  the closer fit to the upload took it (`fit` against `holderFit`), and the
+  track that had it was queued again (`requeued`).
+- `shared-settled`: a video that several tracks had, from before a video had
+  one track, left with the closest fit of them (`measured`, `keeps`).
+- `withdrawn`: a track that has its video is no longer a candidate of
+  another one under review, which is deleted if it has no candidate left.
+- `outdated-option`: at a re-import, a track no longer a candidate of a
+  video under review that today's rules rule out for it by its length
+  (under half the track, say) or as one from a small channel.
 - `untracked-kept` / `untracked-deleted`: a video whose tracks are gone kept,
   or deleted (one at a time, or all of them from Settings).
 - `paused` / `resumed`: the request circuit breaker.
@@ -375,8 +440,8 @@ by a copy in another format — the music library on the other device can be an
 Opus conversion of the FLAC one the videos were imported from.
 
 Files that hold the same recording — a single and its album cut, or two
-copies — count as one: one lookup, one video, and the video carries the tags
-of the best-quality file. An instrumental, a live take, another language
+copies — count as one track: one lookup, one video, and the video carries
+the tags of the best-quality file. An instrumental, a live take, another language
 version or a short edit is a different recording with a lookup of its own.
 
 When a recording has no video and one of its files carries a title that has
@@ -435,9 +500,11 @@ command.
   and the library. Its title shows the music file the video was found for —
   where it is, how long it plays, its format and every tag in it, with arrows
   when several files hold the recording — and the video's own length with a
-  link to it on YouTube. For a video under review the track's length is in
-  the bar itself, beside the artist: the seek bar has the video's, and a
-  video much shorter than its track is a cut of the song.
+  link to it on YouTube. For a video under review the corner shows its
+  candidate track on show, with arrows when it has several (see above), and
+  the track's length is in the bar itself, beside the artist: the seek bar
+  has the video's, and a video much shorter than its track is a cut of the
+  song.
 - The sidebar lists one tag at a time. The selector above the list switches
   between album artists, artists, genres, albums and years, and the box under
   it filters the listed values. The search box at the top right searches every

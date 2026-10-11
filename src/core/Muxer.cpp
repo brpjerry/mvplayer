@@ -188,9 +188,8 @@ void addTag(QStringList &args, const QString &key, const QString &value)
         args << QStringLiteral("-metadata") << key + QLatin1Char('=') + value;
 }
 
-void addTags(QStringList &args, const Plan &plan)
+void addTags(QStringList &args, const TrackInfo &t, const QString &ytId)
 {
-    const TrackInfo &t = plan.track;
     addTag(args, QStringLiteral("title"), t.title);
     addTag(args, QStringLiteral("artist"), t.artist);
     addTag(args, QStringLiteral("album_artist"), t.albumArtist);
@@ -200,7 +199,109 @@ void addTags(QStringList &args, const Plan &plan)
         addTag(args, QStringLiteral("date"), QString::number(t.year));
     if (t.trackNo > 0)
         addTag(args, QStringLiteral("track"), QString::number(t.trackNo));
-    addTag(args, QStringLiteral("comment"), QStringLiteral("https://www.youtube.com/watch?v=") + plan.ytId);
+    addTag(args, QStringLiteral("comment"), QStringLiteral("https://www.youtube.com/watch?v=") + ytId);
+}
+
+// The track's audio on the video's timeline, as raw PCM in the work folder.
+struct Composed {
+    QString raw;
+    int rate = 0;
+    int channels = 0;
+    bool deep = false; // more than 16 bits to keep
+    QString detail;    // e.g. "FLAC 24/48"
+};
+
+bool composeLibraryAudio(const Plan &plan, const std::atomic<bool> *cancel, Composed *out, QString *error, ReviewSpan *reviewSpan)
+{
+    const TrackInfo &t = plan.track;
+    const int rate = t.codec == QLatin1String("dsd") ? 88200 : std::clamp(t.sampleRate, 8000, 192000);
+    const int ch = std::clamp(t.channels, 1, 8);
+    const QString trackRaw = QDir(plan.workDir).filePath(QStringLiteral("track.raw"));
+    const QString mvRaw = QDir(plan.workDir).filePath(QStringLiteral("mv.raw"));
+    const QString outRaw = QDir(plan.workDir).filePath(QStringLiteral("mix.raw"));
+
+    if (!decodeRaw(t.path, trackRaw, rate, ch, cancel, error)
+        || !decodeRaw(plan.ytAudioFile, mvRaw, rate, ch, cancel, error, plan.ytAudioStream))
+        return false;
+    {
+        RawPcm T, M;
+        if (!T.open(trackRaw, ch) || !M.open(mvRaw, ch)) {
+            if (error)
+                *error = QStringLiteral("cannot map decoded audio");
+            return false;
+        }
+        const double k = double(rate) / AudioAlign::kRate;
+        QVector<NativeSegment> segs;
+        for (const AudioAlign::Segment &s : plan.align.segments) {
+            NativeSegment n;
+            n.start = std::clamp<qint64>(std::llround(s.mvStart * k), 0, M.frames);
+            n.end = std::clamp<qint64>(std::llround(s.mvEnd * k), 0, M.frames);
+            n.lag = refineNativeLag(T, M, n.start, n.end, std::llround(s.lag * k), rate, plan.align.inverted ? -1 : 1);
+            // Never read outside the track.
+            n.start = std::max(n.start, n.lag);
+            n.end = std::min(n.end, T.frames + n.lag);
+            if (n.end - n.start > rate / 2)
+                segs.append(n);
+        }
+        if (segs.isEmpty()) {
+            if (error)
+                *error = QStringLiteral("no usable segments after refinement");
+            return false;
+        }
+        // The track is copied as it is; where the upload's polarity is the
+        // other way round, it is the video's own audio that is turned over,
+        // so the two meet in phase at the joins.
+        const double gain = std::clamp(plan.align.gain, 0.25, 4.0) * (plan.align.inverted ? -1 : 1);
+        if (!compose(T, M, segs, gain, rate, outRaw, cancel, error)) {
+            if (error && error->isEmpty())
+                *error = QStringLiteral("cancelled");
+            return false;
+        }
+        if (reviewSpan) {
+            reviewSpan->start = double(segs.first().start) / rate;
+            reviewSpan->end = double(segs.last().end) / rate;
+        }
+    }
+    QFile::remove(trackRaw);
+    QFile::remove(mvRaw);
+    out->raw = outRaw;
+    out->rate = rate;
+    out->channels = ch;
+    out->deep = !t.lossless || t.bitsPerSample > 16;
+    out->detail = QStringLiteral("FLAC %1/%2").arg(out->deep ? 24 : 16).arg(QString::number(rate / 1000.0, 'g', 4));
+    return true;
+}
+
+int audioStreams(const QString &file, const std::atomic<bool> *cancel)
+{
+    ProcOptions opts;
+    opts.cancel = cancel;
+    opts.timeoutMs = 60 * 1000;
+    const ProcResult streams = runProcess(QStringLiteral("ffprobe"), {
+        QStringLiteral("-v"), QStringLiteral("error"), QStringLiteral("-select_streams"), QStringLiteral("a"),
+        QStringLiteral("-show_entries"), QStringLiteral("stream=index"), QStringLiteral("-of"), QStringLiteral("csv=p=0"), file}, opts);
+    if (!streams.ok())
+        return -1;
+    return int(QString::fromUtf8(streams.out).split(QLatin1Char('\n'), Qt::SkipEmptyParts).size());
+}
+
+bool finishFile(const QStringList &args, const QString &partFile, const QString &outFile, const ProcOptions &opts,
+                const QString &what, QString *error)
+{
+    const ProcResult r = runProcess(kFfmpeg, args, opts);
+    if (!r.ok()) {
+        QFile::remove(partFile);
+        if (error)
+            *error = what + QStringLiteral(": ") + r.errorText();
+        return false;
+    }
+    if (!replaceFile(partFile, outFile)) {
+        QFile::remove(partFile);
+        if (error)
+            *error = QStringLiteral("cannot move video into the library");
+        return false;
+    }
+    return true;
 }
 
 } // namespace
@@ -216,59 +317,12 @@ bool mux(const Plan &plan, const std::atomic<bool> *cancel, QString *audioDetail
     QStringList args = {QStringLiteral("-v"), QStringLiteral("error"), QStringLiteral("-nostdin"), QStringLiteral("-y")};
 
     if (plan.replaceAudio && !plan.align.segments.isEmpty()) {
-        const TrackInfo &t = plan.track;
-        const int rate = t.codec == QLatin1String("dsd") ? 88200 : std::clamp(t.sampleRate, 8000, 192000);
-        const int ch = std::clamp(t.channels, 1, 8);
-        const QString trackRaw = QDir(plan.workDir).filePath(QStringLiteral("track.raw"));
-        const QString mvRaw = QDir(plan.workDir).filePath(QStringLiteral("mv.raw"));
-        const QString outRaw = QDir(plan.workDir).filePath(QStringLiteral("mix.raw"));
-
-        if (!decodeRaw(t.path, trackRaw, rate, ch, cancel, error)
-            || !decodeRaw(plan.ytAudioFile, mvRaw, rate, ch, cancel, error, plan.ytAudioStream))
+        Composed lib;
+        if (!composeLibraryAudio(plan, cancel, &lib, error, reviewSpan))
             return false;
-        {
-            RawPcm T, M;
-            if (!T.open(trackRaw, ch) || !M.open(mvRaw, ch)) {
-                if (error)
-                    *error = QStringLiteral("cannot map decoded audio");
-                return false;
-            }
-            const double k = double(rate) / AudioAlign::kRate;
-            QVector<NativeSegment> segs;
-            for (const AudioAlign::Segment &s : plan.align.segments) {
-                NativeSegment n;
-                n.start = std::clamp<qint64>(std::llround(s.mvStart * k), 0, M.frames);
-                n.end = std::clamp<qint64>(std::llround(s.mvEnd * k), 0, M.frames);
-                n.lag = refineNativeLag(T, M, n.start, n.end, std::llround(s.lag * k), rate, plan.align.inverted ? -1 : 1);
-                // Never read outside the track.
-                n.start = std::max(n.start, n.lag);
-                n.end = std::min(n.end, T.frames + n.lag);
-                if (n.end - n.start > rate / 2)
-                    segs.append(n);
-            }
-            if (segs.isEmpty()) {
-                if (error)
-                    *error = QStringLiteral("no usable segments after refinement");
-                return false;
-            }
-            // The track is copied as it is; where the upload's polarity is the
-            // other way round, it is the video's own audio that is turned over,
-            // so the two meet in phase at the joins.
-            const double gain = std::clamp(plan.align.gain, 0.25, 4.0) * (plan.align.inverted ? -1 : 1);
-            if (!compose(T, M, segs, gain, rate, outRaw, cancel, error)) {
-                if (error && error->isEmpty())
-                    *error = QStringLiteral("cancelled");
-                return false;
-            }
-            if (reviewSpan) {
-                reviewSpan->start = double(segs.first().start) / rate;
-                reviewSpan->end = double(segs.last().end) / rate;
-            }
-        }
-        QFile::remove(trackRaw);
-        QFile::remove(mvRaw);
-
-        const bool deep = !t.lossless || t.bitsPerSample > 16;
+        const int rate = lib.rate, ch = lib.channels;
+        const QString outRaw = lib.raw;
+        const bool deep = lib.deep;
         args << QStringLiteral("-i") << plan.videoFile
              << QStringLiteral("-f") << QStringLiteral("s32le") << QStringLiteral("-ar") << QString::number(rate)
              << QStringLiteral("-ac") << QString::number(ch) << QStringLiteral("-i") << outRaw
@@ -285,10 +339,8 @@ bool mux(const Plan &plan, const std::atomic<bool> *cancel, QString *audioDetail
              << QStringLiteral("-disposition:a:1") << QStringLiteral("0")
              << QStringLiteral("-metadata:s:a:0") << QStringLiteral("title=Library audio")
              << QStringLiteral("-metadata:s:a:1") << QStringLiteral("title=YouTube audio");
-        if (audioDetail) {
-            const QString khz = QString::number(rate / 1000.0, 'g', 4);
-            *audioDetail = QStringLiteral("FLAC %1/%2").arg(deep ? 24 : 16).arg(khz);
-        }
+        if (audioDetail)
+            *audioDetail = lib.detail;
     } else {
         args << QStringLiteral("-i") << plan.videoFile << QStringLiteral("-i") << plan.ytAudioFile
              << QStringLiteral("-map") << QStringLiteral("0:v:0") << QStringLiteral("-map") << QStringLiteral("1:a:%1").arg(plan.ytAudioStream)
@@ -298,58 +350,71 @@ bool mux(const Plan &plan, const std::atomic<bool> *cancel, QString *audioDetail
         if (audioDetail)
             *audioDetail = QStringLiteral("YouTube");
     }
-    addTags(args, plan);
+    addTags(args, plan.track, plan.ytId);
     args << QStringLiteral("-f") << QStringLiteral("matroska") << partFile;
-
-    const ProcResult r = runProcess(kFfmpeg, args, opts);
-    if (!r.ok()) {
-        QFile::remove(partFile);
-        if (error)
-            *error = QStringLiteral("ffmpeg mux: ") + r.errorText();
-        return false;
-    }
-    if (!replaceFile(partFile, plan.outFile)) {
-        QFile::remove(partFile);
-        if (error)
-            *error = QStringLiteral("cannot move video into the library");
-        return false;
-    }
-    return true;
+    return finishFile(args, partFile, plan.outFile, opts, QStringLiteral("ffmpeg mux"), error);
 }
 
-bool dropReviewStream(const QString &file, const std::atomic<bool> *cancel, QString *error)
+bool addLibraryStream(const Plan &plan, const std::atomic<bool> *cancel, QString *audioDetail, QString *error)
+{
+    Composed lib;
+    if (!composeLibraryAudio(plan, cancel, &lib, error, nullptr))
+        return false;
+    const QString partFile = plan.outFile + QStringLiteral(".part.mkv");
+    ProcOptions opts;
+    opts.cancel = cancel;
+    opts.timeoutMs = 60 * 60 * 1000;
+    const int n = plan.ytAudioStream; // the library streams it has; the new one's place
+    QStringList args = {QStringLiteral("-v"), QStringLiteral("error"), QStringLiteral("-nostdin"), QStringLiteral("-y"),
+                        QStringLiteral("-i"), plan.outFile,
+                        QStringLiteral("-f"), QStringLiteral("s32le"), QStringLiteral("-ar"), QString::number(lib.rate),
+                        QStringLiteral("-ac"), QString::number(lib.channels), QStringLiteral("-i"), lib.raw,
+                        QStringLiteral("-map"), QStringLiteral("0:v:0")};
+    for (int i = 0; i < n; ++i)
+        args << QStringLiteral("-map") << QStringLiteral("0:a:%1").arg(i);
+    args << QStringLiteral("-map") << QStringLiteral("1:a:0") << QStringLiteral("-map") << QStringLiteral("0:a:%1").arg(n)
+         << QStringLiteral("-c") << QStringLiteral("copy")
+         << QStringLiteral("-c:a:%1").arg(n) << QStringLiteral("flac")
+         << QStringLiteral("-sample_fmt:a:%1").arg(n) << (lib.deep ? QStringLiteral("s32") : QStringLiteral("s16"));
+    if (lib.deep)
+        args << QStringLiteral("-bits_per_raw_sample:a:%1").arg(n) << QStringLiteral("24");
+    for (int i = 0; i <= n + 1; ++i)
+        args << QStringLiteral("-disposition:a:%1").arg(i) << (i == 0 ? QStringLiteral("default") : QStringLiteral("0"));
+    args << QStringLiteral("-metadata:s:a:%1").arg(n) << QStringLiteral("title=Library audio")
+         << QStringLiteral("-metadata:s:a:%1").arg(n + 1) << QStringLiteral("title=YouTube audio")
+         << QStringLiteral("-f") << QStringLiteral("matroska") << partFile;
+    if (audioDetail)
+        *audioDetail = lib.detail;
+    return finishFile(args, partFile, plan.outFile, opts, QStringLiteral("ffmpeg mux"), error);
+}
+
+bool keepAudio(const QString &file, int libraryStream, int ytStream, const TrackInfo &track, const QString &ytId,
+               const std::atomic<bool> *cancel, QString *error)
 {
     ProcOptions opts;
     opts.cancel = cancel;
     opts.timeoutMs = 30 * 60 * 1000;
-    // The track's audio and YouTube's, and nothing after them: as it should be.
-    const ProcResult streams = runProcess(QStringLiteral("ffprobe"), {
-        QStringLiteral("-v"), QStringLiteral("error"), QStringLiteral("-select_streams"), QStringLiteral("a"),
-        QStringLiteral("-show_entries"), QStringLiteral("stream=index"), QStringLiteral("-of"), QStringLiteral("csv=p=0"), file}, opts);
-    if (streams.ok() && streams.out.trimmed().split('\n').size() < 3)
+    const int has = audioStreams(file, cancel);
+    const int wanted = libraryStream >= 0 ? 2 : 1;
+    if (has == wanted && ytStream == wanted - 1 && libraryStream <= 0)
         return true;
     const QString partFile = file + QStringLiteral(".part.mkv");
-    const ProcResult r = runProcess(kFfmpeg, {
-        QStringLiteral("-v"), QStringLiteral("error"), QStringLiteral("-nostdin"), QStringLiteral("-y"),
-        QStringLiteral("-i"), file,
-        QStringLiteral("-map"), QStringLiteral("0:v:0"), QStringLiteral("-map"), QStringLiteral("0:a:0"),
-        QStringLiteral("-map"), QStringLiteral("0:a:1"), QStringLiteral("-c"), QStringLiteral("copy"),
-        QStringLiteral("-disposition:a:0"), QStringLiteral("default"),
-        QStringLiteral("-disposition:a:1"), QStringLiteral("0"),
-        QStringLiteral("-f"), QStringLiteral("matroska"), partFile}, opts);
-    if (!r.ok()) {
-        QFile::remove(partFile);
-        if (error)
-            *error = QStringLiteral("ffmpeg: ") + r.errorText();
-        return false;
+    QStringList args = {QStringLiteral("-v"), QStringLiteral("error"), QStringLiteral("-nostdin"), QStringLiteral("-y"),
+                        QStringLiteral("-i"), file, QStringLiteral("-map"), QStringLiteral("0:v:0")};
+    if (libraryStream >= 0)
+        args << QStringLiteral("-map") << QStringLiteral("0:a:%1").arg(libraryStream);
+    args << QStringLiteral("-map") << QStringLiteral("0:a:%1").arg(ytStream) << QStringLiteral("-c") << QStringLiteral("copy")
+         << QStringLiteral("-disposition:a:0") << QStringLiteral("default");
+    if (libraryStream >= 0) {
+        args << QStringLiteral("-disposition:a:1") << QStringLiteral("0")
+             << QStringLiteral("-metadata:s:a:0") << QStringLiteral("title=Library audio")
+             << QStringLiteral("-metadata:s:a:1") << QStringLiteral("title=YouTube audio");
+    } else {
+        args << QStringLiteral("-metadata:s:a:0") << QStringLiteral("title=YouTube audio");
     }
-    if (!replaceFile(partFile, file)) {
-        QFile::remove(partFile);
-        if (error)
-            *error = QStringLiteral("cannot replace the video");
-        return false;
-    }
-    return true;
+    addTags(args, track, ytId);
+    args << QStringLiteral("-f") << QStringLiteral("matroska") << partFile;
+    return finishFile(args, partFile, file, opts, QStringLiteral("ffmpeg"), error);
 }
 
 bool probe(const QString &file, Probe *out)
