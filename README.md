@@ -216,24 +216,55 @@ fits outright, and then waits for you:
   round again at the same place: each candidate's that is better than
   YouTube's, then YouTube's own. The chip says which is playing — "Library
   audio 1/2 (FLAC 24/96)", "YouTube audio" — and carries the key.
-- The bottom bar's corner shows one candidate at a time: its title, artist
-  and length, and its music file in the popup. With several, arrows there
-  go to the next one and back, and the audio goes with them; while
-  YouTube's audio plays the corner stays on the candidate it showed. First
-  comes the candidate the upload is titled after (and no other), then the
-  ones whose waveform is closest to the upload's. A candidate that is a
-  candidate of other videos as well carries a "+1" button, which
-  brings the next of those into view; the queue is ordered by track, so they
-  are mostly side by side.
+- While the queue is shown, a panel beside the sidebar takes the place of
+  the bottom bar's music-file popup. It is about the video that plays, or
+  until one does, the first in the queue, and shows one candidate at a
+  time: its title and artist, its music file with every tag, and the
+  video's page on YouTube with the Re-import and Replace… buttons. With
+  several candidates, arrows at its top (and in the bottom bar's corner,
+  for the playing video) go to the next one and back; on the playing video
+  the audio goes with them, and while YouTube's audio plays the corner
+  stays on the candidate it showed. First comes the candidate the upload is
+  titled after (and no other), then the ones whose waveform is closest to
+  the upload's. A candidate that is a candidate of other videos as well
+  carries a "+1" button, which brings the next of those into view; the
+  queue is ordered by track, so they are mostly side by side.
 - ✓ on its thumbnail accepts it for the candidate on show: it joins the
   library as that track's video, with that track's audio, and the other
   candidates' audio is taken out of the file. That track is then a candidate
   of nothing else, and a video left without a candidate is deleted. The
   video's other candidates wait on whatever else they are candidates of, or
-  have no video.
+  have no video. Your verdict vouches for that upload as the track's video,
+  so a re-import does not ask again whose channel it is on; it says nothing
+  of the channel's other uploads.
   ✗ turns it down for all of its candidates: the video is deleted, that
   upload is not offered to any of them again, and each waits on whatever
   else it is a candidate of or counts as having no video.
+- Either can be taken back: until the next verdict (or the app closes), an
+  Undo button in the review panel names the last one and puts things back
+  as they were — the video in the queue with its candidates, the videos
+  deleted with it, the files as they were. What a verdict deletes is only
+  set aside in `.mvplayer/undo` for that long. Channel verdicts are not
+  undone this way (unlist the channel in Settings), and the headless
+  importer's verdicts are final.
+- Rest the pointer on ✓ or ✗ for a second and a second button comes up under
+  it, for the upload's channel as a whole. They are offered where the
+  channel is not an artist's channel already.
+  The double tick allows the channel: it counts as an artist's channel from
+  then on, for every track (a label's channel has the videos of many), and
+  is never ignored as a small one. Its videos under review are judged again
+  at once, from their files and with nothing asked of YouTube: one that
+  waited only on whose channel it is on is accepted, and one that waits for
+  another reason (too little of the same waveform, a cut, another version)
+  stays for your verdict, the card the button was on included.
+  The double cross denies the channel: every video the library has from it
+  is deleted, the ones under review as turned down for all their candidates,
+  and its uploads are never taken again. Tracks that had one of its videos
+  are looked up again for another.
+  Either way the app first lists what would change, video by video, and
+  asks. Settings lists the channels you allowed and denied; taken off
+  there, a channel is judged like any other again, and nothing in the
+  library changes with that.
 
 In the library there is no sharing: a track has one video and a video one
 track. When a track's search turns up a video that another track has, the
@@ -257,22 +288,18 @@ listened to. A verified channel is not dropped whatever its size (an
 artist's own can be a small one), nor is an upload that YouTube lists under
 several channels ("A and B"): one of them meeting the limit is enough, and
 for such an upload the page gives no count to go by. A count that is not
-known, or that the channel hides, is no reason either. The library keeps
-what the page said for every video it brings in. Headless:
-`--min-subscribers <n>`, `0` for no limit.
-
-A label's channel, or an artist's own, can be a small one that is not
-verified. "Except these channels", below the limit in Settings, lists the
-channels that are never ignored as small: each by its handle (`@name`) or by
-the address of its page, with commas between them. A channel's name will not
-do, since two channels can have the same one; the field shows what was
-understood. An exception only keeps the rule off a channel: its uploads are
-judged like any other's. Headless: `--small-channel-exception <channel>`,
-once for each.
+known, or that the channel hides, is no reason either. Nor is a channel you
+allowed ignored: a label's channel, or an artist's own, can be a small one
+that is not verified. The library keeps what the page said for every video
+it brings in. Headless: `--min-subscribers <n>`, `0` for no limit.
 
 Headless: `--approve <youtube id>` accepts for the candidate shown first,
 `--approve <youtube id>=<music file>` for that file's track, and
-`--reject <youtube id>`.Headless: `--approve <youtube id>` and `--reject <youtube id>`.
+`--reject <youtube id>`. `--allow-channel <channel>`, `--deny-channel
+<channel>` and `--unlist-channel <channel>` take a channel's id (`UC…`), or
+its handle (`@name`) or the address of its page where the library has a
+video of it: a name will not do, since two channels can have the same one.
+Headless: `--approve <youtube id>` and `--reject <youtube id>`.
 
 Turning off "Use my library's audio" in Settings lifts all of this.
 
@@ -334,7 +361,8 @@ options for one track are a card each from then on.
 
 Tracks without a video are simply looked up again. Re-import one video
 from the Re-import button in the music-file popup (the bottom bar's
-title), every video under a sidebar entry from its right-click menu, or
+title; the review panel, for a video under review), every video under a
+sidebar entry from its right-click menu, or
 the music files in a folder or one file from Settings. Headless:
 `--reimport <file or folder>` (repeatable), and `--reimport-before <time>`
 for every track with a video whose last lookup was before then (ISO 8601:
@@ -499,12 +527,13 @@ command.
 - In the bottom bar, the playing video's picture switches between the player
   and the library. Its title shows the music file the video was found for —
   where it is, how long it plays, its format and every tag in it, with arrows
-  when several files hold the recording — and the video's own length with a
-  link to it on YouTube. For a video under review the corner shows its
-  candidate track on show, with arrows when it has several (see above), and
-  the track's length is in the bar itself, beside the artist: the seek bar
-  has the video's, and a video much shorter than its track is a cut of the
-  song.
+  when several files hold the recording — and the video's own length, its
+  channel and the day it was published, with a link to it on YouTube. For a video under review the corner shows its
+  candidate track on show, with arrows when it has several, and the
+  music file and YouTube page are in the review panel beside the sidebar
+  instead (see above); the track's length is in the bar itself, beside the
+  artist: the seek bar has the video's, and a video much shorter than its
+  track is a cut of the song.
 - The sidebar lists one tag at a time. The selector above the list switches
   between album artists, artists, genres, albums and years, and the box under
   it filters the listed values. The search box at the top right searches every

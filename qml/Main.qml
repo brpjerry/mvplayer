@@ -285,9 +285,24 @@ ApplicationWindow {
             onSettingsRequested: settings.open()
         }
 
+        // The music file and YouTube page of the video under review, with the
+        // arrows between its candidates: a panel in place of the control
+        // bar's popup while the review queue is on show.
+        ReviewPanel {
+            id: reviewPanel
+            anchors.left: sidebar.right
+            anchors.top: parent.top
+            anchors.bottom: controlBar.top
+            active: App.videos.section === "review" && !window.fullscreen
+            playing: player.current
+            onStepRequested: (delta) => controlBar.stepCandidate(delta)
+            onReplaceRequested: (videoId) => replaceDialog.openFor(videoId)
+            onRevealRequested: (videoId) => window.revealVideo(videoId)
+        }
+
         Item {
             id: mainArea
-            anchors.left: sidebar.right
+            anchors.left: reviewPanel.right
             anchors.right: parent.right
             anchors.top: parent.top
             anchors.bottom: controlBar.top
@@ -325,6 +340,7 @@ ApplicationWindow {
                     onActivated: (row) => player.playRow(row)
                     onApproved: (id) => window.approveVideo(id)
                     onRejected: (id) => window.rejectVideo(id)
+                    onChannelRequested: (id, allow) => channelDialog.openFor(id, allow)
                 }
 
                 Welcome {
@@ -336,7 +352,7 @@ ApplicationWindow {
 
         PlayerView {
             id: playerView
-            x: window.fullscreen ? 0 : sidebar.width
+            x: window.fullscreen ? 0 : mainArea.x
             y: window.fullscreen ? 0 : topBar.height
             width: window.fullscreen ? window.width : mainArea.width
             height: window.fullscreen ? window.height : pane.height
@@ -349,6 +365,7 @@ ApplicationWindow {
             onCloseRequested: player.stop()
             onReviewApproved: window.approveVideo(player.current.videoId)
             onReviewRejected: window.rejectVideo(player.current.videoId)
+            onReviewChannelRequested: (allow) => channelDialog.openFor(player.current.videoId, allow)
             candidates: controlBar.candidates.length
             candidateTitle: controlBar.candidate ? controlBar.candidate.title : ""
             onTogglePauseRequested: window.togglePause()
@@ -369,6 +386,7 @@ ApplicationWindow {
             mpv: window.mpv
             current: player.current
             playing: window.playingNow
+            sourcesInPanel: reviewPanel.active
             overlay: window.fullscreen
             fullscreen: window.fullscreen
             shuffle: player.shuffle
@@ -386,11 +404,19 @@ ApplicationWindow {
 
     SettingsPanel { id: settings }
     ReplaceDialog { id: replaceDialog }
+    ChannelDialog {
+        id: channelDialog
+        // A video that plays is let go of before its channel's videos change.
+        onConfirmed: (ids) => {
+            if (player.current && ids.indexOf(player.current.videoId) >= 0)
+                player.stop()
+        }
+    }
 
     // Frame rate counter (F12)
     Rectangle {
         visible: FrameStats.visible
-        x: (window.fullscreen ? 0 : sidebar.width) + 14
+        x: (window.fullscreen ? 0 : mainArea.x) + 14
         y: controlBar.y - height - 14
         z: 100
         width: fpsLabel.implicitWidth + 16
@@ -501,11 +527,24 @@ ApplicationWindow {
         case "check-quality": App.checkQuality(); return "ok"
         case "check-cookies": App.checkCookies(); return "ok"
         case "sign-in-on-bot-check": App.accountOnBotCheck = arg !== "off"; return "ok"
-        case "small-channels": // small-channels on|off, the limit: small-channels 5000, or the exceptions: small-channels except @a, @b
+        case "small-channels": // small-channels on|off, or the limit: small-channels 5000
             if (arg === "on" || arg === "off") App.ignoreSmallChannels = arg === "on"
-            else if (arg === "except" || arg.startsWith("except ")) App.smallChannelExceptions = arg.slice(7)
             else App.minSubscribers = parseInt(arg)
             return "ok"
+        // Channels: channel-actions <video id> (whether the two buttons are offered), channel-dialog <video id> allow|deny,
+        // channel-confirm, channel-cancel, channel-state (the dialog as it stands), channels (the lists), unlist-channel <id>
+        case "channel-actions": return JSON.stringify(App.channelActions(parseInt(arg)))
+        case "channel-dialog": {
+            const parts = arg.split(" ")
+            channelDialog.openFor(parseInt(parts[0]), parts[1] !== "deny")
+            return channelDialog.change.id !== undefined ? "ok" : "no channel"
+        }
+        case "channel-confirm": if (!channelDialog.opened) return "closed"; channelDialog.confirm(); return "ok"
+        case "channel-cancel": channelDialog.close(); return "ok"
+        case "channel-state": return JSON.stringify({ opened: channelDialog.opened, allow: channelDialog.allow, judging: channelDialog.judging,
+            channel: channelDialog.change, judged: channelDialog.judged, accepted: channelDialog.accepted })
+        case "channels": return JSON.stringify(App.listedChannels)
+        case "unlist-channel": App.unlistChannel(arg); return "ok"
         case "resume": App.resumeImport(); return "ok"
         case "fetch-subtitles": App.fetchSubtitles(); return "ok"
         case "delete-untracked": return "" + App.deleteUntracked()
@@ -544,9 +583,13 @@ ApplicationWindow {
         case "candidate": controlBar.stepCandidate(parseInt(arg || "1")); return "ok" // the next (1) or previous (-1) candidate track of the playing video
         case "candidates": return JSON.stringify(App.candidates(parseInt(arg)))
         case "elsewhere": return "" + controlBar.showElsewhere() // as the button in the panel does: the video it went to
+        // The review panel's own arrows and "+N" button, for the video it is about
+        case "panel-candidate": reviewPanel.stepCandidate(parseInt(arg || "1")); return "ok"
+        case "panel-elsewhere": return "" + reviewPanel.showElsewhere()
         case "reveal": return "" + window.revealVideo(parseInt(arg))
         case "approve": window.approveVideo(parseInt(arg)); return "ok"
         case "reject": window.rejectVideo(parseInt(arg)); return "ok"
+        case "undo": if (!App.undoAvailable) return "nothing to undo"; App.undoVerdict(); return "ok" // the last verdict taken back
         case "grab": // grab <file>: a picture of the settings panel when open, else of the window (grab-window: with popups)
             (settings.opened ? settings.contentItem : frame).grabToImage(r => r.saveToFile(arg))
             return "ok"
@@ -588,12 +631,16 @@ ApplicationWindow {
                 cookiesStatus: App.cookiesStatus, checkingQuality: App.checkingQuality, reviewCount: App.reviewCount,
                 paused: App.importPaused, pauseKind: App.pauseKind, accountOnBotCheck: App.accountOnBotCheck,
                 ignoreSmallChannels: App.ignoreSmallChannels, minSubscribers: App.minSubscribers,
-                smallChannelExceptions: App.smallChannelExceptions,
+                channelDialog: channelDialog.opened,
                 facet: App.videos.facetType, facetValue: App.videos.facetValue, section: App.videos.section,
                 orphanCount: App.orphanCount, reviewLabel: controlBar.reviewLabel, trackLength: controlBar.trackLength,
                 candidates: controlBar.candidates.length, candidate: controlBar.shown,
                 candidateTitle: controlBar.candidate ? controlBar.candidate.title : null,
                 elsewhere: controlBar.candidate ? controlBar.candidate.elsewhere.length : 0, nowTitle: controlBar.nowTitle,
+                panel: reviewPanel.active, panelWidth: reviewPanel.width, panelVideo: reviewPanel.videoId, panelPlaying: reviewPanel.isPlaying,
+                panelCandidates: reviewPanel.candidates.length, panelCandidate: reviewPanel.shown, panelTitle: reviewPanel.title,
+                panelFile: reviewPanel.file ? reviewPanel.file.path : null, panelYt: reviewPanel.ytTitle,
+                undo: App.undoAvailable, undoLabel: App.undoLabel,
                 replacing: App.replacing, replaceStage: App.replaceStage, replaceDialog: replaceDialog.opened, replaceOptions: replaceDialog.options.length, replaceMode: replaceDialog.mode,
                 accent: "" + Theme.accent, accentMode: App.accent, theme: App.themeMode, dark: Theme.dark,
                 systemDark: App.systemDark, bg: "" + Theme.bg, musicDirs: App.musicDirs, frameColor: "" + mpv.frameColor,

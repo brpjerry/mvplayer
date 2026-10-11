@@ -108,6 +108,10 @@ struct VideoInfo {
     // is the better audio, then YouTube's. The first candidate's audio sits
     // between these two times of the video.
     bool review = false;
+    // The user accepted this upload as its track's video: it counts as on
+    // the artist's channel, whoever's channel it is on. Never set on a video
+    // under review.
+    bool vouched = false;
     double reviewStart = 0;
     double reviewEnd = 0;
     // Which of the file's audio streams is YouTube's, from 0: the ones before
@@ -130,6 +134,9 @@ struct VideoInfo {
     // Null: never kept (the page was read before handles were); empty: the
     // page gave none.
     QString ytChannelHandle;
+    // When the upload was published, "YYYY-MM-DD" (its premiere date where
+    // it had one). Null: not known (videos from before it was kept).
+    QString ytDate;
     QJsonObject tags;
     qint64 addedAt = 0;
 };

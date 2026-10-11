@@ -19,5 +19,8 @@ QStringList fromMusicBrainz(const QString &artist, QString *error);
 // channel's name) is one of the artist's known channels, asking MusicBrainz
 // once per artist and remembering the answer. Any of the track's names.
 bool isArtistChannel(Database &db, const QStringList &artistNames, const QString &channelId, const QString &channelName);
+// The same from what the library knows already: MusicBrainz is not asked.
+// For the interface, which must not wait.
+bool knownArtistChannel(Database &db, const QStringList &artistNames, const QString &channelId, const QString &channelName);
 
 } // namespace ArtistChannels

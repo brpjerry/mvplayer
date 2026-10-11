@@ -102,8 +102,23 @@ QStringList fromMusicBrainz(const QString &artist, QString *error)
     return ids;
 }
 
+bool knownArtistChannel(Database &db, const QStringList &artistNames, const QString &channelId, const QString &channelName)
+{
+    if (db.channelAllowed(channelId))
+        return true;
+    for (const QString &artist : artistNames) {
+        const QString name = artist.trimmed();
+        if (name.size() >= 2 && db.isArtistChannel(name, channelId, channelName))
+            return true;
+    }
+    return false;
+}
+
 bool isArtistChannel(Database &db, const QStringList &artistNames, const QString &channelId, const QString &channelName)
 {
+    // A channel the user allowed is an artist's channel for every track.
+    if (db.channelAllowed(channelId))
+        return true;
     for (const QString &artist : artistNames) {
         const QString name = artist.trimmed();
         if (name.size() < 2)

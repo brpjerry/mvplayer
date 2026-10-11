@@ -32,11 +32,14 @@ Rectangle {
 
     readonly property bool hasMedia: current !== null
 
-    // The playing video's music file and YouTube page, in a popup.
+    // The playing video's music file and YouTube page, in a popup. Not
+    // while the review panel shows the same: the corner is then no button.
+    property bool sourcesInPanel: false
+    onSourcesInPanelChanged: if (sourcesInPanel) sources.close()
     function toggleSources() {
         if (sources.visible)
             sources.close()
-        else if (hasMedia)
+        else if (hasMedia && !sourcesInPanel)
             sources.open()
     }
     // What a video under review is playing right now; empty otherwise.
@@ -179,7 +182,7 @@ Rectangle {
                 // (Room on the right for the arrows between candidates.)
                 width: parent.width - (candidateSteps.visible ? candidateSteps.width + 6 : 0)
                 text: root.nowTitle
-                color: textMouse.containsMouse || sources.visible ? Theme.accentHi : Theme.text
+                color: (textMouse.containsMouse && !root.sourcesInPanel) || sources.visible ? Theme.accentHi : Theme.text
                 font.pixelSize: 14
                 font.weight: Font.DemiBold
                 elide: Text.ElideRight
@@ -208,7 +211,7 @@ Rectangle {
             id: textMouse
             anchors.fill: trackText
             hoverEnabled: true
-            cursorShape: Qt.PointingHandCursor
+            cursorShape: root.sourcesInPanel ? Qt.ArrowCursor : Qt.PointingHandCursor
             onClicked: root.toggleSources()
         }
 

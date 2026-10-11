@@ -61,8 +61,11 @@ int main(int argc, char **argv)
         {QStringLiteral("allow-still-images"), QStringLiteral("Accept videos whose picture never changes.")},
         {QStringLiteral("min-subscribers"), QStringLiteral("Ignore uploads from channels with fewer subscribers, unless the channel is verified or one of several the upload is listed under; 0 ignores none."),
          QStringLiteral("n"), QStringLiteral("5000")},
-        {QStringLiteral("small-channel-exception"), QStringLiteral("A channel that is never ignored as a small one, by its handle (@name), its id (UC…) or the address of its page (repeatable)."),
+        {QStringLiteral("allow-channel"), QStringLiteral("Allow a channel, by its id (UC…), its handle (@name) or the address of its page: an artist's channel for every track, and never ignored as a small one. Its videos under review are judged again at once (repeatable)."),
          QStringLiteral("channel")},
+        {QStringLiteral("deny-channel"), QStringLiteral("Deny a channel: every video the library has from it is deleted, and its uploads are never taken (repeatable)."),
+         QStringLiteral("channel")},
+        {QStringLiteral("unlist-channel"), QStringLiteral("Take a channel off the allowed or denied ones (repeatable)."), QStringLiteral("channel")},
         {QStringLiteral("retry"), QStringLiteral("Retry tracks that previously failed or had no video.")},
         {QStringLiteral("ytdlp-arg"), QStringLiteral("Extra argument passed to yt-dlp (repeatable)."), QStringLiteral("arg")},
         {QStringLiteral("cookies"), QStringLiteral("cookies.txt of a YouTube Premium account, for its higher audio bitrate."), QStringLiteral("file")},
@@ -241,15 +244,6 @@ int main(int argc, char **argv)
     cfg.replaceAudio = !parser.isSet(QStringLiteral("keep-youtube-audio"));
     cfg.skipStillImages = !parser.isSet(QStringLiteral("allow-still-images"));
     cfg.minSubscribers = qMax(0, parser.value(QStringLiteral("min-subscribers")).toInt());
-    for (const QString &typed : parser.values(QStringLiteral("small-channel-exception"))) {
-        const QString channel = YtDlp::channelRef(typed);
-        if (channel.isEmpty()) {
-            out << "error: --small-channel-exception " << typed << ": not a channel's handle (@name), id (UC…) or address" << Qt::endl;
-            return 1;
-        }
-        if (!cfg.smallChannelExceptions.contains(channel))
-            cfg.smallChannelExceptions << channel;
-    }
     cfg.ytdlpArgs = parser.values(QStringLiteral("ytdlp-arg"));
     cfg.subtitleLangs = parser.value(QStringLiteral("subtitles")).split(QRegularExpression(QStringLiteral("[,\\s]+")), Qt::SkipEmptyParts);
     if (parser.isSet(QStringLiteral("fetch-subtitles")) && cfg.subtitleLangs.isEmpty()) {
@@ -359,6 +353,30 @@ int main(int argc, char **argv)
     if (reimportBefore.isValid()) {
         const int n = mgr.reimport(db.trackIdsImportedBefore(reimportBefore.toSecsSinceEpoch()));
         out << "re-importing " << n << " tracks last looked up before " << reimportBefore.toString(Qt::ISODate) << Qt::endl;
+    }
+    // A channel by its id, or by its handle where the library has a video
+    // of it: a handle alone does not say which channel it is.
+    const auto channelNamed = [&](const QString &typed) -> std::optional<Database::ListedChannel> {
+        const QString ref = YtDlp::channelRef(typed);
+        const Database::ListedChannel c = ref.isEmpty() ? Database::ListedChannel() : db.knownChannel(ref);
+        if (c.id.isEmpty()) {
+            out << (ref.isEmpty() ? "not a channel's id (UC…), handle (@name) or address: " : "the library has no video of the channel ") << typed
+                << (ref.isEmpty() ? "" : ": give its id (UC…)") << Qt::endl;
+            return std::nullopt;
+        }
+        return c;
+    };
+    for (const QString &typed : parser.values(QStringLiteral("allow-channel"))) {
+        if (const auto c = channelNamed(typed))
+            mgr.allowChannel(c->id, c->name, c->handle);
+    }
+    for (const QString &typed : parser.values(QStringLiteral("deny-channel"))) {
+        if (const auto c = channelNamed(typed))
+            mgr.denyChannel(c->id, c->name, c->handle);
+    }
+    for (const QString &typed : parser.values(QStringLiteral("unlist-channel"))) {
+        if (const auto c = channelNamed(typed))
+            mgr.unlistChannel(c->id);
     }
     for (const QString &arg : parser.values(QStringLiteral("approve"))) {
         // (A YouTube id has no "=" in it.)

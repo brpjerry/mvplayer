@@ -45,6 +45,9 @@ public:
     // music folders or gone from them, has no video any more and waits for
     // a lookup. Returns the ones in the music folders.
     QVector<TrackInfo> unlinkOthers(qint64 videoId, const TrackInfo &keeper);
+    // The same for every track that has the video: it is about to be
+    // deleted as one that was never theirs, and they are looked up again.
+    void unlinkAll(qint64 videoId);
 
     // The review queue: a video that waits for the user's verdict has
     // candidates, the tracks whose video it could be, and a track can be a
@@ -140,6 +143,8 @@ public:
     void updateVideoMedia(const VideoInfo &v);
     // What is known of the upload's channel: its id, subscribers, verified mark.
     void updateVideoChannel(const VideoInfo &v);
+    // The videos the library has from a channel, by the channel's id.
+    QVector<VideoInfo> videosOfChannel(const QString &channelId);
     // Makes a track look for (more) videos again; what it has stays with it.
     void setTrackPending(qint64 trackId);
     // Makes the track's recording pending for a re-import (TrackInfo::reimport),
@@ -161,10 +166,58 @@ public:
     // Whether MusicBrainz has been asked about the artist lately.
     bool artistChannelsKnown(const QString &artist);
     void setArtistChannelsKnown(const QString &artist, int days);
+    // The channels the user allowed (each an artist's channel for every
+    // track, and never ignored as a small one) and the ones the user denied
+    // (their uploads are never taken), by id.
+    struct ListedChannel {
+        QString id;
+        QString list;   // "allow" or "deny"
+        QString name;   // as it was when listed, for showing
+        QString handle; // "@name", where known
+        qint64 addedAt = 0;
+    };
+    QString channelList(const QString &channelId); // "allow", "deny" or empty
+    bool channelAllowed(const QString &channelId) { return channelList(channelId) == QLatin1String("allow"); }
+    bool channelDenied(const QString &channelId) { return channelList(channelId) == QLatin1String("deny"); }
+    void setChannelList(const QString &channelId, const QString &list, const QString &name, const QString &handle);
+    void removeChannelList(const QString &channelId);
+    QVector<ListedChannel> channelLists();
+    // A channel by its id or by its handle ("@name", in any case), as the
+    // library knows it from the videos it has of it and from the lists: its
+    // id, its own name (not "Name and Other", as an upload listed under
+    // several channels carries it) and its handle. An id it has never seen
+    // comes back with no name; a handle it has never seen, with no id.
+    ListedChannel knownChannel(const QString &idOrHandle);
     // A video the user turned down for a track is not offered for it again.
     void rejectVideoFor(const TrackInfo &track, const QString &ytId);
     bool videoRejectedFor(const TrackInfo &track, const QString &ytId);
+    // ...until the verdict is taken back.
+    void unrejectVideoFor(const TrackInfo &track, const QString &ytId);
     void removeVideo(qint64 id);
+
+    // Taking a verdict back (ImportManager's undo): rows as they were, and
+    // put back as they were.
+    struct CandidateRow {
+        qint64 trackKey = 0;
+        int stream = 0;
+        double fit = 0;
+        QString audioDetail;
+    };
+    QVector<CandidateRow> candidateRows(qint64 videoId);
+    void restoreCandidates(qint64 videoId, const QVector<CandidateRow> &rows);
+    struct TrackState {
+        qint64 id = 0;
+        QString state;
+        qint64 videoId = 0;
+        QString message;
+    };
+    // The import state of every file of a candidate's recording.
+    QVector<TrackState> trackStates(qint64 trackKey);
+    void restoreTrackState(const TrackState &t);
+    // The video's row as it was: updated where the row still exists,
+    // inserted again with its id where it was deleted. False where another
+    // video has its YouTube id by now.
+    bool restoreVideo(const VideoInfo &v);
 
 private:
     QSqlDatabase conn();

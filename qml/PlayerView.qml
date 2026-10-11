@@ -30,6 +30,7 @@ Item {
     // orphans) that is playing in its thumbnail.
     signal reviewApproved()
     signal reviewRejected()
+    signal reviewChannelRequested(bool allow)
     // Its candidate tracks: how many, and the title of the one on show.
     property int candidates: 1
     property string candidateTitle
@@ -356,8 +357,11 @@ Item {
         sameTitle: wanted ? root.current.sameTitle : ({})
         orphan: wanted && root.current.review !== true
         canDelete: !App.scanning
+        videoId: wanted ? root.current.videoId : -1
         onApproved: root.reviewApproved()
         onRejected: root.reviewRejected()
+        onAllowChannelRequested: root.reviewChannelRequested(true)
+        onDenyChannelRequested: root.reviewChannelRequested(false)
     }
 
     // Pause / play flash in the middle of the video

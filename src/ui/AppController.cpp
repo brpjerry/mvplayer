@@ -1,5 +1,6 @@
 #include "ui/AppController.h"
 
+#include "core/ArtistChannels.h"
 #include "core/Util.h"
 #include "core/YtDlp.h"
 
@@ -11,7 +12,9 @@
 #include <QRegularExpression>
 #include <QSet>
 #include <QSaveFile>
+#include <QFile>
 #include <QFileInfo>
+#include <QJsonDocument>
 #include <QMap>
 #include <QStandardPaths>
 #include <QThreadPool>
@@ -115,11 +118,6 @@ AppController::AppController(const AppOptions &options, QObject *parent)
     m_ignoreSmallChannels = m_settings->value(QStringLiteral("import/ignoreSmallChannels"), true).toBool();
     m_minSubscribers = qMax(1, m_settings->value(QStringLiteral("import/minSubscribers"), 5000).toInt());
     m_cfg.minSubscribers = m_ignoreSmallChannels ? m_minSubscribers : 0;
-    for (const QString &kept : m_settings->value(QStringLiteral("import/smallChannelExceptions")).toStringList()) {
-        const QString channel = YtDlp::channelRef(kept);
-        if (!channel.isEmpty() && !m_cfg.smallChannelExceptions.contains(channel))
-            m_cfg.smallChannelExceptions << channel;
-    }
     m_cfg.concurrency = m_settings->value(QStringLiteral("import/concurrency"), 2).toInt();
     // By default the language the desktop is in.
     QString language = QLocale::system().name().section(QLatin1Char('_'), 0, 0).toLower();
@@ -224,6 +222,8 @@ void AppController::openLibrary()
 
     m_manager = std::make_unique<ImportManager>(m_db.get());
     m_manager->setSettings(m_cfg);
+    m_manager->setKeepsUndo(true);
+    connect(m_manager.get(), &ImportManager::undoChanged, this, &AppController::undoChanged, Qt::QueuedConnection);
     connect(m_manager.get(), &ImportManager::jobChanged, this, [this](const JobStatus &s) {
         m_jobs->update(s);
         if (s.finished && !s.upgrade && s.outcome != QLatin1String("postponed")) {
@@ -251,6 +251,16 @@ void AppController::openLibrary()
         m_shownKey.remove(id);
         emit candidatesChanged();
         refreshCounts();
+    });
+    connect(m_manager.get(), &ImportManager::channelListsChanged, this, &AppController::channelListsChanged);
+    connect(m_manager.get(), &ImportManager::channelJudged, this,
+            [this](int ticket, qint64 videoId, bool accept, qint64, const QString &track, const QString &reason) {
+        if (ticket != 0 && ticket == m_channelTicket)
+            emit channelJudged(videoId, accept, track, reason);
+    });
+    connect(m_manager.get(), &ImportManager::channelPreviewDone, this, [this](int ticket) {
+        if (ticket == m_channelTicket)
+            emit channelPreviewDone();
     });
     connect(m_manager.get(), &ImportManager::activityChanged, this, [this] {
         if (!m_manager->busy())
@@ -384,7 +394,6 @@ void AppController::saveSettings()
     m_settings->setValue(QStringLiteral("import/skipStillImages"), m_cfg.skipStillImages);
     m_settings->setValue(QStringLiteral("import/ignoreSmallChannels"), m_ignoreSmallChannels);
     m_settings->setValue(QStringLiteral("import/minSubscribers"), m_minSubscribers);
-    m_settings->setValue(QStringLiteral("import/smallChannelExceptions"), m_cfg.smallChannelExceptions);
     m_settings->setValue(QStringLiteral("import/accountOnBotCheck"), m_cfg.accountOnBotCheck);
     m_settings->setValue(QStringLiteral("player/volume"), m_volume);
     m_settings->setValue(QStringLiteral("player/muted"), m_muted);
@@ -591,6 +600,118 @@ void AppController::approveVideo(qint64 videoId)
             trackId = all.at(qBound(0, shownCandidate(videoId), int(all.size()) - 1)).track.id;
     }
     m_manager->approveVideo(videoId, trackId);
+}
+
+void AppController::undoVerdict()
+{
+    if (m_manager)
+        m_manager->undoVerdict();
+}
+
+QVariantMap AppController::channelActions(qint64 videoId) const
+{
+    QVariantMap out{{QStringLiteral("offered"), false}};
+    const std::optional<VideoInfo> v = m_db ? m_db->video(videoId) : std::nullopt;
+    if (!v || !v->review)
+        return out;
+    // (Under the channel's own name: this upload may be listed under several.)
+    const Database::ListedChannel channel = m_db->knownChannel(v->ytChannelId);
+    out.insert(QStringLiteral("id"), v->ytChannelId);
+    out.insert(QStringLiteral("name"), channel.name.isEmpty() ? v->ytChannel : channel.name);
+    out.insert(QStringLiteral("handle"), channel.handle);
+    // A name will not do: two channels can have the same one.
+    if (v->ytChannelId.isEmpty() || !m_db->channelList(v->ytChannelId).isEmpty())
+        return out;
+    // Not where it is an artist's channel already, for the candidate showing.
+    const QVector<Database::Candidate> all = ImportManager::candidatesInOrder(m_db.get(), *v);
+    if (all.isEmpty())
+        return out;
+    const TrackInfo &track = all.at(qBound(0, shownCandidate(videoId), int(all.size()) - 1)).track;
+    out.insert(QStringLiteral("offered"),
+               !Matcher::isOwnChannel(track, v->ytChannel)
+                   && !ArtistChannels::knownArtistChannel(*m_db, Matcher::artistNames(track), v->ytChannelId, v->ytChannel));
+    return out;
+}
+
+QVariantMap AppController::channelChange(qint64 videoId, bool allow)
+{
+    QVariantMap out;
+    const std::optional<VideoInfo> of = m_db ? m_db->video(videoId) : std::nullopt;
+    if (!of || of->ytChannelId.isEmpty() || !m_manager)
+        return out;
+    const Database::ListedChannel channel = m_db->knownChannel(of->ytChannelId);
+    out.insert(QStringLiteral("id"), of->ytChannelId);
+    out.insert(QStringLiteral("name"), channel.name.isEmpty() ? of->ytChannel : channel.name);
+    out.insert(QStringLiteral("handle"), channel.handle);
+    out.insert(QStringLiteral("allow"), allow);
+    QVariantList videos;
+    for (const VideoInfo &v : m_db->videosOfChannel(of->ytChannelId)) {
+        // Allowing changes what waits for a verdict; denying, everything.
+        if (allow && !v.review)
+            continue;
+        QStringList tracks;
+        if (v.review) {
+            for (const Database::Candidate &c : ImportManager::candidatesInOrder(m_db.get(), v))
+                tracks << (c.track.artist.isEmpty() ? c.track.title : QStringLiteral("%1 — %2").arg(c.track.artist, c.track.title));
+        } else {
+            QSet<qint64> seen;
+            for (const TrackInfo &t : m_db->tracksForVideo(v.id)) {
+                if (seen.contains(Database::trackKey(t)))
+                    continue;
+                seen.insert(Database::trackKey(t));
+                tracks << (t.artist.isEmpty() ? t.title : QStringLiteral("%1 — %2").arg(t.artist, t.title));
+            }
+        }
+        videos << QVariantMap{
+            {QStringLiteral("videoId"), v.id},
+            {QStringLiteral("ytTitle"), v.ytTitle},
+            {QStringLiteral("thumb"), v.thumb.isEmpty() ? QString() : QUrl::fromLocalFile(v.thumb).toString()},
+            {QStringLiteral("review"), v.review},
+            {QStringLiteral("tracks"), tracks},
+        };
+    }
+    out.insert(QStringLiteral("videos"), videos);
+    m_channelTicket = allow ? m_manager->previewAllowChannel(of->ytChannelId) : 0;
+    if (!allow)
+        m_manager->cancelChannelPreview();
+    return out;
+}
+
+void AppController::cancelChannelChange()
+{
+    m_channelTicket = 0;
+    if (m_manager)
+        m_manager->cancelChannelPreview();
+}
+
+void AppController::applyChannelChange(const QString &channelId, bool allow)
+{
+    if (!m_manager || !m_db || channelId.isEmpty())
+        return;
+    m_channelTicket = 0;
+    const Database::ListedChannel c = m_db->knownChannel(channelId);
+    if (allow)
+        m_manager->allowChannel(c.id, c.name, c.handle);
+    else
+        m_manager->denyChannel(c.id, c.name, c.handle);
+}
+
+void AppController::unlistChannel(const QString &channelId)
+{
+    if (m_manager)
+        m_manager->unlistChannel(channelId);
+}
+
+QVariantList AppController::listedChannels() const
+{
+    QVariantList out;
+    if (!m_db)
+        return out;
+    for (const Database::ListedChannel &c : m_db->channelLists()) {
+        out << QVariantMap{{QStringLiteral("id"), c.id}, {QStringLiteral("name"), c.name}, {QStringLiteral("handle"), c.handle},
+                           {QStringLiteral("list"), c.list}};
+    }
+    return out;
 }
 
 QVariantList AppController::candidates(qint64 videoId) const
@@ -807,27 +928,6 @@ void AppController::setMinSubscribers(int n)
         return;
     m_minSubscribers = n;
     m_cfg.minSubscribers = m_ignoreSmallChannels ? m_minSubscribers : 0;
-    saveSettings();
-    if (m_manager)
-        m_manager->setSettings(m_cfg);
-    emit settingsChanged();
-}
-
-void AppController::setSmallChannelExceptions(const QString &channels)
-{
-    // Not at spaces: a channel's name typed for its handle is not two handles.
-    static const QRegularExpression separators(QStringLiteral("[,;\\n]+"));
-    QStringList list;
-    for (const QString &typed : channels.split(separators, Qt::SkipEmptyParts)) {
-        const QString channel = YtDlp::channelRef(typed);
-        if (!channel.isEmpty() && !list.contains(channel))
-            list << channel;
-    }
-    if (list == m_cfg.smallChannelExceptions) {
-        emit settingsChanged(); // the field shows what was understood
-        return;
-    }
-    m_cfg.smallChannelExceptions = list;
     saveSettings();
     if (m_manager)
         m_manager->setSettings(m_cfg);
@@ -1131,10 +1231,21 @@ QVariantMap AppController::videoSources(qint64 videoId) const
             {QStringLiteral("tags"), tags},
         };
     }
+    // When the upload was published: kept with the video, or for one from
+    // before that was kept, read off the importer's copy of its page in the
+    // cache, where that is still there.
+    QString published = v->ytDate;
+    if (published.isNull()) {
+        QFile page(QDir(ImportManager::cacheDir(m_cfg.mvDir)).filePath(QStringLiteral("videos/%1/audio.info.json").arg(v->ytId)));
+        if (page.open(QIODevice::ReadOnly))
+            published = YtDlp::publishedOn(QJsonDocument::fromJson(page.readAll()).object());
+    }
+    const QDate publishedOn = QDate::fromString(published, Qt::ISODate);
     return {
         {QStringLiteral("ytUrl"), QStringLiteral("https://www.youtube.com/watch?v=") + v->ytId},
         {QStringLiteral("ytTitle"), v->ytTitle},
         {QStringLiteral("ytChannel"), v->ytChannel},
+        {QStringLiteral("ytDate"), publishedOn.isValid() ? QLocale().toString(publishedOn, QStringLiteral("d MMM yyyy")) : QString()},
         {QStringLiteral("videoLength"), v->duration > 0 ? formatDuration(v->duration) : QString()},
         {QStringLiteral("files"), files},
     };
