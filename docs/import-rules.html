@@ -638,20 +638,20 @@ del { background: var(--bad-soft); color: var(--bad); text-decoration: line-thro
   <header>
     <h2><span class="tag">G</span> Your verdict on a video under review</h2>
     <p>A card is one video under review, with its candidate tracks: the tracks whose video it could be. A track can be a candidate of several cards. Your verdict is what makes it one track, one video.</p>
-    <div class="where">ImportManager::approveVideo · rejectVideo · allowChannel · denyChannel · candidatesInOrder · withdraw · Muxer::keepAudio</div>
+    <div class="where">ImportManager::approveVideo · rejectVideo · undoVerdict · allowChannel · denyChannel · candidatesInOrder · withdraw · Muxer::keepAudio</div>
   </header>
   <div class="scroll">
   <ul class="tree">
     <li><div class="row"><span class="q">Your verdict</span></div>
       <ul>
         <li id="G1"><div class="row"><a class="id" href="#G1">G1</a><span class="when">Accept</span><span class="out ok">the video of the candidate track that is showing (G3)</span>
-          <span class="why">It joins the library as that track's video, with that track's audio; the other candidates' audio is taken out of the file. Your verdict vouches for that upload as this track's video, so that a re-import does not ask again whose channel it is on; it vouches for nothing else of the channel (R5). That track is no longer a candidate of other videos, and a video left with no candidate is deleted. The other candidates of this video stay candidates of their other videos; one with none left has no video (A6).</span></div></li>
+          <span class="why">It joins the library as that track's video, with that track's audio; the other candidates' audio is taken out of the file. Your verdict vouches for that upload as this track's video, so that a re-import does not ask again whose channel it is on; it vouches for nothing else of the channel (R5). That track is no longer a candidate of other videos, and a video left with no candidate is deleted. The other candidates of this video stay candidates of their other videos; one with none left has no video (A6). Until the next verdict, Undo takes it back (G10).</span></div></li>
         <li id="G2"><div class="row"><a class="id" href="#G2">G2</a><span class="when">Reject</span><span class="q">For each of its candidate tracks: is it a candidate of another video?</span></div>
           <ul>
             <li><div class="row"><span class="when">Yes</span><span class="out review">it waits on those</span></div></li>
             <li><div class="row"><span class="when">No</span><span class="out none">it has no video: A6</span></div></li>
           </ul>
-          <div class="row"><span class="why">Either way the video is deleted, and that upload is not offered to any of its candidate tracks again (D0).</span></div>
+          <div class="row"><span class="why">Either way the video is deleted, and that upload is not offered to any of its candidate tracks again (D0). Until the next verdict, Undo takes it back (G10).</span></div>
         </li>
       </ul>
     </li>
@@ -669,6 +669,8 @@ del { background: var(--bad-soft); color: var(--bad); text-decoration: line-thro
       <span class="why">The double cross that shows once the pointer has rested on Reject for a second. Its videos under review are rejected, each for all its candidates (G2). The ones that tracks have are deleted, and those tracks go back to the queue, to see whether another upload is theirs. Told by the channel's id: a video from before ids were kept goes when a re-import reads its page (D8).</span></div></li>
     <li id="G9"><div class="row"><a class="id" href="#G9">G9</a><span class="q">Before a channel is allowed or denied</span>
       <span class="why">The app lists what that changes and asks: the videos under review that would be accepted and the ones that would stay, each with the reason; or every video that would be deleted, with its track or its candidates. The two buttons are offered only where the channel is not an artist's channel already for the candidate showing (R5), and where the library kept the channel's id: a name will not do, two channels can have the same one. Settings lists the channels you allowed and denied. One taken off a list is judged like any other from then on; nothing in the library changes at that moment.</span></div></li>
+    <li id="G10"><div class="row"><a class="id" href="#G10">G10</a><span class="when">Undo</span><span class="out review">the last verdict is taken back: the queue is as it was before it</span>
+      <span class="why">One step: only the verdict given last, and only until the next one is given or the app closes. For that long, what a verdict deletes is set aside in <code>.mvplayer/undo</code> instead: the file of a rejected video (G2), the files of videos deleted for being left with no candidate (G1), and the file as it was before the other candidates' audio was taken out of it (G1). Undo puts the video back in the queue with the candidates it had, their tracks back to waiting, and the videos deleted with it back in the queue; an upload turned down is offered again (D0). It vouches for nothing: on a re-import the video is judged as if the verdict had never been given. The button is in the review panel and names what it would take back; while a verdict is still being carried out it waits. A verdict given by a channel (G7, G8) is not undone this way: the channel is taken off its list in Settings (G9). A verdict given headless (<code>--approve</code>, <code>--reject</code>) sets nothing aside. Anything left in <code>.mvplayer/undo</code> when the app starts is deleted.</span></div></li>
   </ul>
   </div>
 </section>

@@ -134,6 +134,9 @@ struct VideoInfo {
     // Null: never kept (the page was read before handles were); empty: the
     // page gave none.
     QString ytChannelHandle;
+    // When the upload was published, "YYYY-MM-DD" (its premiere date where
+    // it had one). Null: not known (videos from before it was kept).
+    QString ytDate;
     QJsonObject tags;
     qint64 addedAt = 0;
 };

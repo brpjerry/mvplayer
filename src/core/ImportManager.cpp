@@ -23,6 +23,7 @@
 #include <QFile>
 #include <QThread>
 
+#include <filesystem>
 #include <functional>
 
 namespace {
@@ -409,8 +410,10 @@ void ImportManager::start()
     m_settledOnce = false;
 
     // Leftovers from a previous run that was interrupted: scratch files, and
-    // half-written outputs if the process was killed outright mid-mux.
+    // half-written outputs if the process was killed outright mid-mux. And
+    // what the last verdict of a previous run set aside: that run's undo.
     QDir(QDir(dataDir(cfg.mvDir)).filePath(QStringLiteral("tmp"))).removeRecursively();
+    QDir(undoDir()).removeRecursively();
     // What was remembered about candidates: not for ever, and not without bound.
     YtDlp::pruneCache(cacheDir(cfg.mvDir), 2LL * 1024 * 1024 * 1024, 14);
 
@@ -449,6 +452,189 @@ void ImportManager::stop()
     m_active = 0;
     m_scanning = false;
     m_upgrading = false;
+    // The last verdict stands once the app closes.
+    std::unique_ptr<Undo> undo;
+    {
+        QMutexLocker lock(&m_undoMutex);
+        undo = std::move(m_undo);
+    }
+    if (undo) {
+        dropUndo(std::move(undo));
+        emit undoChanged();
+    }
+}
+
+// ---- Taking the last verdict back -------------------------------------------
+
+QString ImportManager::undoDir() const
+{
+    return QDir(dataDir(settings().mvDir)).filePath(QStringLiteral("undo"));
+}
+
+bool ImportManager::undoAvailable() const
+{
+    QMutexLocker lock(&m_undoMutex);
+    return m_undo != nullptr;
+}
+
+QString ImportManager::undoLabel() const
+{
+    QMutexLocker lock(&m_undoMutex);
+    return m_undo ? m_undo->label : QString();
+}
+
+void ImportManager::beginUndo(const QString &verdict, const QString &label)
+{
+    m_recording = std::make_unique<Undo>();
+    m_recording->verdict = verdict;
+    m_recording->label = label;
+    m_recordingThread = QThread::currentThread();
+}
+
+bool ImportManager::recording() const
+{
+    return m_recording && QThread::currentThread() == m_recordingThread;
+}
+
+void ImportManager::recordVideo(const VideoInfo &v)
+{
+    for (const VideoInfo &had : std::as_const(m_recording->videos)) {
+        if (had.id == v.id)
+            return;
+    }
+    m_recording->videos << v;
+    const QVector<Database::CandidateRow> rows = m_db->candidateRows(v.id);
+    m_recording->candidates.insert(v.id, rows);
+    for (const Database::CandidateRow &r : rows) {
+        if (m_recording->trackKeys.contains(r.trackKey))
+            continue;
+        m_recording->trackKeys.insert(r.trackKey);
+        m_recording->tracks << m_db->trackStates(r.trackKey);
+    }
+}
+
+void ImportManager::setAside(const QString &path, bool copy)
+{
+    if (!m_recording || path.isEmpty() || !QFile::exists(path))
+        return;
+    const QString dir = undoDir();
+    QDir().mkpath(dir);
+    const QString aside = QDir(dir).filePath(QStringLiteral("%1-%2").arg(m_recording->files.size()).arg(QFileInfo(path).fileName()));
+    std::error_code ec;
+    if (copy) {
+        // The file is about to be rewritten (in a new file, moved over this
+        // one): a hard link keeps this one as it is.
+        std::filesystem::create_hard_link(std::filesystem::path(path.toStdString()), std::filesystem::path(aside.toStdString()), ec);
+        if (ec && !QFile::copy(path, aside))
+            return;
+    } else {
+        std::filesystem::rename(std::filesystem::path(path.toStdString()), std::filesystem::path(aside.toStdString()), ec);
+        if (ec && !(QFile::copy(path, aside) && QFile::remove(path)))
+            return;
+    }
+    m_recording->files.insert(path, aside);
+}
+
+void ImportManager::endUndo()
+{
+    if (!m_recording)
+        return;
+    std::unique_ptr<Undo> done = std::move(m_recording);
+    m_recordingThread = nullptr;
+    if (!done->changed) {
+        dropUndo(std::move(done));
+        return;
+    }
+    // The verdict before it is past taking back.
+    std::unique_ptr<Undo> previous;
+    {
+        QMutexLocker lock(&m_undoMutex);
+        previous = std::move(m_undo);
+        m_undo = std::move(done);
+    }
+    dropUndo(std::move(previous));
+    emit undoChanged();
+}
+
+void ImportManager::dropUndo(std::unique_ptr<Undo> undo)
+{
+    if (!undo)
+        return;
+    for (const QString &aside : std::as_const(undo->files))
+        QFile::remove(aside);
+    QDir().rmdir(undoDir());
+}
+
+void ImportManager::undoVerdict()
+{
+    std::shared_ptr<Undo> undo;
+    {
+        QMutexLocker lock(&m_undoMutex);
+        undo = std::move(m_undo);
+    }
+    if (!undo)
+        return;
+    emit undoChanged();
+    ++m_reviewJobs;
+    emit activityChanged();
+    m_verdictPool.start([this, undo] {
+        undoJob(*undo);
+        --m_reviewJobs;
+        QMetaObject::invokeMethod(this, [this] {
+            emit activityChanged();
+            pump();
+        }, Qt::QueuedConnection);
+    });
+}
+
+void ImportManager::undoJob(const Undo &undo)
+{
+    // Each video as it was, in the order they were recorded: the one judged
+    // first, then the ones deleted with it.
+    QStringList claimed;
+    const auto release = qScopeGuard([&] {
+        for (const QString &ytId : std::as_const(claimed))
+            releaseVideo(ytId);
+    });
+    for (const VideoInfo &v : undo.videos) {
+        if (!claimVideo(v.ytId))
+            return;
+        claimed << v.ytId;
+    }
+    QVector<qint64> added, changed;
+    QJsonArray videos;
+    {
+        const Database::Transaction atOnce(m_db);
+        for (const VideoInfo &v : undo.videos) {
+            const bool existed = m_db->video(v.id).has_value();
+            if (!m_db->restoreVideo(v)) {
+                qWarning().noquote() << "[review] cannot put back" << v.ytTitle << ": another video has its YouTube id";
+                continue;
+            }
+            m_db->restoreCandidates(v.id, undo.candidates.value(v.id));
+            (existed ? changed : added) << v.id;
+            videos.append(QJsonObject{{QStringLiteral("videoId"), v.id}, {QStringLiteral("id"), v.ytId}, {QStringLiteral("title"), v.ytTitle},
+                                      {QStringLiteral("deleted"), !existed}});
+        }
+        for (const Database::TrackState &t : undo.tracks)
+            m_db->restoreTrackState(t);
+        for (const auto &r : undo.rejected)
+            m_db->unrejectVideoFor(r.first, r.second);
+    }
+    for (auto it = undo.files.constBegin(); it != undo.files.constEnd(); ++it) {
+        QDir().mkpath(QFileInfo(it.key()).absolutePath());
+        std::error_code ec;
+        std::filesystem::rename(std::filesystem::path(it.value().toStdString()), std::filesystem::path(it.key().toStdString()), ec);
+        if (ec)
+            qWarning().noquote() << "[review] cannot put back" << it.key() << ":" << QString::fromStdString(ec.message());
+    }
+    QDir().rmdir(undoDir());
+    qInfo().noquote() << QStringLiteral("[review] taken back: %1").arg(undo.label);
+    appendLog({{QStringLiteral("event"), QStringLiteral("undo")}, {QStringLiteral("verdict"), undo.verdict}, {QStringLiteral("videos"), videos}});
+    for (qint64 id : std::as_const(added))
+        emit videoAdded(id);
+    for (qint64 id : std::as_const(changed))
+        emit videoChanged(id);
 }
 
 void ImportManager::rescan()
@@ -601,6 +787,14 @@ bool ImportManager::putLibraryAudioIn(const VideoInfo &video, const TrackInfo &t
 void ImportManager::discardVideo(const VideoInfo &v)
 {
     m_db->removeVideo(v.id);
+    // Deleted by a verdict that can be taken back: set aside instead.
+    if (recording()) {
+        for (const QString &sub : Subtitles::sidecars(v.path))
+            setAside(sub, false);
+        setAside(v.path, false);
+        if (!v.thumb.isEmpty())
+            setAside(v.thumb, false);
+    }
     removeVideoFiles(v);
     // An artist folder left empty goes too; never the MV folder itself.
     const QString root = QDir(settings().mvDir).absolutePath();
@@ -652,6 +846,8 @@ void ImportManager::withdraw(const TrackInfo &track, const QVector<VideoInfo> &f
         const std::optional<VideoInfo> v = m_db->video(was.id);
         if (!v || !v->review)
             continue;
+        if (recording())
+            recordVideo(*v);
         m_db->removeCandidate(v->id, track);
         const bool last = m_db->candidateCount(v->id) == 0;
         appendLog({{QStringLiteral("event"), QStringLiteral("withdrawn")}, {QStringLiteral("videoId"), v->id},
@@ -789,8 +985,9 @@ void ImportManager::approveVideo(qint64 videoId, qint64 trackId)
     ++m_reviewJobs;
     emit activityChanged();
     const ImportSettings cfg = settings();
-    m_verdictPool.start([this, videoId, trackId, cfg] {
-        approveJob(videoId, trackId, cfg);
+    const bool undoable = m_keepsUndo;
+    m_verdictPool.start([this, videoId, trackId, cfg, undoable] {
+        approveJob(videoId, trackId, cfg, false, undoable);
         --m_reviewJobs;
         QMetaObject::invokeMethod(this, [this] {
             emit activityChanged();
@@ -803,8 +1000,9 @@ void ImportManager::rejectVideo(qint64 videoId)
 {
     ++m_reviewJobs;
     emit activityChanged();
-    m_verdictPool.start([this, videoId] {
-        rejectJob(videoId);
+    const bool undoable = m_keepsUndo;
+    m_verdictPool.start([this, videoId, undoable] {
+        rejectJob(videoId, QString(), undoable);
         --m_reviewJobs;
         QMetaObject::invokeMethod(this, [this] {
             emit activityChanged();
@@ -813,7 +1011,7 @@ void ImportManager::rejectVideo(qint64 videoId)
     });
 }
 
-void ImportManager::approveJob(qint64 videoId, qint64 trackId, const ImportSettings &cfg, bool byChannel)
+void ImportManager::approveJob(qint64 videoId, qint64 trackId, const ImportSettings &cfg, bool byChannel, bool undoable)
 {
     std::optional<VideoInfo> v = m_db->video(videoId);
     if (!v || !v->review)
@@ -829,6 +1027,14 @@ void ImportManager::approveJob(qint64 videoId, qint64 trackId, const ImportSetti
     v = m_db->video(videoId);
     if (!v || !v->review)
         return;
+    // Kept so that it can be taken back: the rows as they are, and the file
+    // as it is before the other candidates' audio is taken out of it.
+    const auto keep = qScopeGuard([&] { endUndo(); });
+    if (undoable) {
+        beginUndo(QStringLiteral("accept"), QStringLiteral("Accepted “%1”").arg(v->ytTitle));
+        recordVideo(*v);
+        setAside(v->path, true);
+    }
 
     // Whose video it is: the candidate named, or the one shown first.
     QVector<Database::Candidate> candidates = candidatesInOrder(m_db, *v);
@@ -868,6 +1074,10 @@ void ImportManager::approveJob(qint64 videoId, qint64 trackId, const ImportSetti
                 return;
         }
         const Database::Candidate &c = candidates[mine];
+        if (m_recording) {
+            m_recording->label = QStringLiteral("Accepted “%1” for “%2”").arg(v->ytTitle, c.track.title);
+            m_recording->changed = true;
+        }
         // The file keeps this track's audio and YouTube's, and no other
         // candidate's.
         QString error;
@@ -897,6 +1107,8 @@ void ImportManager::approveJob(qint64 videoId, qint64 trackId, const ImportSetti
         }
     }
     v->review = false;
+    if (m_recording)
+        m_recording->changed = true;
     // The user's verdict vouches for this upload as the track's video, so
     // that a re-import does not ask again whose channel it is on. (Accepted
     // because its channel was allowed, the list is what says so.)
@@ -937,7 +1149,7 @@ void ImportManager::approveJob(qint64 videoId, qint64 trackId, const ImportSetti
         withdraw(*keeper, m_db->candidacies(*keeper));
 }
 
-void ImportManager::rejectJob(qint64 videoId, const QString &why)
+void ImportManager::rejectJob(qint64 videoId, const QString &why, bool undoable)
 {
     std::optional<VideoInfo> v = m_db->video(videoId);
     if (!v || !v->review)
@@ -949,11 +1161,21 @@ void ImportManager::rejectJob(qint64 videoId, const QString &why)
     v = m_db->video(videoId);
     if (!v || !v->review)
         return;
+    // Kept so that it can be taken back: the rows as they are, and the
+    // file, set aside instead of deleted.
+    const auto keep = qScopeGuard([&] { endUndo(); });
+    if (undoable) {
+        beginUndo(QStringLiteral("reject"), QStringLiteral("Turned down “%1”").arg(v->ytTitle));
+        recordVideo(*v);
+        m_recording->changed = true;
+    }
     // This upload is not offered to any of its candidates again. Each waits
     // on what else it is a candidate of; with nothing, it has no video.
     const QVector<Database::Candidate> candidates = m_db->candidates(videoId);
     QJsonArray names;
     for (const Database::Candidate &c : candidates) {
+        if (m_recording && !m_db->videoRejectedFor(c.track, v->ytId))
+            m_recording->rejected << qMakePair(c.track, v->ytId);
         m_db->rejectVideoFor(c.track, v->ytId);
         names.append(QJsonObject{{QStringLiteral("trackId"), c.track.id}, {QStringLiteral("track"), c.track.title}, {QStringLiteral("album"), c.track.album}});
     }
@@ -2275,6 +2497,7 @@ void ImportManager::replaceWithJob(const VideoInfo &video, const TrackInfo &trac
     v.ytChannelSubs = channelFacts.subscribers;
     v.ytChannelVerified = channelFacts.verified;
     v.ytChannelHandle = channelFacts.handle;
+    v.ytDate = YtDlp::publishedOn(ytInfo);
     v.tags = track.tags;
     v.addedAt = QDateTime::currentSecsSinceEpoch();
     const qint64 newId = m_db->insertVideo(v);
@@ -2799,6 +3022,8 @@ void ImportManager::runJob(qint64 trackId, const ImportSettings &cfg)
         v.ytChannelSubs = channel.subscribers;
         v.ytChannelVerified = channel.verified;
         v.ytChannelHandle = channel.handle;
+        if (v.ytDate.isNull())
+            v.ytDate = YtDlp::publishedOn(page);
         m_db->updateVideoChannel(v);
         return Page::Known;
     };
@@ -3732,6 +3957,7 @@ void ImportManager::runJob(qint64 trackId, const ImportSettings &cfg)
     v.ytChannelSubs = channel.subscribers;
     v.ytChannelVerified = channel.verified || chosen.verified;
     v.ytChannelHandle = channel.handle;
+    v.ytDate = YtDlp::publishedOn(ytInfo);
     v.tags = track.tags;
     v.addedAt = QDateTime::currentSecsSinceEpoch();
 

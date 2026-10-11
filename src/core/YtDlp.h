@@ -108,6 +108,9 @@ public:
     static double bestAudioKbps(const QJsonObject &info);
     static int bestHeight(const QJsonObject &info);
     static double audioKbps(const QJsonObject &info);
+    // When the upload was published, "YYYY-MM-DD": its premiere date where
+    // it had one, else its upload date. Null where the page gives neither.
+    static QString publishedOn(const QJsonObject &info);
 
     // True for a cookies.txt in the Netscape format with YouTube cookies in it.
     static bool looksLikeCookies(const QString &file);

@@ -47,6 +47,8 @@ class AppController : public QObject
     Q_PROPERTY(int videoCount READ videoCount NOTIFY facetsChanged)
     // Videos that wait for the user to accept or reject them.
     Q_PROPERTY(int reviewCount READ reviewCount NOTIFY facetsChanged)
+    Q_PROPERTY(bool undoAvailable READ undoAvailable NOTIFY undoChanged)
+    Q_PROPERTY(QString undoLabel READ undoLabel NOTIFY undoChanged)
     // Library videos whose tracks are gone, for the user to keep or delete.
     Q_PROPERTY(int orphanCount READ orphanCount NOTIFY facetsChanged)
 
@@ -139,6 +141,11 @@ public:
     // its candidate track on show; rejected, of none of them.
     Q_INVOKABLE void approveVideo(qint64 videoId);
     Q_INVOKABLE void rejectVideo(qint64 videoId);
+    // The last verdict can be taken back until the next one (or the app
+    // closes); undoLabel names what it would take back.
+    bool undoAvailable() const { return m_manager && m_manager->undoAvailable(); }
+    QString undoLabel() const { return m_manager ? m_manager->undoLabel() : QString(); }
+    Q_INVOKABLE void undoVerdict();
     // Allowing or denying the channel of a video under review. Offered
     // where the channel is not an artist's already for the candidate
     // showing and the library kept its id: {offered, id, name, handle}.
@@ -281,6 +288,7 @@ signals:
     void channelPreviewDone();
     // What the videos under review have as candidates, or show of them, changed.
     void candidatesChanged();
+    void undoChanged();
     void facetsChanged();
     void settingsChanged();
     void activityChanged();

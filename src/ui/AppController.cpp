@@ -12,7 +12,9 @@
 #include <QRegularExpression>
 #include <QSet>
 #include <QSaveFile>
+#include <QFile>
 #include <QFileInfo>
+#include <QJsonDocument>
 #include <QMap>
 #include <QStandardPaths>
 #include <QThreadPool>
@@ -220,6 +222,8 @@ void AppController::openLibrary()
 
     m_manager = std::make_unique<ImportManager>(m_db.get());
     m_manager->setSettings(m_cfg);
+    m_manager->setKeepsUndo(true);
+    connect(m_manager.get(), &ImportManager::undoChanged, this, &AppController::undoChanged, Qt::QueuedConnection);
     connect(m_manager.get(), &ImportManager::jobChanged, this, [this](const JobStatus &s) {
         m_jobs->update(s);
         if (s.finished && !s.upgrade && s.outcome != QLatin1String("postponed")) {
@@ -596,6 +600,12 @@ void AppController::approveVideo(qint64 videoId)
             trackId = all.at(qBound(0, shownCandidate(videoId), int(all.size()) - 1)).track.id;
     }
     m_manager->approveVideo(videoId, trackId);
+}
+
+void AppController::undoVerdict()
+{
+    if (m_manager)
+        m_manager->undoVerdict();
 }
 
 QVariantMap AppController::channelActions(qint64 videoId) const
@@ -1221,10 +1231,21 @@ QVariantMap AppController::videoSources(qint64 videoId) const
             {QStringLiteral("tags"), tags},
         };
     }
+    // When the upload was published: kept with the video, or for one from
+    // before that was kept, read off the importer's copy of its page in the
+    // cache, where that is still there.
+    QString published = v->ytDate;
+    if (published.isNull()) {
+        QFile page(QDir(ImportManager::cacheDir(m_cfg.mvDir)).filePath(QStringLiteral("videos/%1/audio.info.json").arg(v->ytId)));
+        if (page.open(QIODevice::ReadOnly))
+            published = YtDlp::publishedOn(QJsonDocument::fromJson(page.readAll()).object());
+    }
+    const QDate publishedOn = QDate::fromString(published, Qt::ISODate);
     return {
         {QStringLiteral("ytUrl"), QStringLiteral("https://www.youtube.com/watch?v=") + v->ytId},
         {QStringLiteral("ytTitle"), v->ytTitle},
         {QStringLiteral("ytChannel"), v->ytChannel},
+        {QStringLiteral("ytDate"), publishedOn.isValid() ? QLocale().toString(publishedOn, QStringLiteral("d MMM yyyy")) : QString()},
         {QStringLiteral("videoLength"), v->duration > 0 ? formatDuration(v->duration) : QString()},
         {QStringLiteral("files"), files},
     };

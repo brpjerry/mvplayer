@@ -88,7 +88,8 @@ TrackInfo readTrack(const QSqlQuery &q)
 const char *kVideoCols =
     "id, yt_id, path, thumb, title, artist, album_artist, album, genre, year, track_no, duration, "
     "width, height, fps, vcodec, audio_source, audio_detail, yt_title, yt_channel, tags_json, added_at, yt_abr, "
-    "review, review_start, review_end, yt_stream, yt_channel_id, yt_channel_subs, yt_channel_verified, yt_channel_handle, vouched";
+    "review, review_start, review_end, yt_stream, yt_channel_id, yt_channel_subs, yt_channel_verified, yt_channel_handle, vouched, "
+    "yt_date";
 
 // Text that was kept, though it may be empty: never the null string, which
 // stands for "not kept".
@@ -136,6 +137,9 @@ VideoInfo readVideo(const QSqlQuery &q)
         v.ytChannelHandle = keptText(q.value(i).toString());
     ++i;
     v.vouched = q.value(i++).toBool();
+    if (!q.value(i).isNull())
+        v.ytDate = q.value(i).toString();
+    ++i;
     return v;
 }
 
@@ -466,8 +470,9 @@ bool Database::init(QString *error)
     }
     // What an upload's page says of its channel, kept since small channels
     // can be ignored: its subscribers and its verified mark, and its handle,
-    // by which an exception names it.
-    for (const char *column : {"yt_channel_subs INTEGER", "yt_channel_verified INTEGER NOT NULL DEFAULT 0", "yt_channel_handle TEXT"}) {
+    // by which an exception names it. And when the upload was published.
+    for (const char *column : {"yt_channel_subs INTEGER", "yt_channel_verified INTEGER NOT NULL DEFAULT 0", "yt_channel_handle TEXT",
+                               "yt_date TEXT"}) {
         QSqlQuery q(db);
         const QString name = QString::fromLatin1(column).section(QLatin1Char(' '), 0, 0);
         bool has = false;
@@ -963,8 +968,8 @@ qint64 Database::insertVideo(const VideoInfo &v)
         "INSERT INTO videos (yt_id, path, thumb, title, artist, album_artist, album, genre, year,"
         " track_no, duration, width, height, fps, vcodec, audio_source, audio_detail, yt_title,"
         " yt_channel, tags_json, added_at, yt_abr, review, review_start, review_end, yt_stream, yt_channel_id,"
-        " yt_channel_subs, yt_channel_verified, yt_channel_handle, vouched)"
-        " VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)"));
+        " yt_channel_subs, yt_channel_verified, yt_channel_handle, vouched, yt_date)"
+        " VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)"));
     q.addBindValue(v.ytId);
     q.addBindValue(storedPath(v.path));
     q.addBindValue(storedPath(v.thumb));
@@ -996,6 +1001,7 @@ qint64 Database::insertVideo(const VideoInfo &v)
     q.addBindValue(v.ytChannelVerified);
     q.addBindValue(v.ytChannelHandle.isNull() ? QVariant() : QVariant(v.ytChannelHandle));
     q.addBindValue(v.vouched && !v.review);
+    q.addBindValue(v.ytDate.isNull() ? QVariant() : QVariant(v.ytDate));
     if (!run(q))
         return 0;
     return q.lastInsertId().toLongLong();
@@ -1046,12 +1052,14 @@ void Database::updateVideoMedia(const VideoInfo &v)
 void Database::updateVideoChannel(const VideoInfo &v)
 {
     QSqlQuery q(conn());
+    // (The page read for the channel says when the upload was published too.)
     q.prepare(QStringLiteral("UPDATE videos SET yt_channel_id = ?, yt_channel_subs = ?, yt_channel_verified = ?,"
-                             " yt_channel_handle = ? WHERE id = ?"));
+                             " yt_channel_handle = ?, yt_date = COALESCE(?, yt_date) WHERE id = ?"));
     q.addBindValue(keptText(v.ytChannelId));
     q.addBindValue(v.ytChannelSubs > -2 ? QVariant(v.ytChannelSubs) : QVariant());
     q.addBindValue(v.ytChannelVerified);
     q.addBindValue(v.ytChannelHandle.isNull() ? QVariant() : QVariant(v.ytChannelHandle));
+    q.addBindValue(v.ytDate.isNull() ? QVariant() : QVariant(v.ytDate));
     q.addBindValue(v.id);
     run(q);
 }
@@ -1350,6 +1358,127 @@ void Database::rejectVideoFor(const TrackInfo &track, const QString &ytId)
     q.addBindValue(rejectionKey(track));
     q.addBindValue(ytId);
     run(q);
+}
+
+void Database::unrejectVideoFor(const TrackInfo &track, const QString &ytId)
+{
+    QSqlQuery q(conn());
+    q.prepare(QStringLiteral("DELETE FROM rejected_videos WHERE key = ? AND yt_id = ?"));
+    q.addBindValue(rejectionKey(track));
+    q.addBindValue(ytId);
+    run(q);
+}
+
+QVector<Database::CandidateRow> Database::candidateRows(qint64 videoId)
+{
+    QVector<CandidateRow> out;
+    QSqlQuery q(conn());
+    q.prepare(QStringLiteral("SELECT track_key, stream, fit, audio_detail FROM candidates WHERE video_id = ? ORDER BY rowid"));
+    q.addBindValue(videoId);
+    if (!run(q))
+        return out;
+    while (q.next())
+        out << CandidateRow{q.value(0).toLongLong(), q.value(1).toInt(), q.value(2).toDouble(), q.value(3).toString()};
+    return out;
+}
+
+void Database::restoreCandidates(qint64 videoId, const QVector<CandidateRow> &rows)
+{
+    clearCandidates(videoId);
+    for (const CandidateRow &r : rows) {
+        QSqlQuery q(conn());
+        q.prepare(QStringLiteral("INSERT INTO candidates (video_id, track_key, stream, fit, audio_detail) VALUES (?, ?, ?, ?, ?)"));
+        q.addBindValue(videoId);
+        q.addBindValue(r.trackKey);
+        q.addBindValue(r.stream);
+        q.addBindValue(r.fit);
+        q.addBindValue(r.audioDetail);
+        run(q);
+    }
+}
+
+QVector<Database::TrackState> Database::trackStates(qint64 trackKey)
+{
+    QVector<TrackState> out;
+    QSqlQuery q(conn());
+    q.prepare(QStringLiteral("SELECT id, state, video_id, message FROM tracks WHERE %1 = ?")
+                  .arg(trackKey > 0 ? QStringLiteral("recording") : QStringLiteral("id")));
+    q.addBindValue(trackKey > 0 ? trackKey : -trackKey);
+    if (!run(q))
+        return out;
+    while (q.next())
+        out << TrackState{q.value(0).toLongLong(), q.value(1).toString(), q.value(2).toLongLong(), q.value(3).toString()};
+    return out;
+}
+
+void Database::restoreTrackState(const TrackState &t)
+{
+    QSqlQuery q(conn());
+    q.prepare(QStringLiteral("UPDATE tracks SET state = ?, video_id = ?, message = ? WHERE id = ?"));
+    q.addBindValue(t.state);
+    q.addBindValue(t.videoId > 0 ? QVariant(t.videoId) : QVariant());
+    q.addBindValue(t.message);
+    q.addBindValue(t.id);
+    run(q);
+}
+
+bool Database::restoreVideo(const VideoInfo &v)
+{
+    // (The columns of kVideoCols after the id, in that order.)
+    static const QStringList cols = QString::fromLatin1(kVideoCols).split(QStringLiteral(", ")).mid(1);
+    const auto bind = [&](QSqlQuery &q) {
+        q.addBindValue(v.ytId);
+        q.addBindValue(storedPath(v.path));
+        q.addBindValue(storedPath(v.thumb));
+        q.addBindValue(v.title);
+        q.addBindValue(v.artist);
+        q.addBindValue(v.albumArtist);
+        q.addBindValue(v.album);
+        q.addBindValue(v.genre);
+        q.addBindValue(v.year);
+        q.addBindValue(v.trackNo);
+        q.addBindValue(v.duration);
+        q.addBindValue(v.width);
+        q.addBindValue(v.height);
+        q.addBindValue(v.fps);
+        q.addBindValue(v.vcodec);
+        q.addBindValue(v.audioSource);
+        q.addBindValue(v.audioDetail);
+        q.addBindValue(v.ytTitle);
+        q.addBindValue(v.ytChannel);
+        q.addBindValue(jsonText(v.tags));
+        q.addBindValue(v.addedAt);
+        q.addBindValue(v.ytAbr > 0 ? QVariant(v.ytAbr) : QVariant());
+        q.addBindValue(v.review);
+        q.addBindValue(v.reviewStart);
+        q.addBindValue(v.reviewEnd);
+        q.addBindValue(v.ytStream);
+        q.addBindValue(v.ytChannelId);
+        q.addBindValue(v.ytChannelSubs > -2 ? QVariant(v.ytChannelSubs) : QVariant());
+        q.addBindValue(v.ytChannelVerified);
+        q.addBindValue(v.ytChannelHandle.isNull() ? QVariant() : QVariant(v.ytChannelHandle));
+        q.addBindValue(v.vouched && !v.review);
+        q.addBindValue(v.ytDate.isNull() ? QVariant() : QVariant(v.ytDate));
+    };
+    QStringList sets;
+    for (const QString &c : cols)
+        sets << c + QStringLiteral(" = ?");
+    QSqlQuery u(conn());
+    u.prepare(QStringLiteral("UPDATE videos SET %1 WHERE id = ?").arg(sets.join(QStringLiteral(", "))));
+    bind(u);
+    u.addBindValue(v.id);
+    if (!run(u))
+        return false;
+    if (u.numRowsAffected() > 0)
+        return true;
+    if (videoByYtId(v.ytId))
+        return false;
+    QSqlQuery i(conn());
+    i.prepare(QStringLiteral("INSERT INTO videos (id, %1) VALUES (?%2)")
+                  .arg(cols.join(QStringLiteral(", ")), QStringLiteral(", ?").repeated(cols.size())));
+    i.addBindValue(v.id);
+    bind(i);
+    return run(i);
 }
 
 bool Database::videoRejectedFor(const TrackInfo &track, const QString &ytId)

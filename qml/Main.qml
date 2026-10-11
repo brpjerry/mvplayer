@@ -285,9 +285,24 @@ ApplicationWindow {
             onSettingsRequested: settings.open()
         }
 
+        // The music file and YouTube page of the video under review, with the
+        // arrows between its candidates: a panel in place of the control
+        // bar's popup while the review queue is on show.
+        ReviewPanel {
+            id: reviewPanel
+            anchors.left: sidebar.right
+            anchors.top: parent.top
+            anchors.bottom: controlBar.top
+            active: App.videos.section === "review" && !window.fullscreen
+            playing: player.current
+            onStepRequested: (delta) => controlBar.stepCandidate(delta)
+            onReplaceRequested: (videoId) => replaceDialog.openFor(videoId)
+            onRevealRequested: (videoId) => window.revealVideo(videoId)
+        }
+
         Item {
             id: mainArea
-            anchors.left: sidebar.right
+            anchors.left: reviewPanel.right
             anchors.right: parent.right
             anchors.top: parent.top
             anchors.bottom: controlBar.top
@@ -337,7 +352,7 @@ ApplicationWindow {
 
         PlayerView {
             id: playerView
-            x: window.fullscreen ? 0 : sidebar.width
+            x: window.fullscreen ? 0 : mainArea.x
             y: window.fullscreen ? 0 : topBar.height
             width: window.fullscreen ? window.width : mainArea.width
             height: window.fullscreen ? window.height : pane.height
@@ -371,6 +386,7 @@ ApplicationWindow {
             mpv: window.mpv
             current: player.current
             playing: window.playingNow
+            sourcesInPanel: reviewPanel.active
             overlay: window.fullscreen
             fullscreen: window.fullscreen
             shuffle: player.shuffle
@@ -400,7 +416,7 @@ ApplicationWindow {
     // Frame rate counter (F12)
     Rectangle {
         visible: FrameStats.visible
-        x: (window.fullscreen ? 0 : sidebar.width) + 14
+        x: (window.fullscreen ? 0 : mainArea.x) + 14
         y: controlBar.y - height - 14
         z: 100
         width: fpsLabel.implicitWidth + 16
@@ -567,9 +583,13 @@ ApplicationWindow {
         case "candidate": controlBar.stepCandidate(parseInt(arg || "1")); return "ok" // the next (1) or previous (-1) candidate track of the playing video
         case "candidates": return JSON.stringify(App.candidates(parseInt(arg)))
         case "elsewhere": return "" + controlBar.showElsewhere() // as the button in the panel does: the video it went to
+        // The review panel's own arrows and "+N" button, for the video it is about
+        case "panel-candidate": reviewPanel.stepCandidate(parseInt(arg || "1")); return "ok"
+        case "panel-elsewhere": return "" + reviewPanel.showElsewhere()
         case "reveal": return "" + window.revealVideo(parseInt(arg))
         case "approve": window.approveVideo(parseInt(arg)); return "ok"
         case "reject": window.rejectVideo(parseInt(arg)); return "ok"
+        case "undo": if (!App.undoAvailable) return "nothing to undo"; App.undoVerdict(); return "ok" // the last verdict taken back
         case "grab": // grab <file>: a picture of the settings panel when open, else of the window (grab-window: with popups)
             (settings.opened ? settings.contentItem : frame).grabToImage(r => r.saveToFile(arg))
             return "ok"
@@ -617,6 +637,10 @@ ApplicationWindow {
                 candidates: controlBar.candidates.length, candidate: controlBar.shown,
                 candidateTitle: controlBar.candidate ? controlBar.candidate.title : null,
                 elsewhere: controlBar.candidate ? controlBar.candidate.elsewhere.length : 0, nowTitle: controlBar.nowTitle,
+                panel: reviewPanel.active, panelWidth: reviewPanel.width, panelVideo: reviewPanel.videoId, panelPlaying: reviewPanel.isPlaying,
+                panelCandidates: reviewPanel.candidates.length, panelCandidate: reviewPanel.shown, panelTitle: reviewPanel.title,
+                panelFile: reviewPanel.file ? reviewPanel.file.path : null, panelYt: reviewPanel.ytTitle,
+                undo: App.undoAvailable, undoLabel: App.undoLabel,
                 replacing: App.replacing, replaceStage: App.replaceStage, replaceDialog: replaceDialog.opened, replaceOptions: replaceDialog.options.length, replaceMode: replaceDialog.mode,
                 accent: "" + Theme.accent, accentMode: App.accent, theme: App.themeMode, dark: Theme.dark,
                 systemDark: App.systemDark, bg: "" + Theme.bg, musicDirs: App.musicDirs, frameColor: "" + mpv.frameColor,

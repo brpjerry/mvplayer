@@ -660,6 +660,17 @@ double YtDlp::audioKbps(const QJsonObject &info)
     return abr > 0 ? abr : info.value(QLatin1String("tbr")).toDouble();
 }
 
+QString YtDlp::publishedOn(const QJsonObject &info)
+{
+    // (yt-dlp writes both as YYYYMMDD.)
+    for (const char *key : {"release_date", "upload_date"}) {
+        const QDate date = QDate::fromString(info.value(QLatin1String(key)).toString(), QStringLiteral("yyyyMMdd"));
+        if (date.isValid())
+            return date.toString(Qt::ISODate);
+    }
+    return QString();
+}
+
 bool YtDlp::downloadPreview(const QString &id, const QString &dir, QString *file, QString *error)
 {
     QStringList args;

@@ -95,6 +95,16 @@ public:
     // videoRemoved says when.
     void approveVideo(qint64 videoId, qint64 trackId = 0);
     void rejectVideo(qint64 videoId);
+    // The last verdict can be taken back while what it deleted is set aside
+    // in `.mvplayer/undo` (G10): the app's verdicts, not the headless
+    // importer's, and not those a channel gives. One step: the next verdict
+    // ends it, as does stopping. undoChanged says when there is one, or
+    // none; undoLabel names what it would take back. Carried out on the
+    // verdicts' thread: videoAdded and videoChanged say when.
+    void setKeepsUndo(bool on) { m_keepsUndo = on; }
+    bool undoAvailable() const;
+    QString undoLabel() const;
+    void undoVerdict();
     // A channel the user allows is an artist's channel for every track from
     // then on, and never ignored as a small one. Every video under review
     // from it is judged again from its file, with nothing asked of YouTube:
@@ -179,8 +189,34 @@ signals:
     void channelPreviewDone(int ticket);
     void activityChanged();
     void idle();
+    void undoChanged();
 
 private:
+    // What a verdict changed, as it was before: the video and the videos
+    // deleted with it, their candidates, the import state of their tracks,
+    // the uploads turned down, and the files it would have deleted (or
+    // rewritten), set aside.
+    struct Undo {
+        QString verdict; // accept | reject
+        QString label;
+        bool changed = false; // something was written: worth keeping
+        QVector<VideoInfo> videos;
+        QHash<qint64, QVector<Database::CandidateRow>> candidates;
+        QSet<qint64> trackKeys; // whose tracks are recorded
+        QVector<Database::TrackState> tracks;
+        QVector<QPair<TrackInfo, QString>> rejected; // track, YouTube id
+        QHash<QString, QString> files;               // where it was, where it is set aside
+    };
+    QString undoDir() const;
+    // The verdict being carried out keeps a record while it is undoable.
+    void beginUndo(const QString &verdict, const QString &label);
+    void endUndo();
+    void recordVideo(const VideoInfo &v);  // the row, its candidates, its candidates' tracks
+    bool recording() const;                // on the verdict's own thread
+    // Sets a file aside instead of deleting it; a copy of one about to be rewritten.
+    void setAside(const QString &path, bool copy);
+    void dropUndo(std::unique_ptr<Undo> undo); // its set-aside files go
+    void undoJob(const Undo &undo);
     void enqueue(qint64 trackId);
     // Deletes an untracked video with what is kept beside it.
     void removeUntracked(const VideoInfo &v);
@@ -219,8 +255,9 @@ private:
     bool measureCandidates(qint64 videoId, const ImportSettings &cfg);
     // `byChannel`: accepted because its channel was allowed, not by the
     // user's verdict on the video itself.
-    void approveJob(qint64 videoId, qint64 trackId, const ImportSettings &cfg, bool byChannel = false);
-    void rejectJob(qint64 videoId, const QString &why = QString());
+    // `undoable`: the user's own verdict in the app, kept so it can be taken back.
+    void approveJob(qint64 videoId, qint64 trackId, const ImportSettings &cfg, bool byChannel = false, bool undoable = false);
+    void rejectJob(qint64 videoId, const QString &why = QString(), bool undoable = false);
     // A video under review judged from its file with its channel taken as an
     // artist's: the candidate whose own recording it is (the closest fit of
     // several), or why it still waits.
@@ -286,6 +323,12 @@ private:
     bool m_started = false;
 
     QSet<QString> m_claimed; // YouTube ids being imported right now (guarded by m_mutex)
+
+    bool m_keepsUndo = false;
+    mutable QMutex m_undoMutex;
+    std::unique_ptr<Undo> m_undo;      // the last verdict's (guarded by m_undoMutex)
+    std::unique_ptr<Undo> m_recording; // the verdict being carried out, on its thread
+    QThread *m_recordingThread = nullptr;
 
     std::atomic<bool> m_blocked{false};
     std::atomic<int> m_failStreak{0}; // network failures in a row, across jobs

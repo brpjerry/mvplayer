@@ -281,7 +281,7 @@ case " \$* " in
     for a in "\$@"; do [ "\$prev" = "-o" ] && out=\$a; prev=\$a; done
     dir=\$(dirname "\$out")
     case "\$out" in
-    *audio.*) cp "$WORK/site-audio.opus" "\$dir/audio.opus"; echo '{"abr": 96, "acodec": "opus"}' > "\$dir/audio.info.json" ;;
+    *audio.*) cp "$WORK/site-audio.opus" "\$dir/audio.opus"; echo '{"abr": 96, "acodec": "opus", "upload_date": "20230307", "release_date": "20230308"}' > "\$dir/audio.info.json" ;;
     *video.*) cp "$WORK/site-video.mkv" "\$dir/video.mkv" ;;
     esac ;;
 esac
@@ -298,6 +298,8 @@ OUT=$(MVPLAYER_YTDLP="$SITE" timeout 120 "$BUILD/mvplayer-import" --allow-still-
 echo "$OUT" | grep -E "^\[import\]|^done:"
 [[ "$OUT" == *"for your review (1 video)"* && "$OUT" == *"done: 0 videos and 1 for review; tracks: review=1"* ]]
 [[ "$(streams)" == "h264 flac opus " && "$(review_state)" == "[(1, 'library')]" ]]
+# When the upload was published is kept with the video: its premiere date, before its upload date.
+[[ "$(python3 -c "import sqlite3, sys; print(sqlite3.connect(sys.argv[1]).execute(\"SELECT yt_date FROM videos WHERE yt_id = 'liv'\").fetchall())" "$WORK/mvlib5/.mvplayer/library.db")" == "[('2023-03-08',)]" ]]
 # search, audio to listen to, the video. (The look at the picture is left out:
 # its format selector has a ">" in it, which the Windows stand-in, a batch
 # file, would take for a redirection.)

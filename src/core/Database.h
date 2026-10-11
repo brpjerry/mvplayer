@@ -191,7 +191,33 @@ public:
     // A video the user turned down for a track is not offered for it again.
     void rejectVideoFor(const TrackInfo &track, const QString &ytId);
     bool videoRejectedFor(const TrackInfo &track, const QString &ytId);
+    // ...until the verdict is taken back.
+    void unrejectVideoFor(const TrackInfo &track, const QString &ytId);
     void removeVideo(qint64 id);
+
+    // Taking a verdict back (ImportManager's undo): rows as they were, and
+    // put back as they were.
+    struct CandidateRow {
+        qint64 trackKey = 0;
+        int stream = 0;
+        double fit = 0;
+        QString audioDetail;
+    };
+    QVector<CandidateRow> candidateRows(qint64 videoId);
+    void restoreCandidates(qint64 videoId, const QVector<CandidateRow> &rows);
+    struct TrackState {
+        qint64 id = 0;
+        QString state;
+        qint64 videoId = 0;
+        QString message;
+    };
+    // The import state of every file of a candidate's recording.
+    QVector<TrackState> trackStates(qint64 trackKey);
+    void restoreTrackState(const TrackState &t);
+    // The video's row as it was: updated where the row still exists,
+    // inserted again with its id where it was deleted. False where another
+    // video has its YouTube id by now.
+    bool restoreVideo(const VideoInfo &v);
 
 private:
     QSqlDatabase conn();
