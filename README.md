@@ -20,7 +20,7 @@ running it.
 ffmpeg is included. yt-dlp, and the Deno runtime it uses for some YouTube
 formats, are downloaded during setup from their own release pages into
 `%LOCALAPPDATA%\mvplayer\tools`. YouTube changes often, so when imports start
-failing use **Settings → Update yt-dlp** to fetch the latest version.
+failing use **Settings → Library → Update yt-dlp** to fetch the latest version.
 
 ## Install (Arch Linux)
 
@@ -262,9 +262,9 @@ fits outright, and then waits for you:
   and its uploads are never taken again. Tracks that had one of its videos
   are looked up again for another.
   Either way the app first lists what would change, video by video, and
-  asks. Settings lists the channels you allowed and denied; taken off
-  there, a channel is judged like any other again, and nothing in the
-  library changes with that.
+  asks. The Channels tab of Settings lists the channels you allowed and
+  denied; taken off there, a channel is judged like any other again, and
+  nothing in the library changes with that.
 
 In the library there is no sharing: a track has one video and a video one
 track. When a track's search turns up a video that another track has, the
@@ -406,7 +406,7 @@ sign-in. Searches still work. The pause says so, and with an account set up
 (below) offers "Carry on signed in": the refused request is made again with
 the account, and while guests are refused the downloads go to the account
 straight away, with a guest trying again every half hour. That is yours to
-switch on (also under Settings → YouTube Premium), because an account that
+switch on (also under Settings → Import → YouTube Premium), because an account that
 downloads a great deal is one YouTube may restrict; videos fetched that way
 also miss the "1080p Premium" picture. Where the account's cookies have
 expired the pause says that instead. Headless: `--sign-in-on-bot-check` with
@@ -546,6 +546,12 @@ command.
   between colours, so cuts do not make the interface flicker. Black, white
   and grey frames give a neutral accent (light grey to white on dark, dark
   grey to black on light).
+- Settings has a tab for each of: the library folders (with re-import and
+  the untracked videos), appearance, playback (subtitles), import behaviour
+  (with YouTube Premium), the channels you allowed and denied, and the
+  judge. Settings → Judge takes a Claude API key for judging videos under
+  review; it is kept beside the config file, readable by this user only,
+  and checked against the API when added. The judging itself is not here yet.
 - On Linux the playing video is offered to the desktop's media controls
   (MPRIS): media keys, `playerctl`, panel and lock-screen widgets show it and
   can play, pause, skip, seek and change the volume, shuffle and repeat. The
