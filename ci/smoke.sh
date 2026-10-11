@@ -283,6 +283,7 @@ case " \$* " in
     case "\$out" in
     *audio.*) cp "$WORK/site-audio.opus" "\$dir/audio.opus"; echo '{"abr": 96, "acodec": "opus", "upload_date": "20230307", "release_date": "20230308"}' > "\$dir/audio.info.json" ;;
     *video.*) cp "$WORK/site-video.mkv" "\$dir/video.mkv" ;;
+    *preview.*) cp "$WORK/site-video.mkv" "\$dir/preview.mkv" ;;
     esac ;;
 esac
 FAKE
@@ -787,7 +788,7 @@ PY
 OUT=$(one mvlib24 --music-dir "$WORK/lib18"); echo "$OUT"
 [[ "$OUT" == *"library brought up from layout 4"* ]]
 [[ "$OUT" == *"library brought up from layout 5"* ]]
-[[ "$(ask mvlib24 "PRAGMA user_version")" == "[(6,)]" && "$(ask mvlib24 "$STATES")" == "[('Ten', 'review', None), ('Tenth', 'review', None)]" ]]
+[[ "$(ask mvlib24 "PRAGMA user_version")" == "[(7,)]" && "$(ask mvlib24 "$STATES")" == "[('Ten', 'review', None), ('Tenth', 'review', None)]" ]]
 [[ "$(ask mvlib24 "SELECT v.yt_id, t.title, c.stream, c.fit > 0 FROM candidates c JOIN videos v ON v.id = c.video_id JOIN tracks t ON t.recording = c.track_key ORDER BY t.title")" == "[('ten', 'Ten', 1, 1), ('ten', 'Tenth', 2, 1)]" ]]
 [[ "$(codecs mvlib24 "Ten [ten].mkv")" == "h264 flac flac opus " ]]
 
@@ -1002,7 +1003,7 @@ echo "== a library from before channels were allowed or denied"
 sql mvlib48 "ALTER TABLE videos DROP COLUMN vouched; DROP TABLE channel_lists; PRAGMA user_version = 5;
     INSERT INTO artist_channels (artist, channel_id, channel, source) VALUES ('Jay', 'UCreupreupreupreupreup-_', '', 'approved')"
 OUT=$(chan mvlib48 --music-dir "$WORK/lib17"); echo "$OUT"
-[[ "$OUT" == *"library brought up from layout 5"* && "$(ask mvlib48 "PRAGMA user_version")" == "[(6,)]" ]]
+[[ "$OUT" == *"library brought up from layout 5"* && "$OUT" == *"library brought up from layout 6"* && "$(ask mvlib48 "PRAGMA user_version")" == "[(7,)]" ]]
 [[ "$(ask mvlib48 "SELECT vouched FROM videos")" == "[(1,)]" && "$(ask mvlib48 "SELECT COUNT(*) FROM artist_channels WHERE source = 'approved'")" == "[(0,)]" ]]
 [[ "$(ask mvlib48 "SELECT COUNT(*) FROM channel_lists")" == "[(0,)]" ]]
 
@@ -1199,6 +1200,130 @@ OUT=$(guard --mv-dir "$WORK/mvlib15" --sign-in-on-bot-check)
 echo "$OUT" | grep -E "^\[import\] paused|^done:" | cut -c1-70
 [[ "$OUT" == *"paused for 0:01"* && "$OUT" == *"done: 0 videos"* ]]
 grep '"event":"paused"' "$WORK/mvlib15/.mvplayer/import-log.jsonl" | grep -q "the account's cookies have expired"
+
+
+echo "== judge mode"
+# The judge runs the lookup (docs/import-rules-judge.html): a stand-in for
+# the Claude API answers the three questions from a file, so that each run
+# below can be given another verdict.
+JUDGE_PORT=$(python3 -c 'import socket; s = socket.socket(); s.bind(("127.0.0.1", 0)); print(s.getsockname()[1])')
+cat > "$WORK/fake-judge.py" <<'PY'
+import json, sys, http.server
+port, answers = int(sys.argv[1]), sys.argv[2]
+class Handler(http.server.BaseHTTPRequestHandler):
+    def log_message(self, *a): pass
+    def reply(self, body):
+        data = json.dumps(body).encode()
+        self.send_response(200); self.send_header('content-type', 'application/json'); self.send_header('content-length', str(len(data))); self.end_headers()
+        self.wfile.write(data)
+    def do_GET(self):
+        self.reply({'data': [{'id': 'claude-sonnet-5-5'}]})
+    def do_POST(self):
+        body = json.loads(self.rfile.read(int(self.headers.get('content-length', 0))))
+        words = body.get('system', '')
+        key = 'query' if words.startswith('You help a music-video library find') else 'pick' if words.startswith('You help a music-video library choose') else 'verdict'
+        with open(answers + '.asked', 'a') as f:
+            f.write(key + ' ' + body['model'] + ' images=' + str(sum(1 for b in body['messages'][0]['content'] if b.get('type') == 'image')) + '\n')
+        self.reply({'content': [{'type': 'text', 'text': json.dumps(json.load(open(answers))[key])}], 'usage': {'input_tokens': 1000, 'output_tokens': 50},
+                    'stop_reason': 'end_turn', 'model': body['model']})
+http.server.HTTPServer(('127.0.0.1', port), Handler).serve_forever()
+PY
+python3 "$WORK/fake-judge.py" "$JUDGE_PORT" "$WORK/judge-answers.json" &
+JUDGE_PID=$!
+trap 'kill $JUDGE_PID 2>/dev/null; rm -rf "$WORK"' EXIT
+python3 - "$JUDGE_PORT" <<'PY'
+import sys, time, urllib.request
+for i in range(100):
+    try:
+        urllib.request.urlopen(f'http://127.0.0.1:{sys.argv[1]}/v1/models', timeout=1); break
+    except Exception:
+        time.sleep(0.1)
+PY
+echo "sk-ant-test-00000000000000000000" > "$WORK/claude-key"
+# The stand-in serves Dee's "Five" again (later tests gave it other songs).
+ffmpeg -v error -y -i "$WORK/lib5/Dee/five.flac" -af atempo=1.004 -c:a libopus -b:a 96k "$WORK/site-audio.opus"
+ffmpeg -v error -y -i "$WORK/mv.mkv" -map 0:v:0 -c copy -t 40 "$WORK/site-video.mkv"
+echo '{"entries": [{"id": "liv", "ie_key": "Youtube", "title": "Dee - Five", "channel": "Dee", "duration": 40, "view_count": 1000, "channel_is_verified": true}]}' > "$WORK/site-search.json"
+answers() { python3 - "$WORK/judge-answers.json" "$1" "$2" "$3" <<'PY'
+import json, sys
+path, verdict, chosen, confidence = sys.argv[1], sys.argv[2], int(sys.argv[3]), float(sys.argv[4])
+keep = verdict == 'accept'
+json.dump({
+    'query': {'lookup': True, 'skip_reason': '', 'queries': ['Dee Five', 'Dee - Five official video'], 'song_known': 'unknown'},
+    'pick': {'picks': [{'id': 'liv', 'why': 'the artist\'s own upload'}], 'reason': 'one result, on the artist\'s channel'},
+    'verdict': {'options': [{'index': 1, 'kind': 'official music video', 'source': "the artist's channel", 'version': 'the same recording',
+                             'whole': 'the whole song', 'official_mv': keep, 'confidence': confidence if keep else 1 - confidence, 'note': 'a moving picture on the artist\'s channel'}],
+                'verdict': verdict, 'chosen': chosen, 'confidence': confidence, 'reason': 'the artist\'s own upload of the song' if keep else 'not the official video'},
+}, open(path, 'w'))
+PY
+}
+judge() { MVPLAYER_YTDLP="$SITE" MVPLAYER_CLAUDE_API="http://127.0.0.1:$JUDGE_PORT" MVPLAYER_PAUSE_SECS=1 timeout 120 "$BUILD/mvplayer-import" --music-dir "$WORK/lib5" --jobs 1 --judge judge --claude-key-file "$WORK/claude-key" "$@" 2>&1; }
+judge_db() { python3 -c "import sqlite3, sys; print(sqlite3.connect(sys.argv[1]).execute(sys.argv[2]).fetchall())" "$WORK/$1/.mvplayer/library.db" "$2"; }
+
+# W1: accepted at the gate, and the upload passes the gates: the track's video, vouched for.
+answers accept 1 0.95
+rm -f "$WORK/judge-answers.json.asked"
+OUT=$(judge --mv-dir "$WORK/mvlib-j1")
+echo "$OUT" | grep -E "^\[import\] Dee|^\[judge\]|^done:" | cut -c1-120
+[[ "$OUT" == *"Imported"* && "$OUT" == *"the judge: the artist's own upload"* ]]
+[[ "$(judge_db mvlib-j1 'SELECT review, vouched, audio_source FROM videos')" == "[(0, 1, "* ]]
+# The three questions were asked once each, the verdict with five frames.
+cat "$WORK/judge-answers.json.asked"
+[[ "$(grep -c . "$WORK/judge-answers.json.asked")" == 3 ]]
+grep -q "^verdict claude-sonnet-5-5 images=5" "$WORK/judge-answers.json.asked"
+[[ "$(grep -c '"event":"judge"' "$WORK/mvlib-j1/.mvplayer/import-log.jsonl")" == 3 ]]
+grep -q '"question":"verdict"' "$WORK/mvlib-j1/.mvplayer/import-log.jsonl"
+# Another model, by name.
+rm -f "$WORK/judge-answers.json.asked"
+OUT=$(judge --mv-dir "$WORK/mvlib-j1b" --judge-model opus)
+grep -q "^query claude-opus-5-5" "$WORK/judge-answers.json.asked"
+
+# W2: accepted below the gate: a card under review, with the judge's advice on it.
+answers accept 1 0.6
+OUT=$(judge --mv-dir "$WORK/mvlib-j2")
+echo "$OUT" | grep -E "^\[import\] Dee|^done:" | cut -c1-120
+[[ "$OUT" == *"For your review"* && "$OUT" == *"the judge:"* ]]
+[[ "$(judge_db mvlib-j2 'SELECT review, vouched FROM videos')" == "[(1, 0)]" ]]
+[[ "$(judge_db mvlib-j2 'SELECT mode, keep, probability, kind FROM judge_advice')" == "[('judge', 1, 0.6, 'official music video')]" ]]
+# Your verdict on the card stands as on the main page (X1).
+OUT=$(judge --mv-dir "$WORK/mvlib-j2" --approve liv)
+[[ "$(judge_db mvlib-j2 'SELECT review FROM videos')" == "[(0,)]" ]]
+
+# W3: rejected at the gate: no video, and the upload is remembered as turned down for the track.
+answers "reject all" 0 0.9
+OUT=$(judge --mv-dir "$WORK/mvlib-j3")
+echo "$OUT" | grep -E "^\[import\] Dee|^done:" | cut -c1-120
+[[ "$OUT" == *"No music video found (the judge: not the official video)"* ]]
+[[ "$(judge_db mvlib-j3 'SELECT count(*) FROM videos')" == "[(0,)]" ]]
+[[ "$(judge_db mvlib-j3 'SELECT count(*) FROM rejected_videos')" == "[(1,)]" ]]
+[[ "$(judge_db mvlib-j3 "SELECT state FROM tracks")" == "[('not_found',)]" ]]
+
+# W4: unsure: a card under review, since the upload is the song.
+answers unsure 0 0.5
+OUT=$(judge --mv-dir "$WORK/mvlib-j4")
+[[ "$OUT" == *"For your review"* ]]
+[[ "$(judge_db mvlib-j4 'SELECT review FROM videos')" == "[(1,)]" ]]
+
+# Q2: the judge says there is nothing to look for.
+python3 - "$WORK/judge-answers.json" <<'PY'
+import json, sys
+a = json.load(open(sys.argv[1])); a['query'] = {'lookup': False, 'skip_reason': 'an instrumental', 'queries': [], 'song_known': 'unknown'}
+json.dump(a, open(sys.argv[1], 'w'))
+PY
+OUT=$(judge --mv-dir "$WORK/mvlib-j5")
+echo "$OUT" | grep -E "^\[import\] Dee|^done:" | cut -c1-120
+[[ "$OUT" == *"Skipped (the judge: an instrumental)"* ]]
+
+# V5: the judge cannot answer: the lookup is postponed as for a pause, and the pause says why.
+OUT=$(MVPLAYER_CLAUDE_API="http://127.0.0.1:1" MVPLAYER_YTDLP="$SITE" MVPLAYER_PAUSE_SECS=1 timeout 60 "$BUILD/mvplayer-import" --music-dir "$WORK/lib5" --mv-dir "$WORK/mvlib-j6" --jobs 1 --judge judge --claude-key-file "$WORK/claude-key" 2>&1 || true)
+echo "$OUT" | grep -E "^\[import\] paused|^done:" | cut -c1-110
+[[ "$OUT" == *"paused for 0:01: The judge cannot answer"* ]]
+# No key: refused up front.
+! "$BUILD/mvplayer-import" --music-dir "$WORK/lib5" --mv-dir "$WORK/mvlib-j7" --judge judge --claude-key-file "$WORK/no-such-key" >/dev/null 2>&1
+# Off, the rules decide as before: the judge is not asked.
+rm -f "$WORK/judge-answers.json.asked"
+OUT=$(MVPLAYER_YTDLP="$SITE" MVPLAYER_CLAUDE_API="http://127.0.0.1:$JUDGE_PORT" timeout 120 "$BUILD/mvplayer-import" --allow-still-images --music-dir "$WORK/lib5" --mv-dir "$WORK/mvlib-j8" --jobs 1 2>&1)
+[[ ! -e "$WORK/judge-answers.json.asked" ]]
 
 echo "== binaries start"
 "$BUILD/mvplayer-import" --help >/dev/null

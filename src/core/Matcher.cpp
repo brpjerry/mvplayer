@@ -7,6 +7,8 @@
 
 #include <algorithm>
 
+#include <atomic>
+
 namespace {
 
 // Folded text with punctuation collapsed to single spaces and padded with a
@@ -145,8 +147,22 @@ QStringList Matcher::artistNames(const TrackInfo &t)
     return names;
 }
 
+static std::atomic<bool> s_judgeRunsLookups{false};
+
+void Matcher::setJudgeRunsLookups(bool on)
+{
+    s_judgeRunsLookups = on;
+}
+
+bool Matcher::judgeRunsLookups()
+{
+    return s_judgeRunsLookups;
+}
+
 bool Matcher::isNonMvTrack(const TrackInfo &track, QString *why)
 {
+    if (judgeRunsLookups())
+        return false;
     if (track.duration > 0 && track.duration < minTrackSecs()) {
         if (why)
             *why = QStringLiteral("%1-second track").arg(qRound(track.duration));

@@ -1,0 +1,28 @@
+  24.6s  TUYU - 太陽になれるかな: accept 1 conf 0.95 | Option 1 is uploaded by the artist's own channel ('ツユ') and is titled 'MV', and the picture is an animated illustration, fitting the criteria for an official mu
+          option 1: official music video — Official channel, titled MV, and the picture is an animated illustration.
+          option 2: fan edit or other — While the picture is animated, the channel is not the artist's, and the title lacks artist information, suggesting it mi
+          option 3: fan edit or other — The title explicitly mentions a 'Version from Sem', indicating it is not the official track/MV.
+  18.7s  HoneyComeBear - Rainy Girl - レイニーガール: accept 1 conf 0.95 | Option 1 presents an animated illustration without obvious signs of being a fan edit or compilation, fitting the convention for official music videos in this sc
+          option 1: official music video — The picture is an animated illustration, and the channel is not explicitly identified as non-official, nor are there obv
+          option 2: fan edit or other — Contains visual overlays like audio spectrum/visualizer bars and watermarks ('SilenceMusic'), indicating it is not the o
+  23.5s  Yunomi - ココロフロート: reject all -1 conf 0.95 | All provided options contain visual elements (waveform overlays or channel branding/watermarks) that indicate they are not the official music video, nor are the
+          option 1: fan edit or other — Contains a waveform overlay, which is a sign of a non-official upload.
+          option 2: fan edit or other — Contains a channel branding/watermark ([MN]) and is not from the artist's official channel.
+          option 3: fan edit or other — Contains a waveform overlay, which is a sign of a non-official upload.
+  16.5s  Aimer - カタオモイ: reject all -1 conf 1.0 | Both options are live performance recordings, not the official studio music video, which is what is typically curated for this library unless the track is expli
+          option 1: live performance — This is a live performance video, not the studio music video.
+          option 2: live performance — This is a live performance video, and the title indicates it is a 'LIVE ver.'.
+  16.5s  Asaka - Raise Your Heart!!: accept 1 conf 1.0 | Option 1 is the official music video uploaded by the artist's official channel, which is the preferred choice.
+          option 1: official music video — Uploaded on the artist's official channel and titled as the Music Video.
+          option 2: re-upload of the music video — Uploaded on a third-party channel, but the picture matches the official MV and there are no signs of fan edits or overla
+  17.2s  Yunomi - すとろべりーカルテ (feat. 桃箱): reject all -1 conf 0.95 | Both options contain a visible audio waveform overlay, which is a sign of a non-official upload, even if the underlying picture might be from an official source
+          option 1: re-upload of the music video — Contains waveform overlay, which is a sign of a non-official upload.
+          option 2: re-upload of the music video — Contains waveform overlay, which is a sign of a non-official upload.
+  12.8s  Ado - 愛して愛して愛して: accept 1 conf 0.95 | Option 1 is a clean re-upload of what appears to be the official animated music video, which is acceptable when the artist's own channel upload is not present.
+          option 1: re-upload of the music video — The picture appears to be an official animated illustration/artwork, and the title indicates it's a removed MV. Since no
+  11.4s  Kano - メトメ: accept 1 conf 1.0 | Option 1 is from the artist's channel and features an animated illustration, fitting the criteria for an official music video.
+          option 1: official music video — The channel name matches the artist, and the title includes 'Music Video'. The picture is an animated illustration, whic
+  11.6s  YOASOBI - Just a Little Step: accept 1 conf 0.95 | Option 1 is from the artist's channel and features an animated illustration, fitting the criteria for an official music video in this scene.
+          option 1: official music video — The channel is named after the artist, and the content appears to be an animated illustration/story-based video, which a
+  12.6s  ARU - あおいゆめ: accept 1 conf 1.0 | Option 1 is from a channel named after the artist and is explicitly titled "【オリジナルMV}". The picture is an animated illustration, fitting the criteria for an off
+          option 1: official music video — The channel name suggests it is related to the artist, and the title includes "【オリジナルMV}". The picture is an animated il

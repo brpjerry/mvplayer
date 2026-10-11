@@ -34,7 +34,7 @@ qt_add_library(mvcore STATIC
     src/core/ArtistChannels.h src/core/ArtistChannels.cpp
     src/core/LibraryScanner.h src/core/LibraryScanner.cpp
     src/core/ImportManager.h src/core/ImportManager.cpp
-    src/core/Judge.h src/core/Judge.cpp
+    src/core/Judge.h src/core/Judge.cpp src/core/JudgePrompts.cpp
 )
 target_include_directories(mvcore PUBLIC src)
 target_link_libraries(mvcore PUBLIC Qt6::Core Qt6::Sql Qt6::Network PkgConfig::TAGLIB PkgConfig::CHROMAPRINT)

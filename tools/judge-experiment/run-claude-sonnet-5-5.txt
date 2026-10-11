@@ -1,0 +1,29 @@
+   6.0s  3464 in   292 out  TUYU - 太陽になれるかな: accept 1 conf 0.8 | Option 1 is uploaded by the artist's own channel and is the genuine animated MV. The other two are a static-image watermark upload and a Gacha fan edit.
+          option 1: official music video — Artist's own channel ツユ, animated lyric-in-picture MV, 244 s matches track length. Low waveform match (38%) is likely due to intro/edit or analysis quirk, but t
+          option 2: fan edit or other — Third-party channel MM Anime, AI-style rainy cafe still image with channel watermark and artist name overlay; not the real MV.
+          option 3: fan edit or other — Gacha Club fan clip by a third party, different version of the song.
+   4.5s  2713 in   256 out  HoneyComeBear - Rainy Girl - レイニーガール: accept 1 conf 0.6 | Option 2 is clearly a visualiser with watermark. Option 1 is a clean animated illustration film with no overlays and the full audio matches, so it is the best candidate even though the channel is not the artist's.
+          option 1: official music video — Animated illustration with subtle motion and letterbox bars, no overlays; channel is a third-party (Waifu Wednesdays) but picture appears to be the MV-style art
+          option 2: lyric or visualiser video — Visualiser overlay with Now playing, timer, waveform and channel watermark over a still image; Silence Music is a compilation-style channel.
+   4.9s  3477 in   252 out  Yunomi - ココロフロート: reject all 0 conf 0.96 | All three options are static images with audio-spectrum visualisers from third-party channels. None is an official music video, and the audio match is also weak and marked as a different version.
+          option 1: still image or slideshow — Static anime cover art with an audio spectrum bar and title text, uploaded by a non-artist channel.
+          option 2: still image or slideshow — Single still illustration with a [MN] watermark and spectrum overlay, from a music compilation channel.
+          option 3: still image or slideshow — Same static art with a spectrum overlay at low resolution, from a third-party channel.
+   4.6s  2761 in   184 out  Aimer - カタオモイ: reject all 0 conf 0.95 | Both options are live concert performances, not the track's music video. The track is the studio version, and neither upload is an official MV, so reject all.
+          option 1: live performance — Concert footage from the Hall Tour 19/20 on the artist's live channel; the title does not mark this as the track itself.
+          option 2: live performance — Budokan live version with a promo overlay, flagged as a different version from the track.
+   5.0s  2756 in   240 out  Asaka - Raise Your Heart!!: accept 1 conf 0.93 | Option 1 comes from the artist's official channel and shows the real MV footage, so it is preferred over the third-party re-upload in option 2.
+          option 1: official music video — Posted by the artist's own channel (亜咲花公式チャンネル), titled Music Video Full ver. The picture is real MV footage with album promo text and the MAGES. logo, with no 
+          option 2: re-upload of the music video — Third-party channel (AniTone Music Channel) with the same picture and title and a higher resolution, but it is not the artist's channel.
+   4.0s  2782 in   265 out  Yunomi - すとろべりーカルテ (feat. 桃箱): reject all 0 conf 0.9 | Neither option is an official music video. Option 1 is a visualiser with a spectrum bar over fan art, and Option 2 is a still image on a non-artist channel. Neither channel is the artist's, and neither is a clean re-uplo
+          option 1: lyric or visualiser video — Third-party channel; anime art with an audio-spectrum bar and a track-name overlay ("Eternal"), i.e. a visualiser-style upload.
+          option 2: still image or slideshow — Third-party channel; a single still anime illustration (Eromanga Sensei character) with a small moving ring effect, not an official MV.
+   2.6s  1945 in   178 out  Ado - 愛して愛して愛して: accept 1 conf 0.86 | The only option is a clean third-party re-upload of the official animated MV, with no overlays. No artist-channel upload is available, so the re-upload is acceptable.
+          option 1: re-upload of the music video — Third-party channel re-uploading the official animated MV ('Removed MV'); animated illustration with kinetic lyric typography, no overlays or visualiser bars; f
+   3.4s  1863 in   190 out  Kano - メトメ: accept 1 conf 0.96 | The artist's own channel uploaded this as the Music Video. The animated motion-graphics picture fits an official MV, and there is no visualiser, watermark or live footage.
+          option 1: official music video — Uploaded by the artist's own channel (鹿乃まほろ / Kano Mahoro), titled Music Video; the picture is dynamic animated illustration with lyrics drawn in, with no overl
+   3.1s  1941 in   209 out  YOASOBI - Just a Little Step: accept 1 conf 0.8 | The upload is an animated official MV for the English version of the song. It sits on an apparent official YOASOBI channel and has no spectrum overlay, watermark or still image. The English subtitles are part of the anim
+          option 1: official music video — Channel 'YOASOBI and Echoes' appears to be an official YOASOBI channel for English versions. The animated MV has English subtitles drawn into the picture and no
+   3.1s  1929 in   200 out  ARU - あおいゆめ: accept 1 conf 0.93 | The upload comes from the artist's own channel and is titled オリジナルMV. The frames show stylized animation with integrated lyrics, which is typical of official MVs in this scene, and there are no visualiser bars, watermark
+          option 1: official music video — Artist's own channel (存流 -ᴀʀᴜ-), titled オリジナルMV; animated illustration and motion graphics with lyrics drawn into the picture, audio fully matches.
+total $0.0739

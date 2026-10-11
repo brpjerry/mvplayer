@@ -76,6 +76,24 @@ public:
     };
     void addCandidate(qint64 videoId, const TrackInfo &track, int stream, double fit, const QString &audioDetail);
     void removeCandidate(qint64 videoId, const TrackInfo &track);
+    // The judge's answer about a video under review for one of its
+    // candidates (docs/import-rules-judge.html, X2): keep or not, how sure,
+    // and what it made of the upload. One per video and candidate.
+    struct Advice {
+        qint64 videoId = 0;
+        qint64 trackKey = 0;
+        QString mode;  // "judge": given during the lookup; "advice": asked from the card
+        QString model;
+        bool keep = false;
+        double probability = 0;
+        QString kind, source, version, whole, note;
+        qint64 askedAt = 0;
+    };
+    // A video goes (back) into the review queue, or leaves it, with nothing else changed.
+    void setVideoReview(qint64 videoId, bool review);
+    void setAdvice(const Advice &a);
+    QVector<Advice> advice(qint64 videoId);
+    void clearAdvice(qint64 videoId, qint64 trackKey);
     void clearCandidates(qint64 videoId);
     // In the order they became candidates. Tracks that have left the music
     // folders stay on record and are not listed; candidateCount counts them.

@@ -519,6 +519,30 @@ command.
 ./build/mvplayer-import check-video video.mkv            # still image or real video?
 ```
 
+## The judge
+
+Claude can take part in importing, through the API with a key of your own
+(Settings → Judge; the key is stored beside the settings, for this user only).
+Its rules are a page of their own, `docs/import-rules-judge.html`, with the
+words it is given and how it measured against hand verdicts. Two modes:
+
+- **Advice**: lookups run by the rules as before, and each card under review
+  shows whether the judge would keep the video for the candidate on show, and
+  how sure it is ("Judge: keep · 92%"), with its reasons when the pointer
+  rests on it. It is asked once per video and candidate, from the video's own
+  file; "Ask again" asks anew. Nothing is decided by it.
+- **Judge**: it runs each lookup — writes the search, picks what to listen to
+  from the results, and gives the verdict once every pick has been listened to
+  and looked at (five frames of each). A verdict it is at least 85% sure of
+  stands by itself; anything less, a cut, an interrupted video, one the audio
+  check doubts or a still picture is left for you, with its advice on the
+  card. Your verdicts on cards stand as before.
+
+The model is yours to pick: Haiku 5.5, Sonnet 5.5 (the default) or Opus 5.5.
+Every answer is logged as a `judge` event in the import log, with what it cost.
+The headless importer takes `--judge off|advice|judge`, `--judge-model` and
+`--claude-key-file`.
+
 ## Using it
 
 - Clicking a video grows its thumbnail into the player. `Esc` (or the back
@@ -589,7 +613,8 @@ flick) and `wheelStep` (pixels per mouse-wheel notch, default 170).
 
 Environment: `MVPLAYER_HWDEC` (mpv `hwdec` value, default `auto-safe`),
 `MVPLAYER_MPV_OPTS` (`name=value,name=value` extra mpv options),
-`MVPLAYER_YTDLP` (the yt-dlp program to run instead of the default one).
+`MVPLAYER_YTDLP` (the yt-dlp program to run instead of the default one),
+`MVPLAYER_CLAUDE_API` (another server in place of the Claude API, for tests).
 
 ## Porting notes
 

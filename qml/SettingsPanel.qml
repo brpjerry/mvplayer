@@ -1354,6 +1354,88 @@ Popup {
                             }
                         }
                     }
+
+                    Divider {}
+
+                    // What the judge does (docs/import-rules-judge.html, X4):
+                    // nothing, advice on cards under review, or the lookup itself.
+                    Column {
+                        width: parent.width
+                        spacing: 8
+                        Text {
+                            text: "What the judge does"
+                            color: Theme.text
+                            font.pixelSize: 14
+                        }
+                        Text {
+                            width: parent.width
+                            text: App.judgeMode === "judge"
+                                ? "Judge: it runs each lookup — writes the search, picks what to listen to, and gives the verdict. A verdict it is at least 85% sure of stands by itself; anything less, a cut, an interrupted video or one the audio check doubts is left for you, with its advice on the card."
+                                : App.judgeMode === "advice"
+                                ? "Advice: lookups run by the rules as before; each card under review shows whether the judge would keep the video for the candidate on show, and how sure it is. Nothing is decided by it."
+                                : "Off: the rules decide, and cards carry no advice."
+                            color: Theme.textDim
+                            font.pixelSize: 12
+                            wrapMode: Text.WordWrap
+                        }
+                        Row {
+                            spacing: 10
+                            Repeater {
+                                model: [{ key: "off", label: "Off" }, { key: "advice", label: "Advice" }, { key: "judge", label: "Judge" }]
+                                FlatButton {
+                                    text: modelData.label
+                                    primary: App.judgeMode === modelData.key
+                                    enabled: App.judgeKeySet || modelData.key === "off"
+                                    onClicked: App.judgeMode = modelData.key
+                                }
+                            }
+                        }
+                        Text {
+                            visible: !App.judgeKeySet
+                            text: "Add a key first."
+                            color: Theme.textFaint
+                            font.pixelSize: 12
+                        }
+                    }
+
+                    Divider {}
+
+                    Column {
+                        width: parent.width
+                        spacing: 8
+                        Text {
+                            text: "Which model"
+                            color: Theme.text
+                            font.pixelSize: 14
+                        }
+                        Text {
+                            width: parent.width
+                            text: "Sonnet 5.5 agreed with your own verdicts on 87% of the review queue it was measured on, Opus 5.5 on 89%, Haiku 5.5 on 73%; what each costs is the price of a verdict with four uploads and their frames."
+                            color: Theme.textDim
+                            font.pixelSize: 12
+                            wrapMode: Text.WordWrap
+                        }
+                        Flow {
+                            width: parent.width
+                            spacing: 10
+                            Repeater {
+                                model: App.judgeModels
+                                FlatButton {
+                                    text: modelData.label + " · " + modelData.cost
+                                    primary: App.judgeModel === modelData.name
+                                    onClicked: App.judgeModel = modelData.name
+                                }
+                            }
+                        }
+                        Text {
+                            visible: App.judgeAlone + App.judgeLeft > 0
+                            text: "In judge mode so far: " + App.judgeAlone + (App.judgeAlone === 1 ? " lookup" : " lookups") + " settled by the judge alone, " + App.judgeLeft + " left for your verdict."
+                            color: Theme.textDim
+                            font.pixelSize: 12
+                            wrapMode: Text.WordWrap
+                            width: parent.width
+                        }
+                    }
                     Item { width: 1; height: 8 }
                 }
             }

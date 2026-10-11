@@ -32,6 +32,13 @@ struct ImportSettings {
     QStringList subtitleLangs;     // subtitles to fetch with a video ("en"); empty: none
     int retryNotFoundDays = 14;
     int pauseBaseSecs = 600;       // first wait after YouTube blocks requests; doubles on repeats
+    // The judge (docs/import-rules-judge.html): "off", "advice" (a
+    // recommendation on cards under review, X2) or "judge" (it runs the
+    // lookup, Q–W); which model ("haiku", "sonnet", "opus"); where the
+    // account's key is kept.
+    QString judgeMode = QStringLiteral("off");
+    QString judgeModel = QStringLiteral("sonnet");
+    QString judgeKeyFile;
 };
 
 struct JobStatus {
@@ -130,6 +137,12 @@ public:
     // shown: first the one the upload is titled after (and no other), then
     // by how close each one's waveform is to the upload's.
     static QVector<Database::Candidate> candidatesInOrder(Database *db, const VideoInfo &video);
+    // Advice mode (X2): asks the judge whether the video under review is the
+    // official video of its candidate `trackId`, from the video's own file
+    // and what the library kept of the upload; nothing is fetched. Asked
+    // once per video and candidate unless `again`; adviceChanged says when
+    // the answer is in. Carried out on a thread of its own.
+    void askJudge(qint64 videoId, qint64 trackId, bool again = false);
 
     // Looks at every video in the library again with the account's cookies
     // and rebuilds those YouTube now offers in better quality.
@@ -190,6 +203,11 @@ signals:
     void activityChanged();
     void idle();
     void undoChanged();
+    // Judge mode: a lookup the judge settled by itself (W1, W3), or left
+    // for your verdict (W2, W4).
+    void judgeDecided(qint64 trackId, bool alone);
+    // The judge's advice on a video under review changed (X2).
+    void adviceChanged(qint64 videoId);
 
 private:
     // What a verdict changed, as it was before: the video and the videos
@@ -268,6 +286,7 @@ private:
     };
     ChannelVerdict judgeAsArtists(const VideoInfo &video, const ImportSettings &cfg, const std::atomic<bool> *stop);
     void allowJob(const QString &channelId, const ImportSettings &cfg);
+    void adviceJob(qint64 videoId, qint64 trackId, bool again, const ImportSettings &cfg);
     void denyJob(const QString &channelId);
     void requeuePending(); // any thread
     void pump();
@@ -299,6 +318,7 @@ private:
     QThreadPool m_replacePool;
     QThreadPool m_verdictPool;
     QThreadPool m_previewPool;
+    QThreadPool m_judgePool; // advice mode's questions, one at a time
     std::shared_ptr<std::atomic<bool>> m_previewStop;
     int m_previewTicket = 0;
     bool m_settledOnce = false; // what a library from before needs was asked for, this run

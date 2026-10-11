@@ -206,7 +206,7 @@ QSqlDatabase Database::conn()
 
 // The layout below is the one this version reads and writes. The one before
 // it is brought up to it (upgradeLayout); any other is refused.
-constexpr int kSchema = 6;
+constexpr int kSchema = 7;
 
 namespace {
 // A track is a recording: its number, or minus the file's id where it has none.
@@ -226,11 +226,19 @@ namespace {
 const char *kChannelListsSql =
     "CREATE TABLE IF NOT EXISTS channel_lists ("
     " channel_id TEXT PRIMARY KEY, list TEXT NOT NULL, name TEXT, handle TEXT, added_at INTEGER NOT NULL DEFAULT 0)";
+// The judge's answer about a video under review, for one of its candidate
+// tracks (docs/import-rules-judge.html, X2): kept with the video.
+const char *kJudgeAdviceSql =
+    "CREATE TABLE IF NOT EXISTS judge_advice ("
+    " video_id INTEGER NOT NULL REFERENCES videos(id) ON DELETE CASCADE, track_key INTEGER NOT NULL,"
+    " mode TEXT NOT NULL, model TEXT NOT NULL, keep INTEGER NOT NULL, probability REAL NOT NULL,"
+    " kind TEXT, source TEXT, version TEXT, whole TEXT, note TEXT, asked_at INTEGER NOT NULL DEFAULT 0,"
+    " PRIMARY KEY (video_id, track_key))";
 }
 
 bool Database::upgradeLayout(int from, QString *error)
 {
-    if (from != 4 && from != 5)
+    if (from != 4 && from != 5 && from != 6)
         return false;
     QSqlDatabase db = conn();
     if (from == 5) {
@@ -264,7 +272,9 @@ bool Database::upgradeLayout(int from, QString *error)
         QStringLiteral("DELETE FROM artist_channels WHERE source = 'approved'"),
         QStringLiteral("PRAGMA user_version = 6"),
     };
-    const QStringList steps = from == 5 ? toSix : QStringList{
+    // Layout 6 to 7: the judge's advice on videos under review.
+    const QStringList toSeven = {QString::fromLatin1(kJudgeAdviceSql), QStringLiteral("PRAGMA user_version = 7")};
+    const QStringList steps = from == 6 ? toSeven : from == 5 ? toSix : QStringList{
         QStringLiteral("CREATE TABLE candidates ("
                        " video_id INTEGER NOT NULL REFERENCES videos(id) ON DELETE CASCADE,"
                        " track_key INTEGER NOT NULL,"
@@ -316,7 +326,9 @@ bool Database::upgradeLayout(int from, QString *error)
             *error = db.lastError().text();
         return false;
     }
-    if (from == 5)
+    if (from == 6)
+        qInfo("[db] library brought up from layout 6: the judge's advice is kept with a video under review");
+    else if (from == 5)
         qInfo("[db] library brought up from layout 5: channels are allowed or denied by you; an accepted video vouches for itself");
     else
         qInfo("[db] library brought up from layout 4: one track per video, review by video");
@@ -413,6 +425,7 @@ bool Database::init(QString *error)
                        " PRIMARY KEY (video_id, track_key))"),
         QStringLiteral("CREATE INDEX IF NOT EXISTS candidates_track ON candidates(track_key)"),
         QString::fromLatin1(kChannelListsSql),
+        QString::fromLatin1(kJudgeAdviceSql),
         QStringLiteral("CREATE INDEX IF NOT EXISTS tracks_state ON tracks(state)"),
         QStringLiteral("CREATE INDEX IF NOT EXISTS tracks_video ON tracks(video_id)"),
         QStringLiteral("CREATE INDEX IF NOT EXISTS tracks_recording ON tracks(recording)"),
@@ -1107,6 +1120,76 @@ void Database::clearCandidates(qint64 videoId)
     QSqlQuery q(conn());
     q.prepare(QStringLiteral("DELETE FROM candidates WHERE video_id = ?"));
     q.addBindValue(videoId);
+    run(q);
+}
+
+void Database::setVideoReview(qint64 videoId, bool review)
+{
+    QSqlQuery q(conn());
+    q.prepare(QStringLiteral("UPDATE videos SET review = ? WHERE id = ?"));
+    q.addBindValue(review ? 1 : 0);
+    q.addBindValue(videoId);
+    run(q);
+}
+
+void Database::setAdvice(const Advice &a)
+{
+    QSqlQuery q(conn());
+    q.prepare(QStringLiteral("INSERT INTO judge_advice (video_id, track_key, mode, model, keep, probability, kind, source, version, whole, note, asked_at)"
+                             " VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)"
+                             " ON CONFLICT(video_id, track_key) DO UPDATE SET mode = excluded.mode, model = excluded.model, keep = excluded.keep,"
+                             " probability = excluded.probability, kind = excluded.kind, source = excluded.source, version = excluded.version,"
+                             " whole = excluded.whole, note = excluded.note, asked_at = excluded.asked_at"));
+    q.addBindValue(a.videoId);
+    q.addBindValue(a.trackKey);
+    q.addBindValue(a.mode);
+    q.addBindValue(a.model);
+    q.addBindValue(a.keep ? 1 : 0);
+    q.addBindValue(a.probability);
+    q.addBindValue(a.kind);
+    q.addBindValue(a.source);
+    q.addBindValue(a.version);
+    q.addBindValue(a.whole);
+    q.addBindValue(a.note);
+    q.addBindValue(a.askedAt);
+    run(q);
+}
+
+QVector<Database::Advice> Database::advice(qint64 videoId)
+{
+    QVector<Advice> out;
+    QSqlQuery q(conn());
+    q.prepare(QStringLiteral("SELECT track_key, mode, model, keep, probability, kind, source, version, whole, note, asked_at"
+                             " FROM judge_advice WHERE video_id = ?"));
+    q.addBindValue(videoId);
+    if (!run(q))
+        return out;
+    while (q.next()) {
+        Advice a;
+        a.videoId = videoId;
+        int i = 0;
+        a.trackKey = q.value(i++).toLongLong();
+        a.mode = q.value(i++).toString();
+        a.model = q.value(i++).toString();
+        a.keep = q.value(i++).toBool();
+        a.probability = q.value(i++).toDouble();
+        a.kind = q.value(i++).toString();
+        a.source = q.value(i++).toString();
+        a.version = q.value(i++).toString();
+        a.whole = q.value(i++).toString();
+        a.note = q.value(i++).toString();
+        a.askedAt = q.value(i++).toLongLong();
+        out.append(a);
+    }
+    return out;
+}
+
+void Database::clearAdvice(qint64 videoId, qint64 trackKey)
+{
+    QSqlQuery q(conn());
+    q.prepare(QStringLiteral("DELETE FROM judge_advice WHERE video_id = ? AND track_key = ?"));
+    q.addBindValue(videoId);
+    q.addBindValue(trackKey);
     run(q);
 }
 

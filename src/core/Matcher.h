@@ -25,8 +25,13 @@ struct YtCandidate {
 namespace Matcher {
 
 // Tracks that by their title cannot have a music video of their own
-// (instrumentals, karaoke versions, ...).
+// (instrumentals, karaoke versions, ...). With the judge running the lookups
+// (docs/import-rules-judge.html, Q2) these rules do not apply: the judge
+// says what there is nothing to look for, and every track counts as one to
+// look up.
 bool isNonMvTrack(const TrackInfo &track, QString *why = nullptr);
+void setJudgeRunsLookups(bool on);
+bool judgeRunsLookups();
 
 // Titles that stand for talk between songs rather than a song: "MC",
 // "MC06", "MC5 at <venue>", "Talk 2", "Interview", or such a word as a tag

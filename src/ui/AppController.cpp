@@ -107,6 +107,7 @@ AppController::AppController(const AppOptions &options, QObject *parent)
     m_judge = std::make_unique<Judge>(QFileInfo(m_settings->fileName()).absoluteDir().filePath(QStringLiteral("claude-api-key")), this);
     connect(m_judge.get(), &Judge::keyChanged, this, &AppController::judgeChanged);
     connect(m_judge.get(), &Judge::checked, this, &AppController::judgeChanged);
+    m_cfg.judgeKeyFile = QFileInfo(m_settings->fileName()).absoluteDir().filePath(QStringLiteral("claude-api-key"));
 
     const QString defaultMvDir =
         QDir(QStandardPaths::writableLocation(QStandardPaths::MoviesLocation)).filePath(QStringLiteral("MVs"));
@@ -123,6 +124,14 @@ AppController::AppController(const AppOptions &options, QObject *parent)
     m_minSubscribers = qMax(1, m_settings->value(QStringLiteral("import/minSubscribers"), 5000).toInt());
     m_cfg.minSubscribers = m_ignoreSmallChannels ? m_minSubscribers : 0;
     m_cfg.concurrency = m_settings->value(QStringLiteral("import/concurrency"), 2).toInt();
+    m_cfg.judgeMode = m_settings->value(QStringLiteral("import/judgeMode"), QStringLiteral("off")).toString();
+    if (m_cfg.judgeMode != QLatin1String("advice") && m_cfg.judgeMode != QLatin1String("judge"))
+        m_cfg.judgeMode = QStringLiteral("off");
+    m_cfg.judgeModel = m_settings->value(QStringLiteral("import/judgeModel"), QStringLiteral("sonnet")).toString();
+    if (!Judge::models().contains(m_cfg.judgeModel))
+        m_cfg.judgeModel = QStringLiteral("sonnet");
+    m_judgeAlone = m_settings->value(QStringLiteral("judge/alone"), 0).toInt();
+    m_judgeLeft = m_settings->value(QStringLiteral("judge/left"), 0).toInt();
     // By default the language the desktop is in.
     QString language = QLocale::system().name().section(QLatin1Char('_'), 0, 0).toLower();
     if (language.size() < 2 || language == QLatin1String("c"))
@@ -266,6 +275,16 @@ void AppController::openLibrary()
         if (ticket == m_channelTicket)
             emit channelPreviewDone();
     });
+    connect(m_manager.get(), &ImportManager::judgeDecided, this, [this](qint64, bool alone) {
+        if (alone)
+            ++m_judgeAlone;
+        else
+            ++m_judgeLeft;
+        m_settings->setValue(QStringLiteral("judge/alone"), m_judgeAlone);
+        m_settings->setValue(QStringLiteral("judge/left"), m_judgeLeft);
+        emit judgeChanged();
+    });
+    connect(m_manager.get(), &ImportManager::adviceChanged, this, &AppController::adviceChanged);
     connect(m_manager.get(), &ImportManager::activityChanged, this, [this] {
         if (!m_manager->busy())
             m_sessionDone = 0;
@@ -398,6 +417,10 @@ void AppController::saveSettings()
     m_settings->setValue(QStringLiteral("import/skipStillImages"), m_cfg.skipStillImages);
     m_settings->setValue(QStringLiteral("import/ignoreSmallChannels"), m_ignoreSmallChannels);
     m_settings->setValue(QStringLiteral("import/minSubscribers"), m_minSubscribers);
+    m_settings->setValue(QStringLiteral("import/judgeMode"), m_cfg.judgeMode);
+    m_settings->setValue(QStringLiteral("import/judgeModel"), m_cfg.judgeModel);
+    m_settings->setValue(QStringLiteral("judge/alone"), m_judgeAlone);
+    m_settings->setValue(QStringLiteral("judge/left"), m_judgeLeft);
     m_settings->setValue(QStringLiteral("import/accountOnBotCheck"), m_cfg.accountOnBotCheck);
     m_settings->setValue(QStringLiteral("player/volume"), m_volume);
     m_settings->setValue(QStringLiteral("player/muted"), m_muted);
@@ -1295,4 +1318,66 @@ QString AppController::displayPath(const QString &path) const
         return QLatin1Char('~') + path.mid(home.size());
     return path;
 #endif
+}
+
+void AppController::setJudgeMode(const QString &mode)
+{
+    const QString m = mode == QLatin1String("advice") || mode == QLatin1String("judge") ? mode : QStringLiteral("off");
+    if (m == m_cfg.judgeMode)
+        return;
+    // A lookup under way finishes as it began; the next starts in the new mode (X4).
+    m_cfg.judgeMode = m;
+    if (m_manager)
+        m_manager->setSettings(m_cfg);
+    m_settings->setValue(QStringLiteral("import/judgeMode"), m);
+    emit settingsChanged();
+}
+
+void AppController::setJudgeModel(const QString &model)
+{
+    if (!Judge::models().contains(model) || model == m_cfg.judgeModel)
+        return;
+    m_cfg.judgeModel = model;
+    if (m_manager)
+        m_manager->setSettings(m_cfg);
+    m_settings->setValue(QStringLiteral("import/judgeModel"), model);
+    emit settingsChanged();
+}
+
+QVariantList AppController::judgeModels() const
+{
+    // What a lookup's verdict cost on average when measured (M).
+    static const QHash<QString, QString> costs = {{QStringLiteral("haiku"), QStringLiteral("about 0.1¢ a lookup")},
+                                                  {QStringLiteral("sonnet"), QStringLiteral("about 2¢ a lookup")},
+                                                  {QStringLiteral("opus"), QStringLiteral("about 3¢ a lookup")}};
+    QVariantList out;
+    for (const QString &name : Judge::models()) {
+        out.append(QVariantMap{{QStringLiteral("name"), name}, {QStringLiteral("label"), Judge::modelLabel(name)},
+                               {QStringLiteral("cost"), costs.value(name)}});
+    }
+    return out;
+}
+
+QVariantMap AppController::judgeAdvice(qint64 videoId, qint64 trackId)
+{
+    QVariantMap out{{QStringLiteral("asked"), false}};
+    const std::optional<TrackInfo> track = m_db->track(trackId);
+    if (!track)
+        return out;
+    const qint64 key = Database::trackKey(*track);
+    for (const Database::Advice &a : m_db->advice(videoId)) {
+        if (a.trackKey != key)
+            continue;
+        out = {{QStringLiteral("asked"), true}, {QStringLiteral("keep"), a.keep}, {QStringLiteral("probability"), a.probability},
+               {QStringLiteral("kind"), a.kind}, {QStringLiteral("source"), a.source}, {QStringLiteral("version"), a.version},
+               {QStringLiteral("whole"), a.whole}, {QStringLiteral("note"), a.note}, {QStringLiteral("mode"), a.mode},
+               {QStringLiteral("model"), a.model}, {QStringLiteral("error"), a.kind == QLatin1String("error")}};
+    }
+    return out;
+}
+
+void AppController::askJudge(qint64 videoId, qint64 trackId, bool again)
+{
+    if (m_manager && m_judge->hasKey())
+        m_manager->askJudge(videoId, trackId, again);
 }

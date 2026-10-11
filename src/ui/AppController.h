@@ -99,6 +99,15 @@ class AppController : public QObject
     Q_PROPERTY(bool judgeChecking READ judgeChecking NOTIFY judgeChanged)
     Q_PROPERTY(QString judgeState READ judgeState NOTIFY judgeChanged)
     Q_PROPERTY(QString judgeStatus READ judgeStatus NOTIFY judgeChanged)
+    // What the judge does (docs/import-rules-judge.html, X4): "off",
+    // "advice" (a recommendation on cards under review) or "judge" (it runs
+    // the lookup); which model; and how many lookups it has settled alone
+    // and left for your verdict.
+    Q_PROPERTY(QString judgeMode READ judgeMode WRITE setJudgeMode NOTIFY settingsChanged)
+    Q_PROPERTY(QString judgeModel READ judgeModel WRITE setJudgeModel NOTIFY settingsChanged)
+    Q_PROPERTY(QVariantList judgeModels READ judgeModels CONSTANT)
+    Q_PROPERTY(int judgeAlone READ judgeAlone NOTIFY judgeChanged)
+    Q_PROPERTY(int judgeLeft READ judgeLeft NOTIFY judgeChanged)
 
     // Replacing a video by hand: whether a search, check or replacement
     // runs, what it is doing, and for which video.
@@ -235,6 +244,18 @@ public:
     Q_INVOKABLE QString setJudgeKey(const QString &key);
     Q_INVOKABLE void removeJudgeKey();
     Q_INVOKABLE void checkJudgeKey();
+    QString judgeMode() const { return m_cfg.judgeMode; }
+    void setJudgeMode(const QString &mode);
+    QString judgeModel() const { return m_cfg.judgeModel; }
+    void setJudgeModel(const QString &model);
+    QVariantList judgeModels() const;
+    int judgeAlone() const { return m_judgeAlone; }
+    int judgeLeft() const { return m_judgeLeft; }
+    // The judge's advice on a video under review for one of its candidates
+    // (X2): {asked, keep, probability, kind, source, version, whole, note,
+    // mode, model, error}. askJudge asks for it (advice mode), or again.
+    Q_INVOKABLE QVariantMap judgeAdvice(qint64 videoId, qint64 trackId);
+    Q_INVOKABLE void askJudge(qint64 videoId, qint64 trackId, bool again);
     bool accountOnBotCheck() const { return m_cfg.accountOnBotCheck; }
     void setAccountOnBotCheck(bool v);
     bool checkingQuality() const;
@@ -308,6 +329,7 @@ signals:
     void candidatesChanged();
     void undoChanged();
     void judgeChanged();
+    void adviceChanged(qint64 videoId);
     void facetsChanged();
     void settingsChanged();
     void activityChanged();
@@ -357,6 +379,7 @@ private:
     int m_sessionDone = 0;
     bool m_ignoreSmallChannels = true;
     int m_minSubscribers = 5000;
+    int m_judgeAlone = 0, m_judgeLeft = 0;
     int m_reviewCount = 0;  // videos waiting for review
     int m_reviewVideos = 0;
     int m_orphanCount = 0;
