@@ -122,7 +122,8 @@ public:
     };
     static QString trackLine(const TrackInfo &t);
     static QString audioText(const AudioAlign::Result &r);
-    static QJsonArray queryContent(const TrackInfo &t);
+    // `sound`: the "Sound:" line for a talk-titled track (Q2), or empty.
+    static QJsonArray queryContent(const TrackInfo &t, const QString &sound = QString());
     static QJsonArray pickContent(const TrackInfo &t, const QVector<Upload> &results);
     static QJsonArray verdictContent(const TrackInfo &t, const QVector<TrackInfo> &others, const QVector<Upload> &uploads);
     // The judge's answer about upload `index` (from 1) in a verdict answer.

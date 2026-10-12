@@ -1266,7 +1266,8 @@ class Handler(http.server.BaseHTTPRequestHandler):
         words = body.get('system', '')
         key = 'query' if words.startswith('You help a music-video library find') else 'pick' if words.startswith('You help a music-video library choose') else 'verdict'
         with open(answers + '.asked', 'a') as f:
-            f.write(key + ' ' + body['model'] + ' images=' + str(sum(1 for b in body['messages'][0]['content'] if b.get('type') == 'image')) + '\n')
+            f.write(key + ' ' + body['model'] + ' images=' + str(sum(1 for b in body['messages'][0]['content'] if b.get('type') == 'image'))
+                    + ' sound=' + ('yes' if any('Sound:' in b.get('text', '') for b in body['messages'][0]['content']) else 'no') + '\n')
         self.reply({'content': [{'type': 'text', 'text': json.dumps(json.load(open(answers))[key])}], 'usage': {'input_tokens': 1000, 'output_tokens': 50},
                     'stop_reason': 'end_turn', 'model': body['model']})
 http.server.HTTPServer(('127.0.0.1', port), Handler).serve_forever()
@@ -1356,6 +1357,35 @@ PY
 OUT=$(judge --mv-dir "$WORK/mvlib-j5")
 echo "$OUT" | grep -E "^\[import\] Dee|^done:" | cut -c1-120
 [[ "$OUT" == *"Skipped (the judge: an instrumental)"* ]]
+
+# Q2, Q4, Q5 on a library the rules had scanned: "MC1" (a talk title, and
+# sounds like it) is skipped by A4, the other two were searched. Judge mode
+# asks the judge once about the rules' skip (Q5), telling it how the track
+# sounds (Q2); the judge's own skip then stands (Q4): the next run asks
+# nothing. A track without a video is not asked again either (A6).
+OUT=$(MVPLAYER_YTDLP="$EMPTY" timeout 120 "$BUILD/mvplayer-import" --music-dir "$WORK/lib6" --mv-dir "$WORK/mvlib-j9" --jobs 1 2>&1)
+[[ "$(judge_db mvlib-j9 "SELECT state FROM tracks WHERE title = 'MC1'")" == "[('skipped',)]" ]]
+python3 - "$WORK/judge-answers.json" <<'PY'
+import json, sys
+a = json.load(open(sys.argv[1])); a['query'] = {'lookup': False, 'skip_reason': 'a talk track', 'queries': [], 'song_known': 'unknown'}
+json.dump(a, open(sys.argv[1], 'w'))
+PY
+rm -f "$WORK/judge-answers.json.asked"
+OUT=$(MVPLAYER_YTDLP="$EMPTY" MVPLAYER_CLAUDE_API="http://127.0.0.1:$JUDGE_PORT" timeout 120 "$BUILD/mvplayer-import" --music-dir "$WORK/lib6" --mv-dir "$WORK/mvlib-j9" --jobs 1 --judge judge --claude-key-file "$WORK/claude-key" 2>&1)
+echo "$OUT" | grep -E "^\[scan\]|^\[import\] Eve|^done:" | cut -c1-120
+[[ "$OUT" == *"MC1: Skipped (the judge: a talk track)"* ]]
+grep -q '"what":"unskipped"' "$WORK/mvlib-j9/.mvplayer/import-log.jsonl"
+cat "$WORK/judge-answers.json.asked"
+[[ "$(cat "$WORK/judge-answers.json.asked")" == "query claude-sonnet-5-5 images=0 sound=yes" ]]
+rm -f "$WORK/judge-answers.json.asked"
+OUT=$(MVPLAYER_YTDLP="$EMPTY" MVPLAYER_CLAUDE_API="http://127.0.0.1:$JUDGE_PORT" timeout 120 "$BUILD/mvplayer-import" --music-dir "$WORK/lib6" --mv-dir "$WORK/mvlib-j9" --jobs 1 --judge judge --claude-key-file "$WORK/claude-key" 2>&1)
+[[ ! -e "$WORK/judge-answers.json.asked" && "$(judge_db mvlib-j9 "SELECT state, message FROM tracks WHERE title = 'MC1'")" == "[('skipped', 'the judge: a talk track')]" ]]
+[[ $(grep -c '"what":"unskipped"' "$WORK/mvlib-j9/.mvplayer/import-log.jsonl") -eq 1 ]]
+# A song's title can mention talk: the judge is told how it sounds, and no
+# "Sound:" line goes with a title that does not look like talk.
+rm -f "$WORK/judge-answers.json.asked"
+OUT=$(judge --mv-dir "$WORK/mvlib-j10")
+[[ "$(cat "$WORK/judge-answers.json.asked")" == "query claude-sonnet-5-5 images=0 sound=no" ]]
 
 # V5: the judge cannot answer: the lookup is postponed as for a pause, and the pause says why.
 OUT=$(MVPLAYER_CLAUDE_API="http://127.0.0.1:1" MVPLAYER_YTDLP="$SITE" MVPLAYER_PAUSE_SECS=1 timeout 60 "$BUILD/mvplayer-import" --music-dir "$WORK/lib5" --mv-dir "$WORK/mvlib-j6" --jobs 1 --judge judge --claude-key-file "$WORK/claude-key" 2>&1 || true)

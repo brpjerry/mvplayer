@@ -421,9 +421,12 @@ QString Judge::audioText(const AudioAlign::Result &r)
     return parts.join(QStringLiteral("; "));
 }
 
-QJsonArray Judge::queryContent(const TrackInfo &t)
+QJsonArray Judge::queryContent(const TrackInfo &t, const QString &sound)
 {
-    return {QJsonObject{{QStringLiteral("type"), QStringLiteral("text")}, {QStringLiteral("text"), QStringLiteral("Track: %1.").arg(trackLine(t))}}};
+    QString text = QStringLiteral("Track: %1.").arg(trackLine(t));
+    if (!sound.isEmpty())
+        text += QLatin1Char('\n') + sound;
+    return {QJsonObject{{QStringLiteral("type"), QStringLiteral("text")}, {QStringLiteral("text"), text}}};
 }
 
 static QString views(qint64 n)

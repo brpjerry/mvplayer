@@ -539,7 +539,11 @@ words it is given and how it measured against hand verdicts. Two modes:
   and looked at (five frames of each). A verdict it is at least 85% sure of
   stands by itself; anything less, a cut, an interrupted video, one the audio
   check doubts or a still picture is left for you, with its advice on the
-  card. Your verdicts on cards stand as before.
+  card. Your verdicts on cards stand as before. It also decides, from the
+  tags, which tracks are not worth a search (an instrumental, a talk track),
+  told how a talk-titled track sounds; turning judge mode on asks it once
+  about every track the rules had skipped, and what it skips stays skipped
+  until the file's tags change.
 
 The model is yours to pick: Haiku 5.5, Sonnet 5.5 (the default) or Opus 5.5.
 Every answer is logged as a `judge` event in the import log, with what it cost.

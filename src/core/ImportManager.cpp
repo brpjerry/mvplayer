@@ -3031,13 +3031,21 @@ void ImportManager::runJob(qint64 trackId, const ImportSettings &cfg)
         return;
     }
     // Talk between songs (a stage announcement, an interview) has no video
-    // to find. A title can mislead and so can the sound, so it takes both.
-    if (!judging && Matcher::isTalkTitle(track.title)) {
+    // to find. A title can mislead and so can the sound, so it takes both
+    // (A4). In judge mode the judge is told how the track sounds (Q2).
+    QString soundLine;
+    if (Matcher::isTalkTitle(track.title)) {
         std::vector<int16_t> pcm;
         QString decodeError;
         if (AudioAlign::decodeMono(track.path, &pcm, &m_cancel, &decodeError)) {
             const TalkCheck::Result talk = TalkCheck::measure(pcm);
-            if (talk.talk) {
+            if (judging) {
+                if (talk.valid)
+                    soundLine = QStringLiteral("Sound: %1% of its moments are far quieter than its average, and its pulse is %2 (speech: at least 40% and at most 0.26). By the library's own measure it sounds like %3.")
+                                    .arg(qRound(talk.pauses * 100))
+                                    .arg(talk.beat, 0, 'f', 2)
+                                    .arg(talk.talk ? QStringLiteral("talk") : QStringLiteral("music"));
+            } else if (talk.talk) {
                 finish(QStringLiteral("skipped"), 0,
                        QStringLiteral("talk, not a song: titled as such and sounds like it (%1% pauses, beat %2)")
                            .arg(qRound(talk.pauses * 100))
@@ -3056,7 +3064,7 @@ void ImportManager::runJob(qint64 trackId, const ImportSettings &cfg)
         if (judgeKey.isEmpty())
             return judgePause(QStringLiteral("no API key is stored (Settings → Judge)"));
         report(QStringLiteral("Asking the judge"));
-        const Judge::Answer a = Judge::ask(judgeKey, judgeModel, QString::fromUtf8(JudgeWords::kQueryWords), Judge::queryContent(track),
+        const Judge::Answer a = Judge::ask(judgeKey, judgeModel, QString::fromUtf8(JudgeWords::kQueryWords), Judge::queryContent(track, soundLine),
                                            QString::fromUtf8(JudgeWords::kQuerySchema), 1500, cacheDir(cfg.mvDir), &m_cancel);
         if (m_cancel)
             return cleanup();
