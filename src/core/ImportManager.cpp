@@ -3132,10 +3132,10 @@ void ImportManager::runJob(qint64 trackId, const ImportSettings &cfg)
         // Only a download proves the pause is over (see withRetry).
         m_failStreak = 0;
         logQueries.append(QJsonObject{{QStringLiteral("q"), query}, {QStringLiteral("results"), found.size()}});
-        if (judging && found.isEmpty()) {
-            // S1: an empty answer is how YouTube refuses a guest it has had
-            // enough of; it is not "no video". The query is asked again
-            // after the pause.
+        if (found.isEmpty()) {
+            // B5 (S1 in judge mode): an empty answer is how YouTube refuses
+            // a guest it has had enough of; it is not "no video". The query
+            // is asked again after the pause.
             const QString reason = QStringLiteral("YouTube answered the search “%1” with nothing: refused, or nothing to find").arg(query);
             if (!m_blocked.exchange(true))
                 QMetaObject::invokeMethod(this, [this, reason] { tripBreaker(reason); }, Qt::QueuedConnection);

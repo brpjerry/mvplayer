@@ -148,8 +148,9 @@ done
 
 echo "== circuit breaker"
 # A yt-dlp that is bot-checked for its first three calls, then answers with
-# no results. The importer must pause (waits doubling), put the tracks back
-# untouched, and finish them once requests succeed again.
+# nothing usable (a Topic channel's upload). The importer must pause (waits
+# doubling), put the tracks back untouched, and finish them once requests
+# succeed again.
 mkdir -p "$WORK/lib/A" "$WORK/mvlib"
 # Two different songs: files are told apart by their sound.
 song() { echo "aevalsrc=0.3*sin(2*PI*t*($1+$2*mod(floor(t/1.5)\,7)))+0.2*sin(2*PI*t*($1*1.5+$2*mod(floor(t/2)\,5))):s=48000:d=40"; }
@@ -159,7 +160,7 @@ cat > "$WORK/fake-ytdlp" <<FAKE
 #!/bin/sh
 n=\$(cat "$WORK/calls" 2>/dev/null || echo 0); n=\$((n+1)); echo \$n > "$WORK/calls"
 if [ \$n -le 3 ]; then echo "ERROR: [youtube] x: Sign in to confirm you’re not a bot" >&2; exit 1; fi
-echo '{"entries": []}'
+echo '{"entries": [{"id": "tpc", "ie_key": "Youtube", "title": "Song", "channel": "A - Topic", "duration": 40, "view_count": 1000}]}'
 FAKE
 chmod +x "$WORK/fake-ytdlp"
 FAKE="$WORK/fake-ytdlp"
@@ -174,6 +175,21 @@ echo "$OUT" | grep -E "paused|resuming|^done:"
 [[ $(echo "$OUT" | grep -c "paused for 0:01") -eq 1 && $(echo "$OUT" | grep -c "paused for 0:02") -eq 1 ]]
 [[ "$OUT" == *"done: 0 videos; tracks: not_found=2"* ]]
 grep -q '"outcome":"postponed"' "$WORK/mvlib/.mvplayer/import-log.jsonl"
+# B5: a search answered with nothing at all is a refusal, not "no video":
+# the lookup is postponed as for a pause, and the query asked again after
+# it. Here the second answer has an upload (nothing usable, C2).
+cat > "$WORK/fake-ytdlp" <<FAKE
+#!/bin/sh
+n=\$(cat "$WORK/calls" 2>/dev/null || echo 0); n=\$((n+1)); echo \$n > "$WORK/calls"
+if [ \$n -le 1 ]; then echo '{"entries": []}'; exit 0; fi
+echo '{"entries": [{"id": "tpc", "ie_key": "Youtube", "title": "Song", "channel": "A - Topic", "duration": 40, "view_count": 1000}]}'
+FAKE
+rm -f "$WORK/calls"
+OUT=$(MVPLAYER_YTDLP="$FAKE" MVPLAYER_PAUSE_SECS=1 timeout 60 "$BUILD/mvplayer-import" \
+    --music-dir "$WORK/lib" --mv-dir "$WORK/mvlib-b5" 2>&1)
+echo "$OUT" | grep -E "paused|resuming|^done:" | cut -c1-110
+[[ "$OUT" == *"paused for 0:01: YouTube answered the search"* && "$OUT" == *"done: 0 videos; tracks: not_found=2"* ]]
+grep -q '"results":0' "$WORK/mvlib-b5/.mvplayer/import-log.jsonl"
 grep -q '"event":"paused"' "$WORK/mvlib/.mvplayer/import-log.jsonl"
 
 echo "== moved library"
@@ -625,7 +641,7 @@ echo "$CHECK" | cut -c1-44
 cat > "$WORK/fake-empty" <<FAKE
 #!/bin/sh
 echo "\$*" >> "$WORK/empty-args"
-echo '{"entries": []}'
+echo '{"entries": [{"id": "tpc", "ie_key": "Youtube", "title": "Song", "channel": "E - Topic", "duration": 40, "view_count": 1000}]}'
 FAKE
 chmod +x "$WORK/fake-empty"
 EMPTY="$WORK/fake-empty"
@@ -1028,7 +1044,7 @@ chan mvlib30 --music-dir "$WORK/lib27" --approve elv
 # its name, but the upload is one you accepted: it still fits outright, and
 # is kept. Its page is read for what was not kept, once.
 cp -r "$WORK/mvlib30" "$WORK/mvlib31"; cp -r "$WORK/mvlib30" "$WORK/mvlib32"; cp -r "$WORK/mvlib30" "$WORK/mvlib43"
-echo '{"entries": []}' > "$WORK/site-search.json"
+echo '{"entries": [{"id": "tpc", "ie_key": "Youtube", "title": "Eleven", "channel": "Elle - Topic", "duration": 50, "view_count": 1000}]}' > "$WORK/site-search.json"
 echo '{"id": "elv", "title": "Eleven", "channel": "エル OFFICIAL", "channel_id": "UCelle_elle_elle_elle_01", "channel_follower_count": 250000, "channel_is_verified": true}' > "$WORK/site-page.json"
 old_library mvlib30
 OUT=$(chan mvlib30 --music-dir "$WORK/lib27" --reimport "$WORK/lib27"); echo "$OUT"
@@ -1076,7 +1092,7 @@ for n in 38 39 41; do
     OUT=$(chan mvlib$n --music-dir "$WORK/lib27" --allow-channel UCelle_elle_elle_elle_01); echo "$OUT"
     [[ "$(ask mvlib$n "$STATES")" == "[('Eleven', 'review', None)]" ]]
 done
-echo '{"entries": []}' > "$WORK/site-search.json"
+echo '{"entries": [{"id": "tpc", "ie_key": "Youtube", "title": "Eleven", "channel": "Elle - Topic", "duration": 50, "view_count": 1000}]}' > "$WORK/site-search.json"
 echo '{"id": "elv", "title": "Eleven", "channel": "エル OFFICIAL", "channel_id": "UCelle_elle_elle_elle_01", "uploader_id": "@elle_official", "channel_follower_count": 250000, "channel_is_verified": true}' > "$WORK/site-page.json"
 OUT=$(chan mvlib38 --music-dir "$WORK/lib27" --reimport "$WORK/lib27"); echo "$OUT"
 [[ "$OUT" == *"(from review)"* && "$(ask mvlib38 "$STATES")" == "[('Eleven', 'done', 'elv')]" ]]
@@ -1106,7 +1122,7 @@ assert heard == [("e1", False), ("e2", False), ("e3", False), ("e4", False), ("e
 PY
 # The page shows a small channel: the track is no longer a candidate of the
 # video, and the video goes. Unless the channel is one you allowed.
-echo '{"entries": []}' > "$WORK/site-search.json"
+echo '{"entries": [{"id": "tpc", "ie_key": "Youtube", "title": "Eleven", "channel": "Elle - Topic", "duration": 50, "view_count": 1000}]}' > "$WORK/site-search.json"
 echo '{"id": "elv", "title": "Eleven", "channel": "エル OFFICIAL", "channel_id": "UCelle_elle_elle_elle_01", "uploader_id": "@elle_official", "channel_follower_count": 120}' > "$WORK/site-page.json"
 OUT=$(chan mvlib40 --music-dir "$WORK/lib27" --reimport "$WORK/lib27"); echo "$OUT"
 [[ "$OUT" == *"is from a small channel (120 subscribers)"* && "$(ask mvlib40 "$STATES")" == "[('Eleven', 'not_found', None)]" && "$(ask mvlib40 "SELECT COUNT(*) FROM videos")" == "[(0,)]" ]]

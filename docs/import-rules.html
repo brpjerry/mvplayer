@@ -179,6 +179,7 @@ del { background: var(--bad-soft); color: var(--bad); text-decoration: line-thro
   <h1>MV Player import rules</h1>
   <p>How a track in the music folders comes to have a music video, to wait for your verdict on one, or to have none. One decision tree per stage of a lookup. This page is the reference, and a rule changes here first. A change is proposed in a copy of this page, additions in green and removals in red; once it is approved the marks come off, it becomes this page, and the code in <code>src/core</code> follows. Where the two disagree, that is a bug in one of them.</p>
   <p class="proposal" hidden>Proposed changes to the rules: <ins>additions</ins> and <del>removals</del>. Not approved yet; the code has not changed.</p>
+  <p class="lede">These are the rules in <b>rules mode</b>. With the judge on (Settings → Judge), <a href="import-rules-judge.html">its own page</a> says what runs the lookup in its place (judge mode) or what the advice on a card is (advice mode); what stays of this page is listed there.</p>
   <div class="stamp">Transcribed from the code on 2026-10-11 · every rule names where it lives · ids (A2, D5.2) are stable, for pointing at</div>
   <div class="legend" aria-label="Legend">
     <span><span class="q">A question</span> its answers hang below</span>
@@ -269,7 +270,9 @@ del { background: var(--bad-soft); color: var(--bad); text-decoration: line-thro
           <span class="why">Usable: not dropped on sight, and it looks official (C7). Results of a later query rank two places below where YouTube put them.</span></div></li>
         <li id="B2"><div class="row"><a class="id" href="#B2">B2</a><span class="when">YouTube refuses the query</span><span class="out later">pause: I5</span></div></li>
         <li id="B3"><div class="row"><a class="id" href="#B3">B3</a><span class="when">All four asked, none could be answered</span><span class="out later">failed: A7</span></div></li>
-        <li id="B4"><div class="row"><a class="id" href="#B4">B4</a><span class="when">All four asked, nothing usable</span><span class="out none">no video: A6</span>
+        <li id="B5"><div class="row"><a class="id" href="#B5">B5</a><span class="when">A query YouTube answers with nothing at all</span><span class="out later">pause: I5</span>
+          <span class="why">An empty answer to a guest is how YouTube refuses one it has had enough of; it is not "no video". After about a hundred searches in a few minutes it answers every query so for an hour or more, and 143 tracks in one library have "none of 0 search results" to show for it. The query is asked again after the pause. (A query that truly matches nothing is rare; one that is refused is not.)</span></div></li>
+        <li id="B4"><div class="row"><a class="id" href="#B4">B4</a><span class="when">All four asked, nothing usable (and at least one was answered, B5)</span><span class="out none">no video: A6</span>
           <span class="why">"None of N search results looked like an official video."</span></div></li>
       </ul>
     </li>

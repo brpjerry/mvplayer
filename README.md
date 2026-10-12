@@ -392,8 +392,10 @@ retried after two weeks. Lookups that could not be completed (a download
 error, typically YouTube throttling) are not treated as "no video": they are
 retried after 30 minutes, then at doubling intervals.
 
-If YouTube starts refusing requests altogether (HTTP 429, a bot check, or
-eight downloads failing in a row), the whole queue pauses instead of failing
+If YouTube starts refusing requests altogether (HTTP 429, a bot check, a
+search answered with no results at all, which is how a guest is refused after
+about a hundred searches in a few minutes, or eight downloads failing in a
+row), the whole queue pauses instead of failing
 track after track: 10 minutes at first, doubling up to two hours while the
 block lasts, then one job tests the water before the rest follow. The import
 panel shows the pause and has a "Resume now" button; `pauseSeconds` under
