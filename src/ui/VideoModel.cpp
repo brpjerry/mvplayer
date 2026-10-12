@@ -73,6 +73,7 @@ QVariant VideoModel::data(const QModelIndex &index, int role) const
     case CandidateArtistRole: return m_shown.value(v.id).artist;
     case CandidateRole: return m_shown.value(v.id).index;
     case CandidatesRole: return m_shown.value(v.id).count;
+    case AdviceRole: return m_shown.value(v.id).advice;
     case YtStreamRole: return v.ytStream;
     case SameTitleRole: {
         const VideoInfo *o = sameTitle(v);
@@ -109,6 +110,7 @@ QHash<int, QByteArray> VideoModel::roleNames() const
         {CandidateArtistRole, "candidateArtist"},
         {CandidateRole, "candidate"},
         {CandidatesRole, "candidates"},
+        {AdviceRole, "advice"},
         {YtStreamRole, "ytStream"},
         {SameTitleRole, "sameTitle"},
         {OrphanRole, "orphan"},
@@ -122,7 +124,7 @@ void VideoModel::setShown(qint64 videoId, const Shown &shown)
     m_shown.insert(videoId, shown);
     for (int i = 0; i < m_videos.size(); ++i) {
         if (m_videos[i].id == videoId) {
-            emit dataChanged(index(i, 0), index(i, 0), {CandidateTitleRole, CandidateArtistRole, CandidateRole, CandidatesRole});
+            emit dataChanged(index(i, 0), index(i, 0), {CandidateTitleRole, CandidateArtistRole, CandidateRole, CandidatesRole, AdviceRole});
             return;
         }
     }

@@ -174,6 +174,17 @@ Item {
         anchors.verticalCenter: parent.verticalCenter
         spacing: 8
 
+        // Advice mode: the judge's answer for every card at once (X2).
+        FlatButton {
+            visible: App.videos.section === "review" && App.judgeMode === "advice" && App.reviewCount > 0
+            anchors.verticalCenter: parent.verticalCenter
+            icon: Icons.review
+            text: App.adviceLeft > 0 ? "Reviewing · " + App.adviceLeft + " left" : "Review all"
+            enabled: App.adviceLeft === 0
+            opacity: enabled ? 1 : 0.6
+            onClicked: App.askJudgeAll()
+        }
+
         ImportPill {
             id: pill
             anchors.verticalCenter: parent.verticalCenter

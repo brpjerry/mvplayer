@@ -1243,6 +1243,18 @@ QVector<VideoInfo> Database::candidacies(const TrackInfo &track)
     return out;
 }
 
+QVector<VideoInfo> Database::videosUnderReview()
+{
+    QVector<VideoInfo> out;
+    QSqlQuery q(conn());
+    q.prepare(QStringLiteral("SELECT %1 FROM videos WHERE review = 1 ORDER BY id").arg(QLatin1String(kVideoCols)));
+    if (run(q)) {
+        while (q.next())
+            out << resolved(readVideo(q));
+    }
+    return out;
+}
+
 QVector<qint64> Database::dropCandidaciesOfTracksWithVideos()
 {
     QVector<qint64> videos;

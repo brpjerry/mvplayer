@@ -284,7 +284,16 @@ void AppController::openLibrary()
         m_settings->setValue(QStringLiteral("judge/left"), m_judgeLeft);
         emit judgeChanged();
     });
-    connect(m_manager.get(), &ImportManager::adviceChanged, this, &AppController::adviceChanged);
+    connect(m_manager.get(), &ImportManager::adviceChanged, this, [this](qint64 videoId) {
+        // The card's badge shows the answer for the candidate on show.
+        if (const std::optional<VideoInfo> v = m_db ? m_db->video(videoId) : std::nullopt)
+            updateShown(*v);
+        emit adviceChanged(videoId);
+    });
+    connect(m_manager.get(), &ImportManager::adviceQueueChanged, this, [this](int left) {
+        m_adviceLeft = left;
+        emit adviceQueueChanged();
+    });
     connect(m_manager.get(), &ImportManager::activityChanged, this, [this] {
         if (!m_manager->busy())
             m_sessionDone = 0;
@@ -842,6 +851,12 @@ void AppController::updateShown(const VideoInfo &v)
         shown.index = at + 1;
         shown.title = all[at].track.title;
         shown.artist = all[at].track.artist;
+        const qint64 shownKey = Database::trackKey(all[at].track);
+        for (const Database::Advice &a : m_db->advice(v.id)) {
+            if (a.trackKey == shownKey)
+                shown.advice = {{QStringLiteral("asked"), true}, {QStringLiteral("keep"), a.keep}, {QStringLiteral("probability"), a.probability},
+                                {QStringLiteral("error"), a.kind == QLatin1String("error")}};
+        }
     }
     m_model->setShown(v.id, shown);
 }
@@ -1380,4 +1395,10 @@ void AppController::askJudge(qint64 videoId, qint64 trackId, bool again)
 {
     if (m_manager && m_judge->hasKey())
         m_manager->askJudge(videoId, trackId, again);
+}
+
+void AppController::askJudgeAll()
+{
+    if (m_manager && m_judge->hasKey())
+        m_manager->askJudgeAll();
 }

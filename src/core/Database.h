@@ -101,6 +101,8 @@ public:
     int candidateCount(qint64 videoId);
     // The videos under review the track is a candidate of.
     QVector<VideoInfo> candidacies(const TrackInfo &track);
+    // Every video under review, oldest first.
+    QVector<VideoInfo> videosUnderReview();
     // Keeping the queue in step with the library after the music folders
     // were read: a track that has a video is no candidate (returns the
     // videos it was one of), and a track that waits for review without

@@ -143,6 +143,11 @@ public:
     // once per video and candidate unless `again`; adviceChanged says when
     // the answer is in. Carried out on a thread of its own.
     void askJudge(qint64 videoId, qint64 trackId, bool again = false);
+    // "Review all" (X2): asks about every video under review that has no
+    // answer yet, for each of its candidates, in the queue's order.
+    void askJudgeAll();
+    // Questions queued for the judge and not yet answered (advice mode).
+    int adviceLeft() const { return m_adviceLeft.load(); }
 
     // Looks at every video in the library again with the account's cookies
     // and rebuilds those YouTube now offers in better quality.
@@ -208,6 +213,7 @@ signals:
     void judgeDecided(qint64 trackId, bool alone);
     // The judge's advice on a video under review changed (X2).
     void adviceChanged(qint64 videoId);
+    void adviceQueueChanged(int left);
 
 private:
     // What a verdict changed, as it was before: the video and the videos
@@ -319,6 +325,7 @@ private:
     QThreadPool m_verdictPool;
     QThreadPool m_previewPool;
     QThreadPool m_judgePool; // advice mode's questions, one at a time
+    std::atomic<int> m_adviceLeft{0};
     std::shared_ptr<std::atomic<bool>> m_previewStop;
     int m_previewTicket = 0;
     bool m_settledOnce = false; // what a library from before needs was asked for, this run

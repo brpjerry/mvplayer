@@ -454,6 +454,7 @@ void ImportManager::stop()
     m_previewPool.waitForDone();
     m_judgePool.clear();
     m_judgePool.waitForDone();
+    m_adviceLeft = 0;
     m_replacing = false;
     m_pending.clear();
     m_active = 0;
@@ -1249,7 +1250,26 @@ void ImportManager::askJudge(qint64 videoId, qint64 trackId, bool again)
     const ImportSettings cfg = settings();
     if (cfg.judgeMode == QLatin1String("off"))
         return;
-    m_judgePool.start([this, videoId, trackId, again, cfg] { adviceJob(videoId, trackId, again, cfg); });
+    emit adviceQueueChanged(++m_adviceLeft);
+    m_judgePool.start([this, videoId, trackId, again, cfg] {
+        adviceJob(videoId, trackId, again, cfg);
+        emit adviceQueueChanged(--m_adviceLeft);
+    });
+}
+
+void ImportManager::askJudgeAll()
+{
+    if (settings().judgeMode != QLatin1String("advice"))
+        return;
+    for (const VideoInfo &v : m_db->videosUnderReview()) {
+        const QVector<Database::Advice> have = m_db->advice(v.id);
+        for (const Database::Candidate &c : candidatesInOrder(m_db, v)) {
+            const qint64 key = Database::trackKey(c.track);
+            if (std::any_of(have.cbegin(), have.cend(), [&](const Database::Advice &a) { return a.trackKey == key; }))
+                continue; // answered already
+            askJudge(v.id, c.track.id, false);
+        }
+    }
 }
 
 void ImportManager::adviceJob(qint64 videoId, qint64 trackId, bool again, const ImportSettings &cfg)

@@ -39,6 +39,7 @@ public:
         CandidateArtistRole,
         CandidateRole,
         CandidatesRole,
+        AdviceRole,        // the judge's advice for the candidate on show (X2)
         YtStreamRole,      // which of the file's audio streams is YouTube's, from 0
         SameTitleRole,     // of a video under review: a library video with its title {album, ytTitle}
         OrphanRole,        // a library video that no track in the music folders has
@@ -64,7 +65,8 @@ public:
         QString artist;
         int index = 0; // from 1; 0: it has none
         int count = 0;
-        bool operator==(const Shown &o) const { return title == o.title && artist == o.artist && index == o.index && count == o.count; }
+        QVariantMap advice; // the judge's advice for it (X2): {asked, keep, probability, error}; empty: none
+        bool operator==(const Shown &o) const { return title == o.title && artist == o.artist && index == o.index && count == o.count && advice == o.advice; }
     };
     void setShown(qint64 videoId, const Shown &shown);
     // The accepted video that has the title of `v`, a video under review:

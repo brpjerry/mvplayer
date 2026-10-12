@@ -21,6 +21,8 @@ Item {
     required property string candidateArtist
     required property var sameTitle     // a library video with this title, for a video under review
     required property bool orphan       // no track in the music folders has it
+    required property var advice        // the judge's advice for the candidate on show: {asked, keep, probability, error}
+    property bool judgeOn: false         // the judge is on (advice or judge mode): the advice badge shows
 
     // Shown among the orphans, an orphan carries the verdict buttons: keep it
     // or delete it. Deleting waits while the music folders are read.
@@ -198,6 +200,8 @@ Item {
         height: thumbItem.height
         candidates: root.candidates
         candidateTitle: root.candidateTitle
+        advice: root.advice
+        judgeOn: root.judgeOn
         sameTitle: root.sameTitle
         orphan: !root.review
         canDelete: root.canDelete

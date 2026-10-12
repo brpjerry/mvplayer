@@ -108,6 +108,7 @@ class AppController : public QObject
     Q_PROPERTY(QVariantList judgeModels READ judgeModels CONSTANT)
     Q_PROPERTY(int judgeAlone READ judgeAlone NOTIFY judgeChanged)
     Q_PROPERTY(int judgeLeft READ judgeLeft NOTIFY judgeChanged)
+    Q_PROPERTY(int adviceLeft READ adviceLeft NOTIFY adviceQueueChanged)
 
     // Replacing a video by hand: whether a search, check or replacement
     // runs, what it is doing, and for which video.
@@ -256,6 +257,10 @@ public:
     // mode, model, error}. askJudge asks for it (advice mode), or again.
     Q_INVOKABLE QVariantMap judgeAdvice(qint64 videoId, qint64 trackId);
     Q_INVOKABLE void askJudge(qint64 videoId, qint64 trackId, bool again);
+    // "Review all": every card without an answer (X2); adviceLeft counts
+    // the questions still queued.
+    Q_INVOKABLE void askJudgeAll();
+    int adviceLeft() const { return m_adviceLeft; }
     bool accountOnBotCheck() const { return m_cfg.accountOnBotCheck; }
     void setAccountOnBotCheck(bool v);
     bool checkingQuality() const;
@@ -330,6 +335,7 @@ signals:
     void undoChanged();
     void judgeChanged();
     void adviceChanged(qint64 videoId);
+    void adviceQueueChanged();
     void facetsChanged();
     void settingsChanged();
     void activityChanged();
@@ -379,7 +385,7 @@ private:
     int m_sessionDone = 0;
     bool m_ignoreSmallChannels = true;
     int m_minSubscribers = 5000;
-    int m_judgeAlone = 0, m_judgeLeft = 0;
+    int m_judgeAlone = 0, m_judgeLeft = 0, m_adviceLeft = 0;
     int m_reviewCount = 0;  // videos waiting for review
     int m_reviewVideos = 0;
     int m_orphanCount = 0;

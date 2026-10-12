@@ -16,6 +16,10 @@ Item {
     // on show, which accepting is for.
     property int candidates: 1
     property string candidateTitle
+    // The judge's advice for the candidate on show (import-rules-judge X2):
+    // {asked, keep, probability, error}; shown while the judge is on.
+    property var advice: ({})
+    property bool judgeOn: false
     // A video already in the library with this one's title: {album, ytTitle}.
     property var sameTitle: ({})
     // An orphan's verdict: keep it, or delete it. Deleting waits while the
@@ -35,10 +39,34 @@ Item {
     signal allowChannelRequested()
     signal denyChannelRequested()
 
+    // The judge's advice: how sure it is, in the colour of its answer.
+    Rectangle {
+        id: adviceBadge
+        readonly property bool asked: root.judgeOn && root.advice !== undefined && root.advice !== null && root.advice.asked === true
+        readonly property bool error: asked && root.advice.error === true
+        readonly property bool unsure: asked && !error && root.advice.probability > 0.4 && root.advice.probability < 0.6
+        readonly property int percent: asked && !error ? Math.round((root.advice.keep ? root.advice.probability : 1 - root.advice.probability) * 100) : 0
+        visible: asked
+        x: 8
+        y: 8
+        width: adviceLabel.implicitWidth + 12
+        height: 20
+        radius: 4
+        color: !asked || error || unsure ? Theme.scrim : root.advice.keep ? Theme.accent : "#c23b3b"
+        Text {
+            id: adviceLabel
+            anchors.centerIn: parent
+            text: !adviceBadge.asked ? "" : adviceBadge.error || adviceBadge.unsure ? "Judge ?" : "Judge " + adviceBadge.percent + "%"
+            color: !adviceBadge.asked || adviceBadge.error || adviceBadge.unsure ? Theme.scrimText : root.advice.keep ? Theme.accentInk : "white"
+            font.pixelSize: 11
+            font.weight: Font.DemiBold
+        }
+    }
+
     // Several tracks could have this video: the panel below steps through them.
     Rectangle {
         visible: root.candidates > 1
-        x: 8
+        x: adviceBadge.visible ? adviceBadge.x + adviceBadge.width + 6 : 8
         y: 8
         width: candidatesLabel.implicitWidth + 12
         height: 20
