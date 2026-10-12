@@ -1,4 +1,6 @@
 #include "ui/AppController.h"
+#include "core/Judge.h"
+#include <functional>
 
 #include "core/ArtistChannels.h"
 #include "core/Util.h"
@@ -1401,4 +1403,68 @@ void AppController::askJudgeAll()
 {
     if (m_manager && m_judge->hasKey())
         m_manager->askJudgeAll();
+}
+
+// X4: a card whose candidate on show the judge would keep at the gate or
+// above, and no other candidate of it as surely, is accepted for that
+// candidate; a card where every candidate's answer is "not this one" at
+// the gate or above is rejected. Every other card stays.
+struct JudgePlan {
+    QVector<QPair<qint64, qint64>> accept; // video, track
+    QVector<qint64> reject;
+};
+static JudgePlan planJudged(Database *db, const std::function<int(qint64)> &shownOf)
+{
+    JudgePlan plan;
+    for (const VideoInfo &v : db->videosUnderReview()) {
+        const QVector<Database::Candidate> all = ImportManager::candidatesInOrder(db, v);
+        if (all.isEmpty())
+            continue;
+        const QVector<Database::Advice> advice = db->advice(v.id);
+        const auto answer = [&](const Database::Candidate &c) -> const Database::Advice * {
+            const qint64 key = Database::trackKey(c.track);
+            for (const Database::Advice &a : advice) {
+                if (a.trackKey == key && a.kind != QLatin1String("error"))
+                    return &a;
+            }
+            return nullptr;
+        };
+        int keeps = 0, rejects = 0;
+        for (const Database::Candidate &c : all) {
+            const Database::Advice *a = answer(c);
+            if (!a)
+                continue;
+            if (a->keep && a->probability >= Judge::kGate)
+                ++keeps;
+            else if (!a->keep && 1 - a->probability >= Judge::kGate)
+                ++rejects;
+        }
+        const Database::Candidate &shown = all.at(qBound(0, shownOf(v.id), int(all.size()) - 1));
+        const Database::Advice *s = answer(shown);
+        if (s && s->keep && s->probability >= Judge::kGate && keeps == 1)
+            plan.accept.append({v.id, shown.track.id});
+        else if (rejects == all.size())
+            plan.reject.append(v.id);
+    }
+    return plan;
+}
+
+QVariantMap AppController::judgePlan() const
+{
+    if (!m_db)
+        return {{QStringLiteral("accept"), 0}, {QStringLiteral("reject"), 0}};
+    const JudgePlan plan = planJudged(m_db.get(), [this](qint64 id) { return shownCandidate(id); });
+    return {{QStringLiteral("accept"), int(plan.accept.size())}, {QStringLiteral("reject"), int(plan.reject.size())}};
+}
+
+void AppController::acceptJudged()
+{
+    if (!m_manager || !m_db || m_cfg.judgeMode != QLatin1String("advice"))
+        return;
+    const JudgePlan plan = planJudged(m_db.get(), [this](qint64 id) { return shownCandidate(id); });
+    for (const auto &[videoId, trackId] : plan.accept)
+        m_manager->approveVideo(videoId, trackId, true);
+    for (qint64 videoId : plan.reject)
+        m_manager->rejectVideo(videoId, true);
+    refreshCounts();
 }

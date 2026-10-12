@@ -100,8 +100,10 @@ public:
     // candidates wait on what else they are candidates of, or have no video.
     // The verdict is carried out on a thread of its own: videoChanged or
     // videoRemoved says when.
-    void approveVideo(qint64 videoId, qint64 trackId = 0);
-    void rejectVideo(qint64 videoId);
+    // `byJudge`: "Accept all" carrying out the judge's confident advice on
+    // your behalf (import-rules-judge X4); logged as the judge's.
+    void approveVideo(qint64 videoId, qint64 trackId = 0, bool byJudge = false);
+    void rejectVideo(qint64 videoId, bool byJudge = false);
     // The last verdict can be taken back while what it deleted is set aside
     // in `.mvplayer/undo` (G10): the app's verdicts, not the headless
     // importer's, and not those a channel gives. One step: the next verdict
@@ -280,8 +282,8 @@ private:
     // `byChannel`: accepted because its channel was allowed, not by the
     // user's verdict on the video itself.
     // `undoable`: the user's own verdict in the app, kept so it can be taken back.
-    void approveJob(qint64 videoId, qint64 trackId, const ImportSettings &cfg, bool byChannel = false, bool undoable = false);
-    void rejectJob(qint64 videoId, const QString &why = QString(), bool undoable = false);
+    void approveJob(qint64 videoId, qint64 trackId, const ImportSettings &cfg, bool byChannel = false, bool undoable = false, bool byJudge = false);
+    void rejectJob(qint64 videoId, const QString &why = QString(), bool undoable = false, bool byJudge = false);
     // A video under review judged from its file with its channel taken as an
     // artist's: the candidate whose own recording it is (the closest fit of
     // several), or why it still waits.

@@ -261,6 +261,10 @@ public:
     // the questions still queued.
     Q_INVOKABLE void askJudgeAll();
     int adviceLeft() const { return m_adviceLeft; }
+    // "Accept all" (X4): what the judge's confident answers would decide,
+    // {accept, reject} counts; acceptJudged carries them out as verdicts.
+    Q_INVOKABLE QVariantMap judgePlan() const;
+    Q_INVOKABLE void acceptJudged();
     bool accountOnBotCheck() const { return m_cfg.accountOnBotCheck; }
     void setAccountOnBotCheck(bool v);
     bool checkingQuality() const;

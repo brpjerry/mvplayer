@@ -988,14 +988,14 @@ void ImportManager::prepareCandidates(const ImportSettings &cfg)
     }
 }
 
-void ImportManager::approveVideo(qint64 videoId, qint64 trackId)
+void ImportManager::approveVideo(qint64 videoId, qint64 trackId, bool byJudge)
 {
     ++m_reviewJobs;
     emit activityChanged();
     const ImportSettings cfg = settings();
     const bool undoable = m_keepsUndo;
-    m_verdictPool.start([this, videoId, trackId, cfg, undoable] {
-        approveJob(videoId, trackId, cfg, false, undoable);
+    m_verdictPool.start([this, videoId, trackId, cfg, undoable, byJudge] {
+        approveJob(videoId, trackId, cfg, false, undoable, byJudge);
         --m_reviewJobs;
         QMetaObject::invokeMethod(this, [this] {
             emit activityChanged();
@@ -1004,13 +1004,13 @@ void ImportManager::approveVideo(qint64 videoId, qint64 trackId)
     });
 }
 
-void ImportManager::rejectVideo(qint64 videoId)
+void ImportManager::rejectVideo(qint64 videoId, bool byJudge)
 {
     ++m_reviewJobs;
     emit activityChanged();
     const bool undoable = m_keepsUndo;
-    m_verdictPool.start([this, videoId, undoable] {
-        rejectJob(videoId, QString(), undoable);
+    m_verdictPool.start([this, videoId, undoable, byJudge] {
+        rejectJob(videoId, QString(), undoable, byJudge);
         --m_reviewJobs;
         QMetaObject::invokeMethod(this, [this] {
             emit activityChanged();
@@ -1019,7 +1019,7 @@ void ImportManager::rejectVideo(qint64 videoId)
     });
 }
 
-void ImportManager::approveJob(qint64 videoId, qint64 trackId, const ImportSettings &cfg, bool byChannel, bool undoable)
+void ImportManager::approveJob(qint64 videoId, qint64 trackId, const ImportSettings &cfg, bool byChannel, bool undoable, bool byJudge)
 {
     std::optional<VideoInfo> v = m_db->video(videoId);
     if (!v || !v->review)
@@ -1141,11 +1141,13 @@ void ImportManager::approveJob(qint64 videoId, qint64 trackId, const ImportSetti
     releaseCandidates(videoId, candidates, keeper ? &*keeper : nullptr,
                       !keeper ? how
                       : (byChannel ? QStringLiteral("“%1” is the video of “%2” [%3]: its channel is one you allowed")
+                         : byJudge ? QStringLiteral("the judge accepted “%1” for “%2” [%3] on your behalf")
                                    : QStringLiteral("you accepted “%1” for “%2” [%3]")).arg(v->ytTitle, keeper->title, keeper->album));
     qInfo().noquote() << (byChannel ? QStringLiteral("[channel] “%1” (%2) is accepted: its channel is one you allowed")
+                          : byJudge ? QStringLiteral("[judge] accepted “%1” (%2) on your behalf")
                                     : QStringLiteral("[review] accepted “%1” (%2)")).arg(v->title, v->ytTitle);
     appendLog({{QStringLiteral("event"), QStringLiteral("verdict")}, {QStringLiteral("verdict"), QStringLiteral("accept")},
-               {QStringLiteral("by"), byChannel ? QStringLiteral("allowed-channel") : QStringLiteral("you")},
+               {QStringLiteral("by"), byChannel ? QStringLiteral("allowed-channel") : byJudge ? QStringLiteral("judge") : QStringLiteral("you")},
                {QStringLiteral("videoId"), videoId}, {QStringLiteral("id"), v->ytId}, {QStringLiteral("title"), v->ytTitle},
                {QStringLiteral("channel"), v->ytChannel},
                {QStringLiteral("tracks"), tracks}, {QStringLiteral("otherCandidates"), others}});
@@ -1157,7 +1159,7 @@ void ImportManager::approveJob(qint64 videoId, qint64 trackId, const ImportSetti
         withdraw(*keeper, m_db->candidacies(*keeper));
 }
 
-void ImportManager::rejectJob(qint64 videoId, const QString &why, bool undoable)
+void ImportManager::rejectJob(qint64 videoId, const QString &why, bool undoable, bool byJudge)
 {
     std::optional<VideoInfo> v = m_db->video(videoId);
     if (!v || !v->review)
@@ -1188,12 +1190,15 @@ void ImportManager::rejectJob(qint64 videoId, const QString &why, bool undoable)
         names.append(QJsonObject{{QStringLiteral("trackId"), c.track.id}, {QStringLiteral("track"), c.track.title}, {QStringLiteral("album"), c.track.album}});
     }
     releaseCandidates(videoId, candidates, nullptr,
-                      why.isEmpty() ? QStringLiteral("you turned down “%1”").arg(v->ytTitle) : QStringLiteral("%1: “%2”").arg(why, v->ytTitle));
+                      !why.isEmpty() ? QStringLiteral("%1: “%2”").arg(why, v->ytTitle)
+                      : byJudge ? QStringLiteral("the judge turned down “%1” on your behalf").arg(v->ytTitle)
+                                : QStringLiteral("you turned down “%1”").arg(v->ytTitle));
     discardVideo(*v);
-    qInfo().noquote() << (why.isEmpty() ? QStringLiteral("[review] rejected “%1” (%2)")
-                                        : QStringLiteral("[channel] “%1” (%2) is deleted: its channel is one you denied")).arg(v->title, v->ytTitle);
+    qInfo().noquote() << (!why.isEmpty() ? QStringLiteral("[channel] “%1” (%2) is deleted: its channel is one you denied")
+                          : byJudge ? QStringLiteral("[judge] rejected “%1” (%2) on your behalf")
+                                    : QStringLiteral("[review] rejected “%1” (%2)")).arg(v->title, v->ytTitle);
     appendLog({{QStringLiteral("event"), QStringLiteral("verdict")}, {QStringLiteral("verdict"), QStringLiteral("reject")},
-               {QStringLiteral("by"), why.isEmpty() ? QStringLiteral("you") : QStringLiteral("denied-channel")},
+               {QStringLiteral("by"), !why.isEmpty() ? QStringLiteral("denied-channel") : byJudge ? QStringLiteral("judge") : QStringLiteral("you")},
                {QStringLiteral("videoId"), videoId}, {QStringLiteral("id"), v->ytId}, {QStringLiteral("title"), v->ytTitle},
                {QStringLiteral("channel"), v->ytChannel}, {QStringLiteral("tracks"), names}});
 }

@@ -73,6 +73,14 @@ ApplicationWindow {
     // An accepted video leaves the review list; it stops rather than play on
     // out of sight, and its file is tidied up meanwhile. Among the orphans
     // the verdict is on an orphan, and a kept one leaves that list alike.
+    // "Accept all" (X4): the judge's confident answers as verdicts. The
+    // playing video may be among them.
+    function acceptJudged() {
+        if (player.current && player.current.review === true)
+            player.stop()
+        App.acceptJudged()
+    }
+
     function approveVideo(id) {
         if (player.current && player.current.videoId === id)
             player.stop()
@@ -314,6 +322,7 @@ ApplicationWindow {
                 current: player.current
                 onBackRequested: window.showGrid()
                 onSectionRequested: (section) => window.showSection(section)
+                onAcceptJudgedRequested: window.acceptJudged()
                 onSearchTextChanged: {
                     App.videos.searchText = searchText
                     if (searchText.length > 0 && window.view === "player")
@@ -526,6 +535,7 @@ ApplicationWindow {
         case "judge-key": return (arg === "" ? (App.removeJudgeKey(), "") : App.setJudgeKey(arg)) || "ok"
         case "judge-check": App.checkJudgeKey(); return "ok"
         case "review-all": App.askJudgeAll(); return "ok" // advice mode: the judge on every card
+        case "accept-all": if (arg === "go") { window.acceptJudged(); return "ok" } return JSON.stringify(App.judgePlan()) // X4: what it would do, or do it
         case "retry": App.retryUnmatched(); return "ok"
         case "rescan": App.rescan(); return "ok"
         case "cookies": return (arg === "" ? (App.removeCookies(), "") : App.importCookies(arg)) || "ok"
