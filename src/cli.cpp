@@ -63,6 +63,8 @@ int main(int argc, char **argv)
         {QStringLiteral("judge"), QStringLiteral("The judge (docs/import-rules-judge.html): off, advice, or judge (it runs the lookup)."), QStringLiteral("mode"), QStringLiteral("off")},
         {QStringLiteral("judge-model"), QStringLiteral("Which model the judge is: haiku, sonnet or opus."), QStringLiteral("model"), QStringLiteral("sonnet")},
         {QStringLiteral("claude-key-file"), QStringLiteral("The file holding the Claude API key; the app's by default."), QStringLiteral("file")},
+        {QStringLiteral("capture"), QStringLiteral("Keep everything under this folder, for good: every yt-dlp exchange, every file a lookup brings, every question to the judge and its answer."), QStringLiteral("dir")},
+        {QStringLiteral("replay"), QStringLiteral("Replay from a capture: searches, pages, downloads and the judge's answers come from this folder wherever it has them; the rest is asked as usual."), QStringLiteral("dir")},
         {QStringLiteral("min-subscribers"), QStringLiteral("Ignore uploads from channels with fewer subscribers, unless the channel is verified or one of several the upload is listed under; 0 ignores none."),
          QStringLiteral("n"), QStringLiteral("5000")},
         {QStringLiteral("allow-channel"), QStringLiteral("Allow a channel, by its id (UC…), its handle (@name) or the address of its page: an artist's channel for every track, and never ignored as a small one. Its videos under review are judged again at once (repeatable)."),
@@ -257,6 +259,10 @@ int main(int argc, char **argv)
         out << "error: --judge-model takes haiku, sonnet or opus" << Qt::endl;
         return 1;
     }
+    if (parser.isSet(QStringLiteral("capture")))
+        cfg.captureDir = QFileInfo(parser.value(QStringLiteral("capture"))).absoluteFilePath();
+    if (parser.isSet(QStringLiteral("replay")))
+        cfg.replayDir = QFileInfo(parser.value(QStringLiteral("replay"))).absoluteFilePath();
     cfg.judgeKeyFile = parser.isSet(QStringLiteral("claude-key-file"))
         ? QFileInfo(parser.value(QStringLiteral("claude-key-file"))).absoluteFilePath()
         : QDir(QStandardPaths::writableLocation(QStandardPaths::GenericConfigLocation)).filePath(QStringLiteral("mvplayer/claude-api-key"));

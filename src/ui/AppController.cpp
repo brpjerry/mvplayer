@@ -1,5 +1,6 @@
 #include "ui/AppController.h"
 #include "core/Judge.h"
+#include <QDirIterator>
 #include <functional>
 
 #include "core/ArtistChannels.h"
@@ -149,6 +150,7 @@ AppController::AppController(const AppOptions &options, QObject *parent)
     if (YtDlp::looksLikeCookies(cookiesPath()))
         m_cfg.cookiesFile = cookiesPath();
     m_cfg.accountOnBotCheck = m_settings->value(QStringLiteral("import/accountOnBotCheck"), false).toBool();
+    m_keepEverything = m_settings->value(QStringLiteral("import/keepEverything"), false).toBool();
     m_cfg.pauseBaseSecs = m_settings->value(QStringLiteral("import/pauseSeconds"), m_cfg.pauseBaseSecs).toInt();
     if (qEnvironmentVariableIsSet("MVPLAYER_PAUSE_SECS"))
         m_cfg.pauseBaseSecs = qEnvironmentVariableIntValue("MVPLAYER_PAUSE_SECS");
@@ -236,6 +238,7 @@ void AppController::openLibrary()
         updateShown(v);
     emit candidatesChanged();
 
+    m_cfg.captureDir = m_keepEverything ? captureFolder() : QString();
     m_manager = std::make_unique<ImportManager>(m_db.get());
     m_manager->setSettings(m_cfg);
     m_manager->setKeepsUndo(true);
@@ -435,6 +438,7 @@ void AppController::saveSettings()
     m_settings->setValue(QStringLiteral("judge/alone"), m_judgeAlone);
     m_settings->setValue(QStringLiteral("judge/left"), m_judgeLeft);
     m_settings->setValue(QStringLiteral("import/accountOnBotCheck"), m_cfg.accountOnBotCheck);
+    m_settings->setValue(QStringLiteral("import/keepEverything"), m_keepEverything);
     m_settings->setValue(QStringLiteral("player/volume"), m_volume);
     m_settings->setValue(QStringLiteral("player/muted"), m_muted);
     m_settings->setValue(QStringLiteral("import/subtitleLangs"), m_cfg.subtitleLangs);
@@ -1411,6 +1415,40 @@ void AppController::askJudge(qint64 videoId, qint64 trackId, bool again)
 {
     if (m_manager && m_judge->hasKey())
         m_manager->askJudge(videoId, trackId, again);
+}
+
+QString AppController::captureFolder() const
+{
+    return m_cfg.mvDir.isEmpty() ? QString() : QDir(m_cfg.mvDir).filePath(QStringLiteral(".mvplayer/capture"));
+}
+
+void AppController::setKeepEverything(bool on)
+{
+    if (on == m_keepEverything)
+        return;
+    m_keepEverything = on;
+    m_cfg.captureDir = on ? captureFolder() : QString();
+    if (m_manager)
+        m_manager->setSettings(m_cfg);
+    m_settings->setValue(QStringLiteral("import/keepEverything"), on);
+    emit settingsChanged();
+}
+
+QString AppController::captureSizeText() const
+{
+    const QString folder = captureFolder();
+    if (folder.isEmpty() || !QDir(folder).exists())
+        return QStringLiteral("nothing kept yet");
+    qint64 bytes = 0;
+    int videos = 0;
+    QDirIterator it(folder, QDir::Files, QDirIterator::Subdirectories);
+    while (it.hasNext()) {
+        it.next();
+        bytes += it.fileInfo().size();
+    }
+    videos = int(QDir(QDir(folder).filePath(QStringLiteral("video"))).entryList(QDir::Dirs | QDir::NoDotAndDotDot).size());
+    const double gb = bytes / 1e9;
+    return QStringLiteral("%1 for %2 videos").arg(gb >= 1 ? QStringLiteral("%1 GB").arg(gb, 0, 'f', 1) : QStringLiteral("%1 MB").arg(bytes / 1e6, 0, 'f', 0)).arg(videos);
 }
 
 void AppController::askJudgeAll()

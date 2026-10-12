@@ -397,6 +397,10 @@ void ImportManager::setSettings(const ImportSettings &s)
     m_settings = s;
     m_jobPool.setMaxThreadCount(qBound(1, s.concurrency, 8));
     m_judgePool.setMaxThreadCount(qBound(1, s.judgeThreads, 8));
+    YtDlp::setCapture(s.captureDir);
+    YtDlp::setReplay(s.replayDir);
+    Judge::setCapture(s.captureDir);
+    Judge::setReplay(s.replayDir);
     // Q2: with the judge running the lookups, A2–A4 do not skip a track; the
     // next scan unskips what they had.
     Matcher::setJudgeRunsLookups(s.judgeMode == QLatin1String("judge"));

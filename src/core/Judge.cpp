@@ -3,6 +3,8 @@
 #include "core/Util.h"
 
 #include <QCryptographicHash>
+#include <QMutex>
+#include <QMutexLocker>
 #include <QDateTime>
 #include <QDir>
 #include <QElapsedTimer>
@@ -193,9 +195,9 @@ Judge::Answer Judge::ask(const QString &key, const QString &modelId, const QStri
     const QByteArray bytes = QJsonDocument(body).toJson(QJsonDocument::Compact);
 
     // Kept a day: the same question gets the same answer without a request.
+    const QString hash = QString::fromLatin1(QCryptographicHash::hash(bytes, QCryptographicHash::Sha256).toHex().left(32));
     QString cacheFile;
     if (!cacheDir.isEmpty()) {
-        const QString hash = QString::fromLatin1(QCryptographicHash::hash(bytes, QCryptographicHash::Sha256).toHex().left(32));
         cacheFile = QDir(cacheDir).filePath(QStringLiteral("judge/%1.json").arg(hash));
         QFile f(cacheFile);
         if (f.open(QIODevice::ReadOnly)) {
@@ -208,6 +210,21 @@ Judge::Answer Judge::ask(const QString &key, const QString &modelId, const QStri
             }
         }
     }
+    // A replay: the answer kept for this very question, however old.
+    const QString replay = replayDir();
+    if (!replay.isEmpty()) {
+        QFile f(QDir(replay).filePath(QStringLiteral("judge/%1.json").arg(hash)));
+        if (f.open(QIODevice::ReadOnly)) {
+            const QJsonObject kept = QJsonDocument::fromJson(f.readAll()).object();
+            if (!kept.value(QLatin1String("answer")).toObject().isEmpty()) {
+                a.json = kept.value(QLatin1String("answer")).toObject();
+                a.usage = kept.value(QLatin1String("usage")).toObject();
+                a.cached = true;
+                return a;
+            }
+        }
+    }
+    const QString capture = captureDir();
 
     QElapsedTimer clock;
     clock.start();
@@ -282,6 +299,19 @@ Judge::Answer Judge::ask(const QString &key, const QString &modelId, const QStri
         }
         a.json = json;
         a.error.clear();
+        if (!capture.isEmpty()) {
+            // Everything: the request as sent (words, facts, frames) and the answer.
+            const QString folder = QDir(capture).filePath(QStringLiteral("judge"));
+            QDir().mkpath(folder);
+            QSaveFile f(QDir(folder).filePath(hash + QStringLiteral(".json")));
+            if (f.open(QIODevice::WriteOnly)) {
+                f.write(QJsonDocument(QJsonObject{{QStringLiteral("t"), QDateTime::currentSecsSinceEpoch()}, {QStringLiteral("model"), modelId},
+                                                  {QStringLiteral("request"), body}, {QStringLiteral("answer"), json}, {QStringLiteral("usage"), a.usage},
+                                                  {QStringLiteral("seconds"), a.seconds}})
+                            .toJson(QJsonDocument::Compact));
+                f.commit();
+            }
+        }
         if (!cacheFile.isEmpty()) {
             QDir().mkpath(QFileInfo(cacheFile).absolutePath());
             QSaveFile f(cacheFile);
@@ -295,6 +325,35 @@ Judge::Answer Judge::ask(const QString &key, const QString &modelId, const QStri
         return a;
     }
     return a;
+}
+
+namespace {
+QMutex g_judgeCaptureLock;
+QString g_judgeCaptureDir, g_judgeReplayDir;
+} // namespace
+
+void Judge::setCapture(const QString &dir)
+{
+    QMutexLocker lock(&g_judgeCaptureLock);
+    g_judgeCaptureDir = dir;
+}
+
+void Judge::setReplay(const QString &dir)
+{
+    QMutexLocker lock(&g_judgeCaptureLock);
+    g_judgeReplayDir = dir;
+}
+
+QString Judge::captureDir()
+{
+    QMutexLocker lock(&g_judgeCaptureLock);
+    return g_judgeCaptureDir;
+}
+
+QString Judge::replayDir()
+{
+    QMutexLocker lock(&g_judgeCaptureLock);
+    return g_judgeReplayDir;
 }
 
 // ---- The picture -------------------------------------------------------------

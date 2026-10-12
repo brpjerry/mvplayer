@@ -40,6 +40,11 @@ struct ImportSettings {
     QString judgeModel = QStringLiteral("sonnet");
     int judgeThreads = 1; // advice questions at once (X2): 1–8
     QString judgeKeyFile;
+    // Keeping everything (README): every yt-dlp exchange, every file a
+    // lookup brings and every question to the judge, kept under captureDir
+    // for good; a replay answers from replayDir wherever it can. Empty: off.
+    QString captureDir;
+    QString replayDir;
 };
 
 struct JobStatus {

@@ -563,6 +563,33 @@ Every answer is logged as a `judge` event in the import log, with what it cost.
 The headless importer takes `--judge off|advice|judge`, `--judge-model` and
 `--claude-key-file`.
 
+## Keeping everything for a replay
+
+Settings → Import → "Keep everything for a replay" (headless: `--capture
+<dir>`) keeps, for good, everything a lookup touches: every search YouTube
+answers (`search/<key>.json`, listed in `search/index.jsonl`), and for every
+video its audio with the page that came with it, its page where one was read
+on its own, its preview, the video with its thumbnail, its subtitles, and the
+account's answers (`video/<id>/`); and every question to the judge with its
+answer (`judge/<hash>.json`, the request as sent, frames included). The
+folder is `.mvplayer/capture` under the videos folder; the Import tab says
+how much it holds. Nothing is pruned: it is yours to delete.
+
+A replay runs a lookup again from a capture: `mvplayer-import --replay <dir>`
+answers searches, pages, downloads and the judge from the folder wherever it
+has the item, and asks YouTube or the API as usual where it has not (keeping
+that too, with `--capture` on). To run a past lookup again as it went, point
+a scratch library at the capture and ask for the track:
+
+```
+mvplayer-import --replay ~/Videos/MVs/.mvplayer/capture --mv-dir /tmp/replay \
+    --music-dir ~/Music --reimport "~/Music/Artist/Album/01 Song.flac" --judge judge
+```
+
+With the judge's words unchanged its answers come from the capture; with new
+words the same frames and facts go to the API again, which is how a change to
+the words is tried against what the judge once saw.
+
 ## Using it
 
 - Clicking a video grows its thumbnail into the player. `Esc` (or the back

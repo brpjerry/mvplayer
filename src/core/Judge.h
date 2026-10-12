@@ -84,6 +84,14 @@ public:
     // repeated within the day asks nothing twice.
     static Answer ask(const QString &key, const QString &modelId, const QString &words, const QJsonArray &content,
                       const QString &schemaJson, int maxTokens, const QString &cacheDir, const std::atomic<bool> *cancel);
+    // Keeping everything (README): every question and its answer under
+    // `dir`/judge, for good; a replay answers from there where the same
+    // question (words, facts and frames alike) was asked before, and asks
+    // the API where not. Empty: off.
+    static void setCapture(const QString &dir);
+    static void setReplay(const QString &dir);
+    static QString captureDir();
+    static QString replayDir();
 
     // ---- The picture (L4.1) ------------------------------------------------
     struct Picture {

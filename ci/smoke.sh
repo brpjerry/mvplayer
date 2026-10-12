@@ -1326,6 +1326,33 @@ rm -f "$WORK/judge-answers.json.asked"
 OUT=$(judge --mv-dir "$WORK/mvlib-j1b" --judge-model opus)
 grep -q "^query claude-opus-5-5" "$WORK/judge-answers.json.asked"
 
+# Keeping everything (README): a lookup with --capture keeps the searches it
+# made, the video's audio, page, preview and video, and the judge's three
+# answers; a replay from the capture, with yt-dlp and the API both out of
+# reach, brings the same video in from the capture alone.
+OUT=$(judge --mv-dir "$WORK/mvlib-cap" --capture "$WORK/cap"); echo "$OUT" | grep -E "^done:"
+[[ "$OUT" == *"done: 1 videos"* ]]
+ls "$WORK/cap/search" "$WORK/cap/video/liv" "$WORK/cap/judge" | tr '\n' ' '; echo
+[[ $(ls "$WORK/cap/search"/*.json | wc -l) -ge 1 && -s "$WORK/cap/search/index.jsonl" ]]
+[[ -f "$WORK/cap/video/liv/audio.opus" && -f "$WORK/cap/video/liv/audio.info.json" && -f "$WORK/cap/video/liv/preview.mkv" && -f "$WORK/cap/video/liv/video.mkv" ]]
+[[ $(ls "$WORK/cap/judge"/*.json | wc -l) -eq 3 ]]
+cat > "$WORK/fake-none" <<FAKE
+#!/bin/sh
+echo "\$*" >> "$WORK/none-args"
+echo "ERROR: not to be asked" >&2
+exit 1
+FAKE
+chmod +x "$WORK/fake-none"
+NONE="$WORK/fake-none"
+if [[ -n "$EXE" ]]; then
+    printf '@"%s" "%%~dp0fake-none" %%*\r\n' "$(cygpath -w "$(command -v sh)")" > "$WORK/fake-none.cmd"
+    NONE="$WORK/fake-none.cmd"
+fi
+rm -f "$WORK/none-args" "$WORK/judge-answers.json.asked"
+OUT=$(MVPLAYER_YTDLP="$NONE" MVPLAYER_CLAUDE_API="http://127.0.0.1:1" MVPLAYER_PAUSE_SECS=1 timeout 120 "$BUILD/mvplayer-import" --music-dir "$WORK/lib5" --mv-dir "$WORK/mvlib-rep" --jobs 1 --judge judge --claude-key-file "$WORK/claude-key" --replay "$WORK/cap" 2>&1); echo "$OUT" | grep -E "^\[import\] Dee|^done:" | cut -c1-120
+[[ "$OUT" == *"done: 1 videos"* && ! -e "$WORK/none-args" && ! -e "$WORK/judge-answers.json.asked" ]]
+[[ "$(judge_db mvlib-rep 'SELECT yt_id, vouched FROM videos')" == "[('liv', 1)]" ]]
+
 # W2: accepted below the gate: a card under review, with the judge's advice on it.
 answers accept 1 0.6
 OUT=$(judge --mv-dir "$WORK/mvlib-j2")

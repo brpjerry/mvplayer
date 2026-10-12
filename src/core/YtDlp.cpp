@@ -18,6 +18,8 @@
 #include <QRegularExpression>
 #include <QUrl>
 #include <QTemporaryFile>
+#include <QMutex>
+#include <QMutexLocker>
 
 #include <algorithm>
 #include <memory>
@@ -28,6 +30,10 @@ namespace {
 // bot"), in seconds since the epoch. It refuses a whole connection, so every
 // wrapper shares what one of them found out.
 std::atomic<qint64> g_guestsRefusedAt{0};
+// Keeping everything, and replaying it: process-wide, read under a lock.
+QMutex g_captureLock;
+QString g_captureDir;
+QString g_replayDir;
 
 QString findFile(const QString &dir, const QString &base, const QStringList &skipSuffixes)
 {
@@ -168,6 +174,62 @@ ProcResult YtDlp::runWithAccount(const QStringList &account, const QStringList &
         r.err = r.err.trimmed() + QByteArrayLiteral(" — and the account's cookies have expired: export cookies.txt from the browser again");
     }
     return r;
+}
+
+void YtDlp::setCapture(const QString &dir)
+{
+    QMutexLocker lock(&g_captureLock);
+    g_captureDir = dir;
+}
+
+void YtDlp::setReplay(const QString &dir)
+{
+    QMutexLocker lock(&g_captureLock);
+    g_replayDir = dir;
+}
+
+QString YtDlp::captureDir()
+{
+    QMutexLocker lock(&g_captureLock);
+    return g_captureDir;
+}
+
+QString YtDlp::replayDir()
+{
+    QMutexLocker lock(&g_captureLock);
+    return g_replayDir;
+}
+
+QString YtDlp::videoFolder(const QString &root, const QString &id)
+{
+    return QDir(root).filePath(QStringLiteral("video/") + id);
+}
+
+QString YtDlp::replayFile(const QString &id, const QString &base, const QString &dir, const QStringList &skipSuffixes)
+{
+    const QString root = replayDir();
+    if (root.isEmpty())
+        return {};
+    const QString have = findFile(videoFolder(root, id), base, skipSuffixes);
+    if (have.isEmpty())
+        return {};
+    QDir().mkpath(dir);
+    const QString to = QDir(dir).filePath(QFileInfo(have).fileName());
+    QFile::remove(to);
+    return QFile::copy(have, to) ? to : QString();
+}
+
+void YtDlp::keepFile(const QString &id, const QString &file)
+{
+    const QString root = captureDir();
+    if (root.isEmpty() || file.isEmpty() || !QFile::exists(file))
+        return;
+    const QString folder = videoFolder(root, id);
+    QDir().mkpath(folder);
+    const QString to = QDir(folder).filePath(QFileInfo(file).fileName());
+    if (QFile::exists(to))
+        QFile::remove(to);
+    QFile::copy(file, to);
 }
 
 QString YtDlp::cacheEntry(const QString &id) const
@@ -322,7 +384,18 @@ bool YtDlp::search(const QString &query, int count, QVector<YtCandidate> *out, Q
             ++m_cacheHits;
         }
     }
+    const QString searchKey = QString::fromLatin1(QCryptographicHash::hash(QStringLiteral("%1:%2").arg(count).arg(query).toUtf8(), QCryptographicHash::Sha1).toHex());
+    if (json.isEmpty() && !replayDir().isEmpty()) {
+        // A replay: the answer kept for this very query.
+        QFile f(QDir(replayDir()).filePath(QStringLiteral("search/%1.json").arg(searchKey)));
+        if (f.open(QIODevice::ReadOnly)) {
+            json = f.readAll();
+            ++m_cacheHits;
+        }
+    }
+    bool asked = false;
     if (json.isEmpty()) {
+        asked = true;
         QStringList args = baseArgs();
         args << QStringLiteral("--flat-playlist") << QStringLiteral("-J")
              << QStringLiteral("ytsearch%1:%2").arg(count).arg(query);
@@ -343,6 +416,20 @@ bool YtDlp::search(const QString &query, int count, QVector<YtCandidate> *out, Q
             QSaveFile f(cached);
             if (f.open(QIODevice::WriteOnly) && f.write(json) == json.size())
                 f.commit();
+        }
+    }
+    if (asked && !captureDir().isEmpty()) {
+        // Kept as answered, empty or not: a replay must see what the lookup saw.
+        const QDir folder(QDir(captureDir()).filePath(QStringLiteral("search")));
+        QDir().mkpath(folder.absolutePath());
+        QSaveFile f(folder.filePath(searchKey + QStringLiteral(".json")));
+        if (f.open(QIODevice::WriteOnly) && f.write(json) == json.size())
+            f.commit();
+        QFile index(folder.filePath(QStringLiteral("index.jsonl")));
+        if (index.open(QIODevice::Append)) {
+            index.write(QJsonDocument(QJsonObject{{QStringLiteral("t"), QDateTime::currentDateTime().toString(Qt::ISODate)}, {QStringLiteral("count"), count},
+                                                  {QStringLiteral("query"), query}, {QStringLiteral("file"), searchKey + QStringLiteral(".json")}})
+                            .toJson(QJsonDocument::Compact) + "\n");
         }
     }
     const QJsonArray entries = QJsonDocument::fromJson(json).object().value(QLatin1String("entries")).toArray();
@@ -403,6 +490,16 @@ bool YtDlp::downloadAudio(const QString &id, const QString &workDir, QString *fi
         QDir(entry).removeRecursively();
         QDir().mkpath(entry);
     }
+    // A replay: the audio and its page as a lookup brought them.
+    const QString replayed = replayFile(id, name, dir, {QStringLiteral(".json"), QStringLiteral(".part"), QStringLiteral(".ytdl")});
+    if (!replayed.isEmpty() && !replayFile(id, name + QStringLiteral(".info"), dir, {}).isEmpty()) {
+        QFile jf(QDir(dir).filePath(name + QStringLiteral(".info.json")));
+        if (info && jf.open(QIODevice::ReadOnly))
+            *info = QJsonDocument::fromJson(jf.readAll()).object();
+        *file = replayed;
+        ++m_cacheHits;
+        return true;
+    }
     QStringList args;
     args << QStringLiteral("-f") << QStringLiteral("ba/b") << QStringLiteral("--no-progress")
          << QStringLiteral("--write-info-json") << QStringLiteral("-o")
@@ -437,6 +534,8 @@ bool YtDlp::downloadAudio(const QString &id, const QString &workDir, QString *fi
             *error = QStringLiteral("yt-dlp produced no audio file");
         return false;
     }
+    keepFile(id, *file);
+    keepFile(id, jf.fileName());
     return true;
 }
 
@@ -455,18 +554,46 @@ bool YtDlp::downloadSubtitles(const QString &id, const QString &dir, const QStri
          << wanted.join(QLatin1Char(',')) << QStringLiteral("--sub-format") << QStringLiteral("srv3")
          << QStringLiteral("--no-progress") << QStringLiteral("-o") << QDir(dir).filePath(QStringLiteral("subs.%(ext)s"))
          << url(id);
-    ProcOptions opts;
-    opts.cancel = m_cancel;
-    opts.timeoutMs = 5 * 60 * 1000;
-    const ProcResult r = run(args, opts);
-    if (!r.ok()) {
-        if (error)
-            *error = r.errorText();
-        return false;
+    bool replayed = false;
+    if (!replayDir().isEmpty()) {
+        // A replay: the subtitles a lookup brought, and a note that it brought none.
+        const QDir kept(videoFolder(replayDir(), id));
+        if (kept.exists(QStringLiteral("subs.none"))) {
+            replayed = true;
+        } else {
+            for (const QFileInfo &fi : kept.entryInfoList({QStringLiteral("subs.*.srv3")}, QDir::Files)) {
+                QDir().mkpath(dir);
+                QFile::copy(fi.absoluteFilePath(), QDir(dir).filePath(fi.fileName()));
+                replayed = true;
+            }
+        }
+        if (replayed)
+            ++m_cacheHits;
+    }
+    if (!replayed) {
+        ProcOptions opts;
+        opts.cancel = m_cancel;
+        opts.timeoutMs = 5 * 60 * 1000;
+        const ProcResult r = run(args, opts);
+        if (!r.ok()) {
+            if (error)
+                *error = r.errorText();
+            return false;
+        }
     }
     // subs.<language>.srv3
     QHash<QString, QString> got;
     const QFileInfoList entries = QDir(dir).entryInfoList({QStringLiteral("subs.*.srv3")}, QDir::Files);
+    if (!replayed && !captureDir().isEmpty()) {
+        for (const QFileInfo &fi : entries)
+            keepFile(id, fi.absoluteFilePath());
+        if (entries.isEmpty()) {
+            const QString folder = videoFolder(captureDir(), id);
+            QDir().mkpath(folder);
+            QFile none(QDir(folder).filePath(QStringLiteral("subs.none")));
+            none.open(QIODevice::WriteOnly);
+        }
+    }
     for (const QFileInfo &fi : entries) {
         const QString name = fi.fileName();
         got.insert(name.mid(5, name.size() - 5 - 5), fi.absoluteFilePath());
@@ -491,6 +618,14 @@ bool YtDlp::premiumInfo(const QString &id, QJsonObject *info, QString *error)
     opts.cancel = m_cancel;
     opts.timeoutMs = 120000;
     // With its warnings: that the cookies are no longer accepted is one.
+    if (!replayDir().isEmpty()) {
+        QFile jf(QDir(videoFolder(replayDir(), id)).filePath(QStringLiteral("premium.json")));
+        if (jf.open(QIODevice::ReadOnly)) {
+            *info = QJsonDocument::fromJson(jf.readAll()).object();
+            ++m_cacheHits;
+            return !info->value(QLatin1String("formats")).toArray().isEmpty();
+        }
+    }
     QStringList base = baseArgs();
     base.removeAll(QStringLiteral("--no-warnings"));
     const ProcResult r = runProcess(m_program, base + account + QStringList{QStringLiteral("-J"), url(id)}, opts);
@@ -506,6 +641,13 @@ bool YtDlp::premiumInfo(const QString &id, QJsonObject *info, QString *error)
         return false;
     }
     *info = QJsonDocument::fromJson(r.out).object();
+    if (!captureDir().isEmpty()) {
+        const QString folder = videoFolder(captureDir(), id);
+        QDir().mkpath(folder);
+        QSaveFile f(QDir(folder).filePath(QStringLiteral("premium.json")));
+        if (f.open(QIODevice::WriteOnly) && f.write(r.out) == r.out.size())
+            f.commit();
+    }
     if (info->value(QLatin1String("formats")).toArray().isEmpty()) {
         if (error)
             *error = QStringLiteral("yt-dlp listed no formats");
@@ -529,6 +671,20 @@ bool YtDlp::pageInfo(const QString &id, QJsonObject *info, QString *error)
             }
         }
     }
+    if (!replayDir().isEmpty()) {
+        // A replay: the page as a lookup read it, or as it came with the audio.
+        for (const QString &name : {QStringLiteral("page.json"), QStringLiteral("audio.info.json")}) {
+            QFile jf(QDir(videoFolder(replayDir(), id)).filePath(name));
+            if (jf.open(QIODevice::ReadOnly)) {
+                const QJsonObject kept = QJsonDocument::fromJson(jf.readAll()).object();
+                if (kept.contains(QLatin1String("channel"))) {
+                    *info = kept;
+                    ++m_cacheHits;
+                    return true;
+                }
+            }
+        }
+    }
     ProcOptions opts;
     opts.cancel = m_cancel;
     opts.timeoutMs = 120000;
@@ -543,6 +699,13 @@ bool YtDlp::pageInfo(const QString &id, QJsonObject *info, QString *error)
         if (error)
             *error = QStringLiteral("yt-dlp said nothing about the upload");
         return false;
+    }
+    if (!captureDir().isEmpty()) {
+        const QString folder = videoFolder(captureDir(), id);
+        QDir().mkpath(folder);
+        QSaveFile f(QDir(folder).filePath(QStringLiteral("page.json")));
+        if (f.open(QIODevice::WriteOnly) && f.write(r.out) == r.out.size())
+            f.commit();
     }
     return true;
 }
@@ -688,6 +851,11 @@ QString YtDlp::descriptionOf(const QJsonObject &info)
 
 bool YtDlp::downloadPreview(const QString &id, const QString &dir, QString *file, QString *error)
 {
+    *file = replayFile(id, QStringLiteral("preview"), dir, {QStringLiteral(".part")});
+    if (!file->isEmpty()) {
+        ++m_cacheHits;
+        return true;
+    }
     QStringList args;
     args << QStringLiteral("-f") << QStringLiteral("wv*[height>=144]/wv*/w") << QStringLiteral("--no-progress")
          << QStringLiteral("-o") << QDir(dir).filePath(QStringLiteral("preview.%(ext)s"));
@@ -702,12 +870,26 @@ bool YtDlp::downloadPreview(const QString &id, const QString &dir, QString *file
         return false;
     }
     *file = findFile(dir, QStringLiteral("preview"), {QStringLiteral(".part")});
+    keepFile(id, *file);
     return !file->isEmpty();
 }
 
 bool YtDlp::downloadVideo(const QString &id, const QString &dir, const std::function<void(double)> &progress,
                           QString *file, QString *thumb, QString *error)
 {
+    {
+        static const QStringList notVideo = {QStringLiteral(".jpg"), QStringLiteral(".webp"), QStringLiteral(".png"),
+                                             QStringLiteral(".part"), QStringLiteral(".json"), QStringLiteral(".ytdl")};
+        const QString replayed = replayFile(id, QStringLiteral("video"), dir, notVideo);
+        if (!replayed.isEmpty()) {
+            *file = replayed;
+            *thumb = replayFile(id, QStringLiteral("video"), dir, {QStringLiteral(".mkv"), QStringLiteral(".mp4"), QStringLiteral(".webm"), QStringLiteral(".part"), QStringLiteral(".json"), QStringLiteral(".ytdl"), QStringLiteral(".webp"), QStringLiteral(".png")});
+            ++m_cacheHits;
+            if (progress)
+                progress(1.0);
+            return true;
+        }
+    }
     QStringList args;
     args << QStringLiteral("-f") << QStringLiteral("bv*/b") << QStringLiteral("--write-thumbnail")
          << QStringLiteral("--convert-thumbnails") << QStringLiteral("jpg") << QStringLiteral("--newline")
@@ -747,5 +929,7 @@ bool YtDlp::downloadVideo(const QString &id, const QString &dir, const std::func
             *error = QStringLiteral("yt-dlp produced no video file");
         return false;
     }
+    keepFile(id, *file);
+    keepFile(id, *thumb);
     return true;
 }

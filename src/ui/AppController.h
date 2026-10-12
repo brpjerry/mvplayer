@@ -91,6 +91,7 @@ class AppController : public QObject
     // Whether the account is used where YouTube refuses a guest with its
     // bot check ("Sign in to confirm you're not a bot"): for the user to say.
     Q_PROPERTY(bool accountOnBotCheck READ accountOnBotCheck WRITE setAccountOnBotCheck NOTIFY settingsChanged)
+    Q_PROPERTY(bool keepEverything READ keepEverything WRITE setKeepEverything NOTIFY settingsChanged)
     // Claude, for judging the review queue: whether an API key is stored,
     // how it reads with its middle left out, and what the last check of it
     // found (judgeState: ok | bad | error, empty before a check).
@@ -269,6 +270,12 @@ public:
     Q_INVOKABLE QVariantMap judgePlan() const;
     Q_INVOKABLE void acceptJudged();
     bool accountOnBotCheck() const { return m_cfg.accountOnBotCheck; }
+    // Keeping everything for a replay (README): the capture folder under
+    // the videos folder; captureSizeText says how much it holds.
+    bool keepEverything() const { return m_keepEverything; }
+    void setKeepEverything(bool on);
+    Q_INVOKABLE QString captureFolder() const;
+    Q_INVOKABLE QString captureSizeText() const;
     void setAccountOnBotCheck(bool v);
     bool checkingQuality() const;
     Q_INVOKABLE void checkQuality();
@@ -393,6 +400,7 @@ private:
     bool m_ignoreSmallChannels = true;
     int m_minSubscribers = 5000;
     int m_judgeAlone = 0, m_judgeLeft = 0, m_adviceLeft = 0;
+    bool m_keepEverything = false;
     int m_reviewCount = 0;  // videos waiting for review
     int m_reviewVideos = 0;
     int m_orphanCount = 0;

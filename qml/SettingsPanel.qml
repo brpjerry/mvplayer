@@ -1112,6 +1112,53 @@ Popup {
 
                     Divider {}
 
+                    // Keeping everything a lookup touches, for a replay (README).
+                    Item {
+                        width: parent.width
+                        height: keepText.implicitHeight + 24
+                        Column {
+                            id: keepText
+                            anchors.left: parent.left
+                            anchors.right: keepSwitch.left
+                            anchors.rightMargin: 20
+                            anchors.verticalCenter: parent.verticalCenter
+                            spacing: 3
+                            Text {
+                                text: "Keep everything for a replay"
+                                color: Theme.text
+                                font.pixelSize: 14
+                            }
+                            Text {
+                                width: parent.width
+                                text: "Every search YouTube answers, every page, audio, preview and video a lookup brings, and every question to the judge with its answer are kept for good under the videos folder (.mvplayer/capture), so that a lookup can be run again later exactly as it went, or with new words for the judge. Takes room: tens of megabytes a lookup."
+                                color: Theme.textFaint
+                                font.pixelSize: 12
+                                wrapMode: Text.WordWrap
+                            }
+                            Text {
+                                id: captureSize
+                                width: parent.width
+                                function refresh() { text = "Kept so far: " + App.captureSizeText() }
+                                Component.onCompleted: refresh()
+                                color: Theme.textFaint
+                                font.pixelSize: 12
+                                Connections {
+                                    target: App
+                                    function onSettingsChanged() { captureSize.refresh() }
+                                }
+                            }
+                        }
+                        FlatSwitch {
+                            id: keepSwitch
+                            anchors.right: parent.right
+                            anchors.verticalCenter: parent.verticalCenter
+                            checked: App.keepEverything
+                            onToggled: (c) => App.keepEverything = c
+                        }
+                    }
+
+                    Divider {}
+
                     // YouTube Premium: the account's cookies bring audio at a higher bitrate.
                     Item {
                         width: parent.width

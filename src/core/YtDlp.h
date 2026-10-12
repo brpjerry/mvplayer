@@ -58,6 +58,20 @@ public:
     // folder is under `maxBytes`. For when nothing is being imported.
     static void pruneCache(const QString &dir, qint64 maxBytes, int maxAgeDays);
 
+    // ---- Keeping everything, and replaying it ------------------------------
+    // With a capture folder set, everything yt-dlp is asked and everything
+    // it brings is kept there for good (README, "Keeping everything"):
+    // search/<key>.json with search/index.jsonl, and video/<id>/ with the
+    // audio and its page (audio.info.json), page.json, preview, video with
+    // its thumbnail, subtitles and the account's premium answers. For every
+    // wrapper in the process; empty: nothing is kept.
+    static void setCapture(const QString &dir);
+    // A replay answers from that folder wherever it has the item, and asks
+    // yt-dlp as usual where it has not (keeping that too, with a capture on).
+    static void setReplay(const QString &dir);
+    static QString captureDir();
+    static QString replayDir();
+
     // Lists the first `count` YouTube results for `query`. `fresh` asks
     // YouTube whatever the cache has (the probe, B5).
     bool search(const QString &query, int count, QVector<YtCandidate> *out, QString *error, bool fresh = false);
@@ -152,6 +166,12 @@ private:
     // Runs a download from the remembered description; from the page when
     // there is none or it no longer works.
     ProcResult runFor(const QString &id, const QStringList &args, const ProcOptions &opts);
+
+    // The replay's copy of a video's file named `base` into `dir`; empty when it has none.
+    static QString replayFile(const QString &id, const QString &base, const QString &dir, const QStringList &skipSuffixes);
+    // Keeps a file the lookup brought under the capture's folder for the video.
+    static void keepFile(const QString &id, const QString &file);
+    static QString videoFolder(const QString &root, const QString &id);
 
     QString m_program;
     QStringList m_extraArgs;
