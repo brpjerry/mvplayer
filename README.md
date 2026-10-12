@@ -542,7 +542,9 @@ words it is given and how it measured against hand verdicts. Two modes:
   file; "Ask again" asks anew. Nothing is decided by it.
 - **Judge**: it runs each lookup — writes the search, picks what to listen to
   from the results, and gives the verdict once every pick has been listened to
-  and looked at (five frames of each). A verdict it is at least 85% sure of
+  and looked at (five frames of each), told each upload's channel, its
+  subscribers, upload date and the first 600 characters of its description,
+  which the library keeps with every video from now on. A verdict it is at least 85% sure of
   stands by itself; anything less, a cut, an interrupted video, one the audio
   check doubts or a still picture is left for you, with its advice on the
   card. Your verdicts on cards stand as before. It also decides, from the

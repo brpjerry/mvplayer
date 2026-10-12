@@ -137,6 +137,7 @@ struct VideoInfo {
     // When the upload was published, "YYYY-MM-DD" (its premiere date where
     // it had one). Null: not known (videos from before it was kept).
     QString ytDate;
+    QString ytDescription; // the first 600 characters of the upload's description, one line; empty: not kept
     QJsonObject tags;
     qint64 addedAt = 0;
 };

@@ -324,7 +324,7 @@ case " \$* " in
     for a in "\$@"; do [ "\$prev" = "-o" ] && out=\$a; prev=\$a; done
     dir=\$(dirname "\$out")
     case "\$out" in
-    *audio.*) cp "$WORK/site-audio.opus" "\$dir/audio.opus"; echo '{"abr": 96, "acodec": "opus", "upload_date": "20230307", "release_date": "20230308"}' > "\$dir/audio.info.json" ;;
+    *audio.*) cp "$WORK/site-audio.opus" "\$dir/audio.opus"; echo '{"abr": 96, "acodec": "opus", "upload_date": "20230307", "release_date": "20230308", "description": "Dee - Five\\nOut now on every streaming service.\\n\\nDirected by Dee."}' > "\$dir/audio.info.json" ;;
     *video.*) cp "$WORK/site-video.mkv" "\$dir/video.mkv" ;;
     *preview.*) cp "$WORK/site-video.mkv" "\$dir/preview.mkv" ;;
     esac ;;
@@ -1267,7 +1267,8 @@ class Handler(http.server.BaseHTTPRequestHandler):
         key = 'query' if words.startswith('You help a music-video library find') else 'pick' if words.startswith('You help a music-video library choose') else 'verdict'
         with open(answers + '.asked', 'a') as f:
             f.write(key + ' ' + body['model'] + ' images=' + str(sum(1 for b in body['messages'][0]['content'] if b.get('type') == 'image'))
-                    + ' sound=' + ('yes' if any('Sound:' in b.get('text', '') for b in body['messages'][0]['content']) else 'no') + '\n')
+                    + ' sound=' + ('yes' if any('Sound:' in b.get('text', '') for b in body['messages'][0]['content']) else 'no')
+                    + ' desc=' + ('yes' if any('Description:' in b.get('text', '') for b in body['messages'][0]['content']) else 'no') + '\n')
         self.reply({'content': [{'type': 'text', 'text': json.dumps(json.load(open(answers))[key])}], 'usage': {'input_tokens': 1000, 'output_tokens': 50},
                     'stop_reason': 'end_turn', 'model': body['model']})
 http.server.HTTPServer(('127.0.0.1', port), Handler).serve_forever()
@@ -1317,6 +1318,9 @@ cat "$WORK/judge-answers.json.asked"
 grep -q "^verdict claude-sonnet-5-5 images=5" "$WORK/judge-answers.json.asked"
 [[ "$(grep -c '"event":"judge"' "$WORK/mvlib-j1/.mvplayer/import-log.jsonl")" == 3 ]]
 grep -q '"question":"verdict"' "$WORK/mvlib-j1/.mvplayer/import-log.jsonl"
+# The upload's description, as the page gave it, is kept with the video and told to the judge (V1).
+grep -q "^verdict claude-sonnet-5-5 images=5 sound=no desc=yes" "$WORK/judge-answers.json.asked"
+[[ "$(judge_db mvlib-j1 'SELECT yt_description FROM videos')" == "[('Dee - Five | Out now on every streaming service. | Directed by Dee.',)]" ]]
 # Another model, by name.
 rm -f "$WORK/judge-answers.json.asked"
 OUT=$(judge --mv-dir "$WORK/mvlib-j1b" --judge-model opus)
@@ -1376,7 +1380,7 @@ echo "$OUT" | grep -E "^\[scan\]|^\[import\] Eve|^done:" | cut -c1-120
 [[ "$OUT" == *"MC1: Skipped (the judge: a talk track)"* ]]
 grep -q '"what":"unskipped"' "$WORK/mvlib-j9/.mvplayer/import-log.jsonl"
 cat "$WORK/judge-answers.json.asked"
-[[ "$(cat "$WORK/judge-answers.json.asked")" == "query claude-sonnet-5-5 images=0 sound=yes" ]]
+[[ "$(cat "$WORK/judge-answers.json.asked")" == "query claude-sonnet-5-5 images=0 sound=yes desc=no" ]]
 rm -f "$WORK/judge-answers.json.asked"
 OUT=$(MVPLAYER_YTDLP="$EMPTY" MVPLAYER_CLAUDE_API="http://127.0.0.1:$JUDGE_PORT" timeout 120 "$BUILD/mvplayer-import" --music-dir "$WORK/lib6" --mv-dir "$WORK/mvlib-j9" --jobs 1 --judge judge --claude-key-file "$WORK/claude-key" 2>&1)
 [[ ! -e "$WORK/judge-answers.json.asked" && "$(judge_db mvlib-j9 "SELECT state, message FROM tracks WHERE title = 'MC1'")" == "[('skipped', 'the judge: a talk track')]" ]]
@@ -1385,7 +1389,7 @@ OUT=$(MVPLAYER_YTDLP="$EMPTY" MVPLAYER_CLAUDE_API="http://127.0.0.1:$JUDGE_PORT"
 # "Sound:" line goes with a title that does not look like talk.
 rm -f "$WORK/judge-answers.json.asked"
 OUT=$(judge --mv-dir "$WORK/mvlib-j10")
-[[ "$(cat "$WORK/judge-answers.json.asked")" == "query claude-sonnet-5-5 images=0 sound=no" ]]
+[[ "$(cat "$WORK/judge-answers.json.asked")" == "query claude-sonnet-5-5 images=0 sound=no desc=no" ]]
 
 # V5: the judge cannot answer: the lookup is postponed as for a pause, and the pause says why.
 OUT=$(MVPLAYER_CLAUDE_API="http://127.0.0.1:1" MVPLAYER_YTDLP="$SITE" MVPLAYER_PAUSE_SECS=1 timeout 60 "$BUILD/mvplayer-import" --music-dir "$WORK/lib5" --mv-dir "$WORK/mvlib-j6" --jobs 1 --judge judge --claude-key-file "$WORK/claude-key" 2>&1 || true)

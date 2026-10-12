@@ -112,6 +112,9 @@ public:
     // When the upload was published, "YYYY-MM-DD": its premiere date where
     // it had one, else its upload date. Null where the page gives neither.
     static QString publishedOn(const QJsonObject &info);
+    // The upload's description as the library keeps it: its first 600
+    // characters on one line (lines joined with " | "), for the judge (V1).
+    static QString descriptionOf(const QJsonObject &info);
 
     // True for a cookies.txt in the Netscape format with YouTube cookies in it.
     static bool looksLikeCookies(const QString &file);

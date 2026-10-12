@@ -671,6 +671,21 @@ QString YtDlp::publishedOn(const QJsonObject &info)
     return QString();
 }
 
+QString YtDlp::descriptionOf(const QJsonObject &info)
+{
+    QString text = info.value(QLatin1String("description")).toString();
+    QStringList lines;
+    for (const QString &line : text.split(QLatin1Char('\n'))) {
+        const QString t = line.simplified();
+        if (!t.isEmpty())
+            lines << t;
+    }
+    text = lines.join(QStringLiteral(" | "));
+    if (text.size() > 600)
+        text = text.left(597).trimmed() + QStringLiteral("…");
+    return text;
+}
+
 bool YtDlp::downloadPreview(const QString &id, const QString &dir, QString *file, QString *error)
 {
     QStringList args;

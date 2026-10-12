@@ -111,6 +111,7 @@ public:
         bool verified = false;
         qint64 subscribers = -2; // -2: unknown
         QString date;            // YYYY-MM-DD, or empty
+        QString description;     // the first 600 characters of its description, one line; empty: not known
         qint64 views = -1;       // -1: unknown
         bool allowed = false;    // a channel you allowed (G7)
         double duration = 0;

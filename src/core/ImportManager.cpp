@@ -1303,6 +1303,7 @@ void ImportManager::adviceJob(qint64 videoId, qint64 trackId, bool again, const 
     u.verified = video->ytChannelVerified;
     u.subscribers = video->ytChannelSubs;
     u.date = video->ytDate;
+    u.description = video->ytDescription;
     u.allowed = !video->ytChannelId.isEmpty() && m_db->channelAllowed(video->ytChannelId);
     u.duration = video->duration;
     u.width = video->width;
@@ -2619,6 +2620,7 @@ void ImportManager::replaceWithJob(const VideoInfo &video, const TrackInfo &trac
     v.ytChannelVerified = channelFacts.verified;
     v.ytChannelHandle = channelFacts.handle;
     v.ytDate = YtDlp::publishedOn(ytInfo);
+    v.ytDescription = YtDlp::descriptionOf(ytInfo);
     v.tags = track.tags;
     v.addedAt = QDateTime::currentSecsSinceEpoch();
     const qint64 newId = m_db->insertVideo(v);
@@ -3293,6 +3295,8 @@ void ImportManager::runJob(qint64 trackId, const ImportSettings &cfg)
         v.ytChannelHandle = channel.handle;
         if (v.ytDate.isNull())
             v.ytDate = YtDlp::publishedOn(page);
+        if (v.ytDescription.isEmpty())
+            v.ytDescription = YtDlp::descriptionOf(page);
         m_db->updateVideoChannel(v);
         return Page::Known;
     };
@@ -3468,7 +3472,8 @@ void ImportManager::runJob(qint64 trackId, const ImportSettings &cfg)
     };
     QVector<JudgeCase> cases;
     QStringList caseClaims;
-    const auto uploadOf = [&](const YtCandidate &c, const YtDlp::Channel &channel, const QString &channelId, const QString &date, qint64 views, int height) {
+    const auto uploadOf = [&](const YtCandidate &c, const YtDlp::Channel &channel, const QString &channelId, const QString &date, qint64 views, int height,
+                              const QString &description) {
         Judge::Upload u;
         u.id = c.id;
         u.title = c.title;
@@ -3479,6 +3484,7 @@ void ImportManager::runJob(qint64 trackId, const ImportSettings &cfg)
         u.verified = channel.verified || c.verified;
         u.subscribers = channel.subscribers;
         u.date = date;
+        u.description = description;
         u.views = views > 0 ? views : -1;
         u.allowed = !channelId.isEmpty() && m_db->channelAllowed(channelId);
         u.duration = c.duration;
@@ -3610,7 +3616,7 @@ void ImportManager::runJob(qint64 trackId, const ImportSettings &cfg)
                 channel.subscribers = existing->ytChannelSubs;
                 channel.verified = existing->ytChannelVerified;
                 channel.handle = existing->ytChannelHandle;
-                jc.upload = uploadOf(c, channel, existing->ytChannelId, existing->ytDate, -1, existing->height);
+                jc.upload = uploadOf(c, channel, existing->ytChannelId, existing->ytDate, -1, existing->height, existing->ytDescription);
                 jc.upload.width = existing->width;
                 jc.upload.audio = Judge::audioText(jc.align);
                 report(QStringLiteral("Looking at the picture"), -1, c.title);
@@ -4081,7 +4087,8 @@ void ImportManager::runJob(qint64 trackId, const ImportSettings &cfg)
             jc.align = ar;
             jc.song = audioMatches(ar);
             jc.upload = uploadOf(c, channel, channelId, YtDlp::publishedOn(info),
-                                 c.views > 0 ? c.views : qint64(info.value(QLatin1String("view_count")).toDouble()), YtDlp::bestHeight(info));
+                                 c.views > 0 ? c.views : qint64(info.value(QLatin1String("view_count")).toDouble()), YtDlp::bestHeight(info),
+                                 YtDlp::descriptionOf(info));
             jc.upload.audio = Judge::audioText(ar);
             report(QStringLiteral("Looking at the picture"), -1, c.title);
             jc.upload.picture = Judge::frames(preview, c.duration > 0 ? c.duration : ar.videoSec, QDir(dir).filePath(QStringLiteral("frames")), &m_cancel);
@@ -4540,6 +4547,7 @@ void ImportManager::runJob(qint64 trackId, const ImportSettings &cfg)
     v.ytChannelVerified = channel.verified || chosen.verified;
     v.ytChannelHandle = channel.handle;
     v.ytDate = YtDlp::publishedOn(ytInfo);
+    v.ytDescription = YtDlp::descriptionOf(ytInfo);
     v.tags = track.tags;
     v.addedAt = QDateTime::currentSecsSinceEpoch();
 

@@ -89,7 +89,7 @@ const char *kVideoCols =
     "id, yt_id, path, thumb, title, artist, album_artist, album, genre, year, track_no, duration, "
     "width, height, fps, vcodec, audio_source, audio_detail, yt_title, yt_channel, tags_json, added_at, yt_abr, "
     "review, review_start, review_end, yt_stream, yt_channel_id, yt_channel_subs, yt_channel_verified, yt_channel_handle, vouched, "
-    "yt_date";
+    "yt_date, yt_description";
 
 // Text that was kept, though it may be empty: never the null string, which
 // stands for "not kept".
@@ -139,6 +139,9 @@ VideoInfo readVideo(const QSqlQuery &q)
     v.vouched = q.value(i++).toBool();
     if (!q.value(i).isNull())
         v.ytDate = q.value(i).toString();
+    ++i;
+    if (!q.value(i).isNull())
+        v.ytDescription = q.value(i).toString();
     ++i;
     return v;
 }
@@ -484,8 +487,9 @@ bool Database::init(QString *error)
     // What an upload's page says of its channel, kept since small channels
     // can be ignored: its subscribers and its verified mark, and its handle,
     // by which an exception names it. And when the upload was published.
+    // And the upload's description, for the judge (judge page, V1).
     for (const char *column : {"yt_channel_subs INTEGER", "yt_channel_verified INTEGER NOT NULL DEFAULT 0", "yt_channel_handle TEXT",
-                               "yt_date TEXT"}) {
+                               "yt_date TEXT", "yt_description TEXT"}) {
         QSqlQuery q(db);
         const QString name = QString::fromLatin1(column).section(QLatin1Char(' '), 0, 0);
         bool has = false;
@@ -981,8 +985,8 @@ qint64 Database::insertVideo(const VideoInfo &v)
         "INSERT INTO videos (yt_id, path, thumb, title, artist, album_artist, album, genre, year,"
         " track_no, duration, width, height, fps, vcodec, audio_source, audio_detail, yt_title,"
         " yt_channel, tags_json, added_at, yt_abr, review, review_start, review_end, yt_stream, yt_channel_id,"
-        " yt_channel_subs, yt_channel_verified, yt_channel_handle, vouched, yt_date)"
-        " VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)"));
+        " yt_channel_subs, yt_channel_verified, yt_channel_handle, vouched, yt_date, yt_description)"
+        " VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)"));
     q.addBindValue(v.ytId);
     q.addBindValue(storedPath(v.path));
     q.addBindValue(storedPath(v.thumb));
@@ -1015,6 +1019,7 @@ qint64 Database::insertVideo(const VideoInfo &v)
     q.addBindValue(v.ytChannelHandle.isNull() ? QVariant() : QVariant(v.ytChannelHandle));
     q.addBindValue(v.vouched && !v.review);
     q.addBindValue(v.ytDate.isNull() ? QVariant() : QVariant(v.ytDate));
+    q.addBindValue(v.ytDescription.isEmpty() ? QVariant() : QVariant(v.ytDescription));
     if (!run(q))
         return 0;
     return q.lastInsertId().toLongLong();
@@ -1067,12 +1072,13 @@ void Database::updateVideoChannel(const VideoInfo &v)
     QSqlQuery q(conn());
     // (The page read for the channel says when the upload was published too.)
     q.prepare(QStringLiteral("UPDATE videos SET yt_channel_id = ?, yt_channel_subs = ?, yt_channel_verified = ?,"
-                             " yt_channel_handle = ?, yt_date = COALESCE(?, yt_date) WHERE id = ?"));
+                             " yt_channel_handle = ?, yt_date = COALESCE(?, yt_date), yt_description = COALESCE(?, yt_description) WHERE id = ?"));
     q.addBindValue(keptText(v.ytChannelId));
     q.addBindValue(v.ytChannelSubs > -2 ? QVariant(v.ytChannelSubs) : QVariant());
     q.addBindValue(v.ytChannelVerified);
     q.addBindValue(v.ytChannelHandle.isNull() ? QVariant() : QVariant(v.ytChannelHandle));
     q.addBindValue(v.ytDate.isNull() ? QVariant() : QVariant(v.ytDate));
+    q.addBindValue(v.ytDescription.isEmpty() ? QVariant() : QVariant(v.ytDescription));
     q.addBindValue(v.id);
     run(q);
 }
@@ -1554,6 +1560,7 @@ bool Database::restoreVideo(const VideoInfo &v)
         q.addBindValue(v.ytChannelHandle.isNull() ? QVariant() : QVariant(v.ytChannelHandle));
         q.addBindValue(v.vouched && !v.review);
         q.addBindValue(v.ytDate.isNull() ? QVariant() : QVariant(v.ytDate));
+        q.addBindValue(v.ytDescription.isEmpty() ? QVariant() : QVariant(v.ytDescription));
     };
     QStringList sets;
     for (const QString &c : cols)

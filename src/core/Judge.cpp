@@ -491,7 +491,10 @@ QJsonArray Judge::verdictContent(const TrackInfo &t, const QVector<TrackInfo> &o
             text += QStringLiteral(", uploaded %1").arg(u.date);
         if (u.views >= 0)
             text += QStringLiteral(", %1").arg(views(u.views));
-        text += QStringLiteral(".\nAudio check: %1.").arg(u.audio.isEmpty() ? QStringLiteral("not measured") : u.audio);
+        text += QLatin1Char('.');
+        if (!u.description.isEmpty())
+            text += QStringLiteral("\nDescription: %1").arg(u.description);
+        text += QStringLiteral("\nAudio check: %1.").arg(u.audio.isEmpty() ? QStringLiteral("not measured") : u.audio);
         text += QStringLiteral("\nPicture check: %1.").arg(u.picture.valid ? pictureText(u.picture) : u.pictureNote.isEmpty() ? pictureText(u.picture) : u.pictureNote);
         if (u.picture.valid && !u.picture.frames.isEmpty()) {
             QStringList at;
