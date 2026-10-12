@@ -6,6 +6,7 @@ Item {
 
     property real position: 0
     property real duration: 0
+    property var spans: []   // [[start, end], …] in seconds: where the library audio is the track's, drawn on the track
     readonly property bool dragging: mouse.pressed
     readonly property bool engaged: mouse.containsMouse || mouse.pressed
 
@@ -43,6 +44,17 @@ Item {
             color: root.engaged ? Theme.accentHi : Theme.accent
             visible: root.duration > 0
             Behavior on color { ColorAnimation { duration: Theme.fast } }
+        }
+        Repeater {
+            model: root.duration > 0 ? root.spans : []
+            Rectangle {
+                required property var modelData
+                x: parent.width * Math.max(0, Math.min(1, modelData[0] / root.duration))
+                width: Math.max(2, parent.width * Math.max(0, Math.min(1, (modelData[1] - modelData[0]) / root.duration)))
+                height: parent.height
+                radius: height / 2
+                color: Qt.rgba(1, 1, 1, 0.22)
+            }
         }
     }
 

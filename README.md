@@ -215,7 +215,13 @@ fits outright, and then waits for you:
   on the chip in the bottom bar, goes on to the next audio the file has and
   round again at the same place: each candidate's that is better than
   YouTube's, then YouTube's own. The chip says which is playing — "Library
-  audio 1/2 (FLAC 24/96)", "YouTube audio" — and carries the key.
+  audio 1/2 (FLAC 24/96)", "YouTube audio" — and carries the key. The change
+  is gapless: every audio track is decoded at once and the chip only changes
+  which one is heard. Where the track's audio does not reach (the video has
+  an intro the track lacks, or runs on after it), the library track carries
+  YouTube's audio instead; there the chip says so ("YouTube audio · library
+  from 0:12") and the key does nothing, and the seek bar shows the stretch
+  the track's audio covers.
 - While the queue is shown, a panel beside the sidebar takes the place of
   the bottom bar's music-file popup. It is about the video that plays, or
   until one does, the first in the queue, and shows one candidate at a

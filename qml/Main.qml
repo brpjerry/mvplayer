@@ -638,7 +638,7 @@ ApplicationWindow {
                 playing: player.current ? player.current.title : null, index: player.index,
                 position: mpv.position, duration: mpv.duration, paused: mpv.paused, active: mpv.active, muted: mpv.muted,
                 hwdec: mpv.hwdec, videoSize: mpv.videoSize.width + "x" + mpv.videoSize.height,
-                audioTrack: mpv.audioTrack, audioTracks: mpv.audioTracks.length,
+                audioTrack: mpv.audioTrack, audioTracks: mpv.audioTracks.length, libraryHere: controlBar.libraryHere, librarySpans: controlBar.libSpans.length,
                 busy: App.busy, scanning: App.scanning, status: App.statusText, counts: App.trackCounts,
                 untracked: App.untrackedCount, autoExpand: App.autoExpand, subtitleOutline: App.subtitleOutline, subtitleShadow: App.subtitleShadow,
                 subtitleLangs: App.subtitleLangs, subtitlesOn: App.subtitlesOn, hasSubtitles: window.mpv.hasSubtitles,

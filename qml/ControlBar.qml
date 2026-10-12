@@ -116,11 +116,62 @@ Rectangle {
         }
         return -1
     }
+    // Where a library audio stream is the track's own audio: the stream
+    // says (the muxer's tag, "segments"), else the library knows the span
+    // of the video's first; empty: not known, taken as everywhere. Outside
+    // it the stream carries the video's own audio, so both tracks are
+    // YouTube's there: the chip says so, and the switch is off.
+    function spansOf(track) {
+        for (let i = 0; i < mpv.audioTracks.length; ++i) {
+            const t = mpv.audioTracks[i]
+            if (t.id === track && t.segments !== undefined && t.segments.length > 0)
+                return t.segments
+        }
+        if (current !== null && current.reviewEnd > 0)
+            return [[current.reviewStart, current.reviewEnd]]
+        return []
+    }
+    readonly property var libSpans: {
+        if (!hasMedia)
+            return []
+        const p = audioAt >= 0 ? audios[audioAt] : null
+        let track = p !== null && p.library ? p.track : -1
+        for (let i = 0; track < 0 && i < audios.length; ++i) {
+            if (audios[i].library)
+                track = audios[i].track
+        }
+        return track < 0 ? [] : spansOf(track)
+    }
+    readonly property bool libraryHere: {
+        if (libSpans.length === 0)
+            return true
+        const pos = mpv.position
+        for (let i = 0; i < libSpans.length; ++i) {
+            if (pos >= libSpans[i][0] - 0.3 && pos <= libSpans[i][1] + 0.3)
+                return true
+        }
+        return false
+    }
+    function mmss(s) {
+        const m = Math.floor(s / 60), r = Math.floor(s % 60)
+        return m + ":" + (r < 10 ? "0" : "") + r
+    }
+    // "from 0:12", "until 3:40": where the library audio is, seen from here.
+    readonly property string libraryWhen: {
+        if (libSpans.length === 0)
+            return ""
+        const first = libSpans[0][0], last = libSpans[libSpans.length - 1][1]
+        if (mpv.position < first)
+            return "from " + mmss(first)
+        if (mpv.position > last)
+            return "until " + mmss(last)
+        return mmss(first) + "–" + mmss(last)
+    }
     // The key that goes on to the next of them, as the chip shows it; the
     // window binds it.
     readonly property string audioKey: "A"
     function switchAudio() {
-        if (!audioSwitch.available)
+        if (!audioSwitch.available || !libraryHere)
             return
         const next = audios[(audioAt + 1) % audios.length]
         mpv.audioTrack = next.track
@@ -383,6 +434,7 @@ Rectangle {
             anchors.bottom: parent.bottom
             position: root.mpv.position
             duration: root.hasMedia ? root.mpv.duration : 0
+            spans: root.audios.length > 1 ? root.libSpans : []
             onSeekRequested: (seconds, exact) => root.mpv.seek(seconds, exact)
         }
         Text {
@@ -419,7 +471,10 @@ Rectangle {
             // which of them plays, "1/2".
             readonly property int libraries: root.audios.length - 1
             readonly property string which: reviewing && libraries > 1 && library ? " " + (root.audioAt + 1) + "/" + libraries : ""
-            readonly property color ink: library ? Theme.accentHi : Theme.textDim
+            // Here both tracks are YouTube's audio: the library's has not
+            // started, or has ended.
+            readonly property bool only: available && !root.libraryHere
+            readonly property color ink: library && !only ? Theme.accentHi : Theme.textDim
             width: available ? chipRow.implicitWidth + 20 : 0
             height: 26
             opacity: available ? 1 : 0
@@ -433,9 +488,9 @@ Rectangle {
                 Rectangle {
                     anchors.fill: parent
                     radius: 13
-                    color: audioSwitch.library ? Theme.accentSoft : Theme.hover
+                    color: audioSwitch.library && !audioSwitch.only ? Theme.accentSoft : Theme.hover
                     border.width: 1
-                    border.color: chipMouse.containsMouse ? Theme.accent : "transparent"
+                    border.color: chipMouse.containsMouse && !audioSwitch.only ? Theme.accent : "transparent"
                     Behavior on color { ColorAnimation { duration: Theme.normal } }
                     Behavior on border.color { ColorAnimation { duration: Theme.fast } }
                 }
@@ -452,7 +507,8 @@ Rectangle {
                                 return root.candidates[p.candidate].audioDetail
                             return root.current && root.current.audioDetail ? root.current.audioDetail : ""
                         }
-                        text: !audioSwitch.library ? "YouTube audio"
+                        text: audioSwitch.only ? "YouTube audio · library " + root.libraryWhen
+                            : !audioSwitch.library ? "YouTube audio"
                             : audioSwitch.reviewing ? "Library audio" + audioSwitch.which + (detail ? " (" + detail + ")" : "")
                             : detail ? detail : "Library audio"
                         color: audioSwitch.ink
@@ -462,6 +518,7 @@ Rectangle {
                     }
                     // The key that changes over
                     Rectangle {
+                        visible: !audioSwitch.only
                         anchors.verticalCenter: parent.verticalCenter
                         width: Math.max(16, keyLabel.implicitWidth + 8)
                         height: 16
@@ -484,11 +541,13 @@ Rectangle {
                 id: chipMouse
                 anchors.fill: parent
                 hoverEnabled: true
-                cursorShape: Qt.PointingHandCursor
+                cursorShape: audioSwitch.only ? Qt.ArrowCursor : Qt.PointingHandCursor
                 onClicked: root.switchAudio()
             }
             Tooltip {
                 text: {
+                    if (audioSwitch.only)
+                        return "Only YouTube's audio here: your library's track covers " + root.mmss(root.libSpans[0][0]) + "–" + root.mmss(root.libSpans[root.libSpans.length - 1][1]) + " of the video"
                     const next = root.audios.length > 0 ? root.audios[(root.audioAt + 1) % root.audios.length] : null
                     const then = next === null ? "" : !next.library ? "YouTube's"
                         : next.candidate >= 0 && audioSwitch.libraries > 1 ? "that of “" + root.candidates[next.candidate].title + "”"

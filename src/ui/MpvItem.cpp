@@ -489,8 +489,95 @@ void MpvItem::setAudioTrack(int id)
 {
     if (!m_core->mpv)
         return;
+    if (m_mixerTracks > 0) {
+        if (id < 1 || id > m_mixerTracks)
+            return;
+        setMixerVolumes(id);
+        if (m_audioTrack != id) {
+            m_audioTrack = id;
+            emit audioTrackChanged();
+        }
+        return;
+    }
     qint64 v = id;
     mpv_set_property_async(m_core->mpv, 0, "aid", MPV_FORMAT_INT64, &v);
+}
+
+int MpvItem::audioTrackCount() const
+{
+    int n = 0;
+    mpv_node node;
+    if (mpv_get_property(m_core->mpv, "track-list", MPV_FORMAT_NODE, &node) < 0)
+        return 0;
+    if (node.format == MPV_FORMAT_NODE_ARRAY) {
+        for (int i = 0; i < node.u.list->num; ++i) {
+            const mpv_node &t = node.u.list->values[i];
+            if (t.format != MPV_FORMAT_NODE_MAP)
+                continue;
+            for (int k = 0; k < t.u.list->num; ++k) {
+                if (QByteArray(t.u.list->keys[k]) == "type" && t.u.list->values[k].format == MPV_FORMAT_STRING
+                    && QByteArray(t.u.list->values[k].u.string) == "audio")
+                    ++n;
+            }
+        }
+    }
+    mpv_free_node_contents(&node);
+    return n;
+}
+
+// Switching mpv's audio track (aid) stops the audio and starts it again on
+// the other, with a gap. Instead every audio track is decoded at once: a
+// complex graph merges them into one stream of 2N channels, and the filter
+// chain splits that back into N stereo pairs, each through a volume filter,
+// and mixes them. The chosen track is the one pair at full volume; a change
+// of track is a command to those filters, which takes effect on the next
+// sample. The chain is addressed as "sw", the pairs as "a1".."aN".
+void MpvItem::setMixer(int tracks, int first)
+{
+    if (tracks < 2 || tracks > 4) {
+        if (m_mixerTracks > 0) {
+            mpv_set_property_string(m_core->mpv, "lavfi-complex", "");
+            mpv_set_property_string(m_core->mpv, "af", "");
+        }
+        m_mixerTracks = 0;
+        return;
+    }
+    // The merged layout and, in its order, the channel each pair goes to:
+    // channelsplit hands them back in that same order, two per track.
+    static const char *const layouts[] = {"", "", "4.0", "6.0", "octagonal"};
+    static const char *const maps[] = {"", "", "0.0-FL|0.1-FR|1.0-FC|1.1-BC", "0.0-FL|0.1-FR|1.0-FC|1.1-BC|2.0-SL|2.1-SR",
+                                       "0.0-FL|0.1-FR|1.0-FC|1.1-BL|2.0-BR|2.1-BC|3.0-SL|3.1-SR"};
+    QStringList graph, merge;
+    for (int i = 1; i <= tracks; ++i) {
+        graph << QStringLiteral("[aid%1]aformat=channel_layouts=stereo[s%1]").arg(i);
+        merge << QStringLiteral("[s%1]").arg(i);
+    }
+    graph << merge.join(QString()) + QStringLiteral("join=inputs=%1:channel_layout=%2:map=%3[ao]").arg(tracks).arg(QLatin1String(layouts[tracks]), QLatin1String(maps[tracks]));
+    QStringList chain, split, mix;
+    for (int i = 0; i < 2 * tracks; ++i)
+        split << QStringLiteral("[c%1]").arg(i);
+    chain << QStringLiteral("channelsplit=channel_layout=%1").arg(QLatin1String(layouts[tracks])) + split.join(QString());
+    for (int i = 1; i <= tracks; ++i) {
+        chain << QStringLiteral("[c%1][c%2]join=inputs=2:channel_layout=stereo[p%3]").arg(2 * (i - 1)).arg(2 * (i - 1) + 1).arg(i);
+        chain << QStringLiteral("[p%1]volume@a%1=%2[q%1]").arg(i).arg(i == first ? 1 : 0);
+        mix << QStringLiteral("[q%1]").arg(i);
+    }
+    chain << mix.join(QString()) + QStringLiteral("amix=inputs=%1:normalize=0").arg(tracks);
+    const QByteArray complexGraph = graph.join(QLatin1Char(';')).toUtf8();
+    const QByteArray af = (QStringLiteral("@sw:lavfi=[") + chain.join(QLatin1Char(';')) + QLatin1Char(']')).toUtf8();
+    mpv_set_property_string(m_core->mpv, "lavfi-complex", complexGraph.constData());
+    mpv_set_property_string(m_core->mpv, "af", af.constData());
+    m_mixerTracks = tracks;
+}
+
+void MpvItem::setMixerVolumes(int track)
+{
+    for (int i = 1; i <= m_mixerTracks; ++i) {
+        const QByteArray value = QByteArray::number(i == track ? 1 : 0);
+        const QByteArray target = QByteArrayLiteral("volume@a") + QByteArray::number(i);
+        const char *cmd[] = {"af-command", "sw", "volume", value.constData(), target.constData(), nullptr};
+        mpv_command_async(m_core->mpv, 0, cmd);
+    }
 }
 
 void MpvItem::setColorSampling(bool on)
@@ -567,7 +654,17 @@ void MpvItem::drainEvents()
             // choice back to automatic when the next file's tracks differ.
             const auto *hook = static_cast<const mpv_event_hook *>(e->data);
             qint64 first = qMax(1, m_firstAudioTrack);
-            mpv_set_property(m_core->mpv, "aid", MPV_FORMAT_INT64, &first);
+            const int tracks = audioTrackCount();
+            setMixer(tracks, int(first));
+            if (m_mixerTracks > 0) {
+                // (The graph names every track; aid is not what plays.)
+                if (m_audioTrack != int(first)) {
+                    m_audioTrack = int(first);
+                    emit audioTrackChanged();
+                }
+            } else {
+                mpv_set_property(m_core->mpv, "aid", MPV_FORMAT_INT64, &first);
+            }
             mpv_hook_continue(m_core->mpv, hook->id);
             break;
         }
@@ -641,6 +738,8 @@ void MpvItem::handleProperty(const mpv_event_property *prop)
             emit mutedChanged();
         }
     } else if (name == "aid") {
+        if (m_mixerTracks > 0)
+            return; // the mixer says which track plays
         m_audioTrack = has && prop->format == MPV_FORMAT_INT64 ? int(*static_cast<qint64 *>(prop->data)) : 0;
         emit audioTrackChanged();
         refreshTracks();
@@ -688,6 +787,21 @@ void MpvItem::refreshTracks()
                         m.insert(QStringLiteral("codec"), QString::fromUtf8(v.u.string));
                     else if (key == "selected" && v.format == MPV_FORMAT_FLAG)
                         m.insert(QStringLiteral("selected"), v.u.flag != 0);
+                    else if (key == "metadata" && v.format == MPV_FORMAT_NODE_MAP) {
+                        // A library audio stream says where it is the track's
+                        // audio (Muxer: MVPLAYER_SEGMENTS "start-end,…", seconds).
+                        for (int j = 0; j < v.u.list->num; ++j) {
+                            if (QByteArray(v.u.list->keys[j]).toUpper() != "MVPLAYER_SEGMENTS" || v.u.list->values[j].format != MPV_FORMAT_STRING)
+                                continue;
+                            QVariantList segments;
+                            for (const QString &span : QString::fromUtf8(v.u.list->values[j].u.string).split(QLatin1Char(','), Qt::SkipEmptyParts)) {
+                                const QStringList ends = span.split(QLatin1Char('-'));
+                                if (ends.size() == 2)
+                                    segments.append(QVariant(QVariantList{ends[0].toDouble(), ends[1].toDouble()}));
+                            }
+                            m.insert(QStringLiteral("segments"), segments);
+                        }
+                    }
                 }
                 if (type == QLatin1String("audio"))
                     tracks.append(m);

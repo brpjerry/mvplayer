@@ -209,6 +209,7 @@ struct Composed {
     int channels = 0;
     bool deep = false; // more than 16 bits to keep
     QString detail;    // e.g. "FLAC 24/48"
+    QString segments;  // where the stream is the track's audio, "start-end,…" in seconds of the video; elsewhere it is the video's own
 };
 
 bool composeLibraryAudio(const Plan &plan, const std::atomic<bool> *cancel, Composed *out, QString *error, ReviewSpan *reviewSpan)
@@ -257,6 +258,10 @@ bool composeLibraryAudio(const Plan &plan, const std::atomic<bool> *cancel, Comp
                 *error = QStringLiteral("cancelled");
             return false;
         }
+        QStringList spans;
+        for (const NativeSegment &s : std::as_const(segs))
+            spans << QStringLiteral("%1-%2").arg(double(s.start) / rate, 0, 'f', 3).arg(double(s.end) / rate, 0, 'f', 3);
+        out->segments = spans.join(QLatin1Char(','));
         if (reviewSpan) {
             reviewSpan->start = double(segs.first().start) / rate;
             reviewSpan->end = double(segs.last().end) / rate;
@@ -338,6 +343,7 @@ bool mux(const Plan &plan, const std::atomic<bool> *cancel, QString *audioDetail
              << QStringLiteral("-disposition:a:0") << QStringLiteral("default")
              << QStringLiteral("-disposition:a:1") << QStringLiteral("0")
              << QStringLiteral("-metadata:s:a:0") << QStringLiteral("title=Library audio")
+             << QStringLiteral("-metadata:s:a:0") << QStringLiteral("MVPLAYER_SEGMENTS=") + lib.segments
              << QStringLiteral("-metadata:s:a:1") << QStringLiteral("title=YouTube audio");
         if (audioDetail)
             *audioDetail = lib.detail;
@@ -381,6 +387,7 @@ bool addLibraryStream(const Plan &plan, const std::atomic<bool> *cancel, QString
     for (int i = 0; i <= n + 1; ++i)
         args << QStringLiteral("-disposition:a:%1").arg(i) << (i == 0 ? QStringLiteral("default") : QStringLiteral("0"));
     args << QStringLiteral("-metadata:s:a:%1").arg(n) << QStringLiteral("title=Library audio")
+         << QStringLiteral("-metadata:s:a:%1").arg(n) << QStringLiteral("MVPLAYER_SEGMENTS=") + lib.segments
          << QStringLiteral("-metadata:s:a:%1").arg(n + 1) << QStringLiteral("title=YouTube audio")
          << QStringLiteral("-f") << QStringLiteral("matroska") << partFile;
     if (audioDetail)

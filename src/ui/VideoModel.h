@@ -40,6 +40,8 @@ public:
         CandidateRole,
         CandidatesRole,
         AdviceRole,        // the judge's advice for the candidate on show (X2)
+        ReviewStartRole,   // of a video with library audio: where in the video the track's audio starts and ends (seconds)
+        ReviewEndRole,
         YtStreamRole,      // which of the file's audio streams is YouTube's, from 0
         SameTitleRole,     // of a video under review: a library video with its title {album, ytTitle}
         OrphanRole,        // a library video that no track in the music folders has
