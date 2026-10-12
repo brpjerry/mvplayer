@@ -132,6 +132,7 @@ AppController::AppController(const AppOptions &options, QObject *parent)
     m_cfg.judgeModel = m_settings->value(QStringLiteral("import/judgeModel"), QStringLiteral("sonnet")).toString();
     if (!Judge::models().contains(m_cfg.judgeModel))
         m_cfg.judgeModel = QStringLiteral("sonnet");
+    m_cfg.judgeThreads = qBound(1, m_settings->value(QStringLiteral("import/judgeThreads"), 1).toInt(), 8);
     m_judgeAlone = m_settings->value(QStringLiteral("judge/alone"), 0).toInt();
     m_judgeLeft = m_settings->value(QStringLiteral("judge/left"), 0).toInt();
     // By default the language the desktop is in.
@@ -430,6 +431,7 @@ void AppController::saveSettings()
     m_settings->setValue(QStringLiteral("import/minSubscribers"), m_minSubscribers);
     m_settings->setValue(QStringLiteral("import/judgeMode"), m_cfg.judgeMode);
     m_settings->setValue(QStringLiteral("import/judgeModel"), m_cfg.judgeModel);
+    m_settings->setValue(QStringLiteral("import/judgeThreads"), m_cfg.judgeThreads);
     m_settings->setValue(QStringLiteral("judge/alone"), m_judgeAlone);
     m_settings->setValue(QStringLiteral("judge/left"), m_judgeLeft);
     m_settings->setValue(QStringLiteral("import/accountOnBotCheck"), m_cfg.accountOnBotCheck);
@@ -1358,6 +1360,18 @@ void AppController::setJudgeModel(const QString &model)
     if (m_manager)
         m_manager->setSettings(m_cfg);
     m_settings->setValue(QStringLiteral("import/judgeModel"), model);
+    emit settingsChanged();
+}
+
+void AppController::setJudgeThreads(int n)
+{
+    n = qBound(1, n, 8);
+    if (n == m_cfg.judgeThreads)
+        return;
+    m_cfg.judgeThreads = n;
+    if (m_manager)
+        m_manager->setSettings(m_cfg);
+    m_settings->setValue(QStringLiteral("import/judgeThreads"), n);
     emit settingsChanged();
 }
 

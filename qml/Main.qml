@@ -657,7 +657,7 @@ ApplicationWindow {
                 panelFile: reviewPanel.file ? reviewPanel.file.path : null, panelYt: reviewPanel.ytTitle,
                 undo: App.undoAvailable, undoLabel: App.undoLabel,
                 settingsOpen: settings.opened, settingsTab: settings.tab,
-                judgeKey: App.judgeKeySet, judgeKeyHint: App.judgeKeyHint, judgeChecking: App.judgeChecking, judgeState: App.judgeState, judgeStatus: App.judgeStatus, adviceLeft: App.adviceLeft,
+                judgeKey: App.judgeKeySet, judgeKeyHint: App.judgeKeyHint, judgeChecking: App.judgeChecking, judgeState: App.judgeState, judgeStatus: App.judgeStatus, adviceLeft: App.adviceLeft, judgeThreads: App.judgeThreads,
                 replacing: App.replacing, replaceStage: App.replaceStage, replaceDialog: replaceDialog.opened, replaceOptions: replaceDialog.options.length, replaceMode: replaceDialog.mode,
                 accent: "" + Theme.accent, accentMode: App.accent, theme: App.themeMode, dark: Theme.dark,
                 systemDark: App.systemDark, bg: "" + Theme.bg, musicDirs: App.musicDirs, frameColor: "" + mpv.frameColor,

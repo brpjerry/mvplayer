@@ -105,6 +105,7 @@ class AppController : public QObject
     // and left for your verdict.
     Q_PROPERTY(QString judgeMode READ judgeMode WRITE setJudgeMode NOTIFY settingsChanged)
     Q_PROPERTY(QString judgeModel READ judgeModel WRITE setJudgeModel NOTIFY settingsChanged)
+    Q_PROPERTY(int judgeThreads READ judgeThreads WRITE setJudgeThreads NOTIFY settingsChanged)
     Q_PROPERTY(QVariantList judgeModels READ judgeModels CONSTANT)
     Q_PROPERTY(int judgeAlone READ judgeAlone NOTIFY judgeChanged)
     Q_PROPERTY(int judgeLeft READ judgeLeft NOTIFY judgeChanged)
@@ -248,6 +249,8 @@ public:
     QString judgeMode() const { return m_cfg.judgeMode; }
     void setJudgeMode(const QString &mode);
     QString judgeModel() const { return m_cfg.judgeModel; }
+    int judgeThreads() const { return m_cfg.judgeThreads; }
+    void setJudgeThreads(int n);
     void setJudgeModel(const QString &model);
     QVariantList judgeModels() const;
     int judgeAlone() const { return m_judgeAlone; }

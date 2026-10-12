@@ -544,6 +544,11 @@ words it is given and how it measured against hand verdicts. Two modes:
   told how a talk-titled track sounds; turning judge mode on asks it once
   about every track the rules had skipped, and what it skips stays skipped
   until the file's tags change.
+- In advice mode, "Review all" above the queue asks about every card at
+  once, each card wears the answer for its candidate on show, and "Accept
+  all" carries out the answers the judge is at least 85% sure of as
+  verdicts, after saying what it will do. How many questions run at once is
+  a setting on the Judge tab (one unless you raise it).
 
 The model is yours to pick: Haiku 5.5, Sonnet 5.5 (the default) or Opus 5.5.
 Every answer is logged as a `judge` event in the import log, with what it cost.

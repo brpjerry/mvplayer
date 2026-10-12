@@ -1428,6 +1428,31 @@ Popup {
                             }
                         }
                         Text {
+                            topPadding: 8
+                            text: "How many questions at once"
+                            color: Theme.text
+                            font.pixelSize: 14
+                        }
+                        Text {
+                            width: parent.width
+                            text: "For the advice on cards (\"Review all\" and the panel's own questions). A question is half waiting for the API and half this machine's work, so three at once run about three times as fast; the key's rate limit is the ceiling. One unless you raise it."
+                            color: Theme.textDim
+                            font.pixelSize: 12
+                            wrapMode: Text.WordWrap
+                        }
+                        Flow {
+                            width: parent.width
+                            spacing: 10
+                            Repeater {
+                                model: [1, 2, 3, 4, 6, 8]
+                                FlatButton {
+                                    text: "" + modelData
+                                    primary: App.judgeThreads === modelData
+                                    onClicked: App.judgeThreads = modelData
+                                }
+                            }
+                        }
+                        Text {
                             visible: App.judgeAlone + App.judgeLeft > 0
                             text: "In judge mode so far: " + App.judgeAlone + (App.judgeAlone === 1 ? " lookup" : " lookups") + " settled by the judge alone, " + App.judgeLeft + " left for your verdict."
                             color: Theme.textDim

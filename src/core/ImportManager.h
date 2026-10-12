@@ -38,6 +38,7 @@ struct ImportSettings {
     // account's key is kept.
     QString judgeMode = QStringLiteral("off");
     QString judgeModel = QStringLiteral("sonnet");
+    int judgeThreads = 1; // advice questions at once (X2): 1–8
     QString judgeKeyFile;
 };
 

@@ -350,7 +350,7 @@ ImportManager::ImportManager(Database *db, QObject *parent)
     m_replacePool.setMaxThreadCount(1);
     m_verdictPool.setMaxThreadCount(1);
     m_previewPool.setMaxThreadCount(2);
-    m_judgePool.setMaxThreadCount(1);
+    m_judgePool.setMaxThreadCount(qBound(1, m_settings.judgeThreads, 8));
     m_jobPool.setMaxThreadCount(2);
 
     m_debounce.setSingleShot(true);
@@ -396,6 +396,7 @@ void ImportManager::setSettings(const ImportSettings &s)
     QMutexLocker lock(&m_mutex);
     m_settings = s;
     m_jobPool.setMaxThreadCount(qBound(1, s.concurrency, 8));
+    m_judgePool.setMaxThreadCount(qBound(1, s.judgeThreads, 8));
     // Q2: with the judge running the lookups, A2–A4 do not skip a track; the
     // next scan unskips what they had.
     Matcher::setJudgeRunsLookups(s.judgeMode == QLatin1String("judge"));
