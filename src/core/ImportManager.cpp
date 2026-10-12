@@ -3271,7 +3271,9 @@ void ImportManager::runJob(qint64 trackId, const ImportSettings &cfg)
     // subscribers the channel has. One request, nothing downloaded.
     enum class Page { Known, Postponed, Cancelled };
     const auto knowChannel = [&](VideoInfo &v) {
-        if (v.ytChannelSubs != -2)
+        // (The judge is told the upload's description too, V1: a video from
+        // before the library kept it has its page read once for it.)
+        if (v.ytChannelSubs != -2 && (!judging || !v.ytDescription.isEmpty()))
             return Page::Known;
         QJsonObject page;
         QString why;
