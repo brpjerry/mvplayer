@@ -3133,10 +3133,29 @@ void ImportManager::runJob(qint64 trackId, const ImportSettings &cfg)
         m_failStreak = 0;
         logQueries.append(QJsonObject{{QStringLiteral("q"), query}, {QStringLiteral("results"), found.size()}});
         if (found.isEmpty()) {
-            // B5 (S1 in judge mode): an empty answer is how YouTube refuses
-            // a guest it has had enough of; it is not "no video". The query
-            // is asked again after the pause.
-            const QString reason = QStringLiteral("YouTube answered the search “%1” with nothing: refused, or nothing to find").arg(query);
+            // An empty answer is how YouTube refuses a guest it has had
+            // enough of; but a query can match nothing too. The probe tells
+            // the two apart: a search whose answer is empty only when
+            // YouTube refuses, asked fresh, its results not looked at.
+            QVector<YtCandidate> probe;
+            QString probeError;
+            ++nSearch;
+            const bool answered = yt.search(QStringLiteral("official music video"), 10, &probe, &probeError, true);
+            if (m_cancel)
+                return cleanup();
+            logQueries.append(answered ? QJsonObject{{QStringLiteral("probe"), true}, {QStringLiteral("results"), probe.size()}}
+                                       : QJsonObject{{QStringLiteral("probe"), true}, {QStringLiteral("error"), probeError}});
+            if (!answered && noteFailure(probeError))
+                return postpone();
+            if (answered && !probe.isEmpty()) {
+                // B6 (S5 in judge mode): nothing matched the query. Asked
+                // again it would find nothing again: the next query.
+                searched = true;
+                continue;
+            }
+            // B5 (S1 in judge mode): refused; it is not "no video". The
+            // query is asked again after the pause.
+            const QString reason = QStringLiteral("YouTube answered the search “%1” with nothing, and the probe after it likewise: refused").arg(query);
             if (!m_blocked.exchange(true))
                 QMetaObject::invokeMethod(this, [this, reason] { tripBreaker(reason); }, Qt::QueuedConnection);
             return postpone();
@@ -3362,7 +3381,8 @@ void ImportManager::runJob(qint64 trackId, const ImportSettings &cfg)
         finish(QStringLiteral("not_found"), 0,
                (judging ? QStringLiteral("the judge found nothing that looks like the track's official video among %1 results%2")
                               .arg(candidates.size()).arg(pickReason.isEmpty() ? QString() : QStringLiteral(": ") + pickReason)
-                        : QStringLiteral("none of %1 search results looked like an official video").arg(candidates.size()))
+                        : candidates.isEmpty() ? QStringLiteral("the search matched nothing (YouTube answered the probe, B6)")
+                                               : QStringLiteral("none of %1 search results looked like an official video").arg(candidates.size()))
                    + (priorRejected ? QStringLiteral("; ") + reasons.join(QStringLiteral("; ")) : QString()));
         return;
     }

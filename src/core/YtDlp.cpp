@@ -308,12 +308,12 @@ QString YtDlp::url(const QString &id)
     return QStringLiteral("https://www.youtube.com/watch?v=") + id;
 }
 
-bool YtDlp::search(const QString &query, int count, QVector<YtCandidate> *out, QString *error)
+bool YtDlp::search(const QString &query, int count, QVector<YtCandidate> *out, QString *error, bool fresh)
 {
     // The same query comes up for every file of a song.
     QString cached;
     QByteArray json;
-    if (!m_cacheDir.isEmpty()) {
+    if (!m_cacheDir.isEmpty() && !fresh) {
         const QByteArray key = QCryptographicHash::hash(QStringLiteral("%1:%2").arg(count).arg(query).toUtf8(), QCryptographicHash::Sha1).toHex();
         cached = QDir(m_cacheDir).filePath(QStringLiteral("search/%1.json").arg(QString::fromLatin1(key)));
         QFile f(cached);

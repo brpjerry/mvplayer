@@ -175,21 +175,48 @@ echo "$OUT" | grep -E "paused|resuming|^done:"
 [[ $(echo "$OUT" | grep -c "paused for 0:01") -eq 1 && $(echo "$OUT" | grep -c "paused for 0:02") -eq 1 ]]
 [[ "$OUT" == *"done: 0 videos; tracks: not_found=2"* ]]
 grep -q '"outcome":"postponed"' "$WORK/mvlib/.mvplayer/import-log.jsonl"
-# B5: a search answered with nothing at all is a refusal, not "no video":
-# the lookup is postponed as for a pause, and the query asked again after
-# it. Here the second answer has an upload (nothing usable, C2).
-cat > "$WORK/fake-ytdlp" <<FAKE
+# B5: a search answered with nothing at all, and the probe after it
+# likewise, is a refusal, not "no video": the lookup is postponed as for a
+# pause, and the query asked again after it. Here the third answer has an
+# upload (nothing usable, C2).
+cat > "$WORK/fake-b5" <<FAKE
 #!/bin/sh
-n=\$(cat "$WORK/calls" 2>/dev/null || echo 0); n=\$((n+1)); echo \$n > "$WORK/calls"
-if [ \$n -le 1 ]; then echo '{"entries": []}'; exit 0; fi
+n=\$(cat "$WORK/calls-b5" 2>/dev/null || echo 0); n=\$((n+1)); echo \$n > "$WORK/calls-b5"
+if [ \$n -le 2 ]; then echo '{"entries": []}'; exit 0; fi
 echo '{"entries": [{"id": "tpc", "ie_key": "Youtube", "title": "Song", "channel": "A - Topic", "duration": 40, "view_count": 1000}]}'
 FAKE
-rm -f "$WORK/calls"
-OUT=$(MVPLAYER_YTDLP="$FAKE" MVPLAYER_PAUSE_SECS=1 timeout 60 "$BUILD/mvplayer-import" \
-    --music-dir "$WORK/lib" --mv-dir "$WORK/mvlib-b5" 2>&1)
+chmod +x "$WORK/fake-b5"
+FAKE5="$WORK/fake-b5"
+if [[ -n "$EXE" ]]; then
+    printf '@"%s" "%%~dp0fake-b5" %%*\r\n' "$(cygpath -w "$(command -v sh)")" > "$WORK/fake-b5.cmd"
+    FAKE5="$WORK/fake-b5.cmd"
+fi
+OUT=$(MVPLAYER_YTDLP="$FAKE5" MVPLAYER_PAUSE_SECS=1 timeout 60 "$BUILD/mvplayer-import" \
+    --music-dir "$WORK/lib" --mv-dir "$WORK/mvlib-b5" --jobs 1 2>&1)
 echo "$OUT" | grep -E "paused|resuming|^done:" | cut -c1-110
-[[ "$OUT" == *"paused for 0:01: YouTube answered the search"* && "$OUT" == *"done: 0 videos; tracks: not_found=2"* ]]
-grep -q '"results":0' "$WORK/mvlib-b5/.mvplayer/import-log.jsonl"
+[[ "$OUT" == *"paused for 0:01: YouTube answered the search"*"and the probe after it likewise"* && "$OUT" == *"done: 0 videos; tracks: not_found=2"* ]]
+grep -q '"probe":true,"results":0' "$WORK/mvlib-b5/.mvplayer/import-log.jsonl"
+# B6: the probe is answered: the query matched nothing, and counts as
+# answered. Every query of both tracks does here, and the probe is asked
+# fresh each time, never from the cache.
+cat > "$WORK/fake-b6" <<FAKE
+#!/bin/sh
+echo "\$*" >> "$WORK/probe-args"
+case "\$*" in *"official music video"*) echo '{"entries": [{"id": "any", "ie_key": "Youtube", "title": "Any", "channel": "Anyone", "duration": 200, "view_count": 1}]}' ;;
+*) echo '{"entries": []}' ;; esac
+FAKE
+chmod +x "$WORK/fake-b6"
+FAKE6="$WORK/fake-b6"
+if [[ -n "$EXE" ]]; then
+    printf '@"%s" "%%~dp0fake-b6" %%*\r\n' "$(cygpath -w "$(command -v sh)")" > "$WORK/fake-b6.cmd"
+    FAKE6="$WORK/fake-b6.cmd"
+fi
+rm -f "$WORK/probe-args"
+OUT=$(MVPLAYER_YTDLP="$FAKE6" MVPLAYER_PAUSE_SECS=1 timeout 60 "$BUILD/mvplayer-import" \
+    --music-dir "$WORK/lib" --mv-dir "$WORK/mvlib-b6" --jobs 1 2>&1)
+echo "$OUT" | grep -E "paused|^\[import\] A|^done:" | cut -c1-110
+[[ "$OUT" != *"paused"* && "$OUT" == *"the search matched nothing (YouTube answered the probe, B6)"* && "$OUT" == *"done: 0 videos; tracks: not_found=2"* ]]
+[[ $(grep -c "official music video" "$WORK/probe-args") -ge 2 ]]
 grep -q '"event":"paused"' "$WORK/mvlib/.mvplayer/import-log.jsonl"
 
 echo "== moved library"

@@ -58,8 +58,9 @@ public:
     // folder is under `maxBytes`. For when nothing is being imported.
     static void pruneCache(const QString &dir, qint64 maxBytes, int maxAgeDays);
 
-    // Lists the first `count` YouTube results for `query`.
-    bool search(const QString &query, int count, QVector<YtCandidate> *out, QString *error);
+    // Lists the first `count` YouTube results for `query`. `fresh` asks
+    // YouTube whatever the cache has (the probe, B5).
+    bool search(const QString &query, int count, QVector<YtCandidate> *out, QString *error, bool fresh = false);
 
     // Downloads the best audio-only stream. `info` receives yt-dlp's metadata.
     // `premium` asks with the account, for the formats only it is offered.
