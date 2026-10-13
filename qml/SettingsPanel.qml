@@ -1112,6 +1112,53 @@ Popup {
 
                     Divider {}
 
+                    // Keeping everything a lookup touches, for a replay (README).
+                    Item {
+                        width: parent.width
+                        height: keepText.implicitHeight + 24
+                        Column {
+                            id: keepText
+                            anchors.left: parent.left
+                            anchors.right: keepSwitch.left
+                            anchors.rightMargin: 20
+                            anchors.verticalCenter: parent.verticalCenter
+                            spacing: 3
+                            Text {
+                                text: "Keep everything for a replay"
+                                color: Theme.text
+                                font.pixelSize: 14
+                            }
+                            Text {
+                                width: parent.width
+                                text: "Every search YouTube answers, every page, audio, preview and video a lookup brings, and every question to the judge with its answer are kept for good under the videos folder (.mvplayer/capture), so that a lookup can be run again later exactly as it went, or with new words for the judge. Takes room: tens of megabytes a lookup."
+                                color: Theme.textFaint
+                                font.pixelSize: 12
+                                wrapMode: Text.WordWrap
+                            }
+                            Text {
+                                id: captureSize
+                                width: parent.width
+                                function refresh() { text = "Kept so far: " + App.captureSizeText() }
+                                Component.onCompleted: refresh()
+                                color: Theme.textFaint
+                                font.pixelSize: 12
+                                Connections {
+                                    target: App
+                                    function onSettingsChanged() { captureSize.refresh() }
+                                }
+                            }
+                        }
+                        FlatSwitch {
+                            id: keepSwitch
+                            anchors.right: parent.right
+                            anchors.verticalCenter: parent.verticalCenter
+                            checked: App.keepEverything
+                            onToggled: (c) => App.keepEverything = c
+                        }
+                    }
+
+                    Divider {}
+
                     // YouTube Premium: the account's cookies bring audio at a higher bitrate.
                     Item {
                         width: parent.width
@@ -1352,6 +1399,113 @@ Popup {
                                 enabled: keyField.text.length > 0
                                 onClicked: keyField.store()
                             }
+                        }
+                    }
+
+                    Divider {}
+
+                    // What the judge does (docs/import-rules-judge.html, X4):
+                    // nothing, advice on cards under review, or the lookup itself.
+                    Column {
+                        width: parent.width
+                        spacing: 8
+                        Text {
+                            text: "What the judge does"
+                            color: Theme.text
+                            font.pixelSize: 14
+                        }
+                        Text {
+                            width: parent.width
+                            text: App.judgeMode === "judge"
+                                ? "Judge: it runs each lookup — writes the search, picks what to listen to, and gives the verdict. A verdict it is at least 85% sure of stands by itself; anything less, a cut, an interrupted video or one the audio check doubts is left for you, with its advice on the card."
+                                : App.judgeMode === "advice"
+                                ? "Advice: lookups run by the rules as before; each card under review shows whether the judge would keep the video for the candidate on show, and how sure it is. Nothing is decided by it."
+                                : "Off: the rules decide, and cards carry no advice."
+                            color: Theme.textDim
+                            font.pixelSize: 12
+                            wrapMode: Text.WordWrap
+                        }
+                        Row {
+                            spacing: 10
+                            Repeater {
+                                model: [{ key: "off", label: "Off" }, { key: "advice", label: "Advice" }, { key: "judge", label: "Judge" }]
+                                FlatButton {
+                                    text: modelData.label
+                                    primary: App.judgeMode === modelData.key
+                                    enabled: App.judgeKeySet || modelData.key === "off"
+                                    onClicked: App.judgeMode = modelData.key
+                                }
+                            }
+                        }
+                        Text {
+                            visible: !App.judgeKeySet
+                            text: "Add a key first."
+                            color: Theme.textFaint
+                            font.pixelSize: 12
+                        }
+                    }
+
+                    Divider {}
+
+                    Column {
+                        width: parent.width
+                        spacing: 8
+                        Text {
+                            text: "Which model"
+                            color: Theme.text
+                            font.pixelSize: 14
+                        }
+                        Text {
+                            width: parent.width
+                            text: "Sonnet 5.5 agreed with your own verdicts on 87% of the review queue it was measured on, Opus 5.5 on 89%, Haiku 5.5 on 73%; what each costs is the price of a verdict with four uploads and their frames."
+                            color: Theme.textDim
+                            font.pixelSize: 12
+                            wrapMode: Text.WordWrap
+                        }
+                        Flow {
+                            width: parent.width
+                            spacing: 10
+                            Repeater {
+                                model: App.judgeModels
+                                FlatButton {
+                                    text: modelData.label + " · " + modelData.cost
+                                    primary: App.judgeModel === modelData.name
+                                    onClicked: App.judgeModel = modelData.name
+                                }
+                            }
+                        }
+                        Text {
+                            topPadding: 8
+                            text: "How many questions at once"
+                            color: Theme.text
+                            font.pixelSize: 14
+                        }
+                        Text {
+                            width: parent.width
+                            text: "For the advice on cards (\"Review all\" and the panel's own questions). A question is half waiting for the API and half this machine's work, so three at once run about three times as fast; the key's rate limit is the ceiling. One unless you raise it."
+                            color: Theme.textDim
+                            font.pixelSize: 12
+                            wrapMode: Text.WordWrap
+                        }
+                        Flow {
+                            width: parent.width
+                            spacing: 10
+                            Repeater {
+                                model: [1, 2, 3, 4, 6, 8]
+                                FlatButton {
+                                    text: "" + modelData
+                                    primary: App.judgeThreads === modelData
+                                    onClicked: App.judgeThreads = modelData
+                                }
+                            }
+                        }
+                        Text {
+                            visible: App.judgeAlone + App.judgeLeft > 0
+                            text: "In judge mode so far: " + App.judgeAlone + (App.judgeAlone === 1 ? " lookup" : " lookups") + " settled by the judge alone, " + App.judgeLeft + " left for your verdict."
+                            color: Theme.textDim
+                            font.pixelSize: 12
+                            wrapMode: Text.WordWrap
+                            width: parent.width
                         }
                     }
                     Item { width: 1; height: 8 }

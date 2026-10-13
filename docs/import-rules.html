@@ -179,6 +179,7 @@ del { background: var(--bad-soft); color: var(--bad); text-decoration: line-thro
   <h1>MV Player import rules</h1>
   <p>How a track in the music folders comes to have a music video, to wait for your verdict on one, or to have none. One decision tree per stage of a lookup. This page is the reference, and a rule changes here first. A change is proposed in a copy of this page, additions in green and removals in red; once it is approved the marks come off, it becomes this page, and the code in <code>src/core</code> follows. Where the two disagree, that is a bug in one of them.</p>
   <p class="proposal" hidden>Proposed changes to the rules: <ins>additions</ins> and <del>removals</del>. Not approved yet; the code has not changed.</p>
+  <p class="lede">These are the rules in <b>rules mode</b>. With the judge on (Settings → Judge), <a href="import-rules-judge.html">its own page</a> says what runs the lookup in its place (judge mode) or what the advice on a card is (advice mode); what stays of this page is listed there.</p>
   <div class="stamp">Transcribed from the code on 2026-10-11 · every rule names where it lives · ids (A2, D5.2) are stable, for pointing at</div>
   <div class="legend" aria-label="Legend">
     <span><span class="q">A question</span> its answers hang below</span>
@@ -269,7 +270,11 @@ del { background: var(--bad-soft); color: var(--bad); text-decoration: line-thro
           <span class="why">Usable: not dropped on sight, and it looks official (C7). Results of a later query rank two places below where YouTube put them.</span></div></li>
         <li id="B2"><div class="row"><a class="id" href="#B2">B2</a><span class="when">YouTube refuses the query</span><span class="out later">pause: I5</span></div></li>
         <li id="B3"><div class="row"><a class="id" href="#B3">B3</a><span class="when">All four asked, none could be answered</span><span class="out later">failed: A7</span></div></li>
-        <li id="B4"><div class="row"><a class="id" href="#B4">B4</a><span class="when">All four asked, nothing usable</span><span class="out none">no video: A6</span>
+        <li id="B5"><div class="row"><a class="id" href="#B5">B5</a><span class="when">A query YouTube answers with nothing at all, and the probe after it likewise</span><span class="out later">pause: I5</span>
+          <span class="why">An empty answer to a guest is how YouTube refuses one it has had enough of; it is not "no video". After about a hundred searches in a few minutes it answers every query so for an hour or more, and 143 tracks in one library have "none of 0 search results" to show for it. The query is asked again after the pause. But a query can match nothing too: a title tag with its first character missing ("ラネタリー・メッセージ"), a live tour's name in brackets. The probe tells the two apart: a search for <i>official music video</i>, asked fresh (never answered from the cache), whose answer is empty only when YouTube refuses. Its results are not looked at.</span></div></li>
+        <li id="B6"><div class="row"><a class="id" href="#B6">B6</a><span class="when">A query YouTube answers with nothing at all, and the probe after it is answered</span><span class="out go">the query counts as answered; the next query</span>
+          <span class="why">Nothing matched it. Asked again it would find nothing again.</span></div></li>
+        <li id="B4"><div class="row"><a class="id" href="#B4">B4</a><span class="when">All four asked, nothing usable (and at least one was answered, B5)</span><span class="out none">no video: A6</span>
           <span class="why">"None of N search results looked like an official video."</span></div></li>
       </ul>
     </li>
@@ -378,7 +383,7 @@ del { background: var(--bad-soft); color: var(--bad); text-decoration: line-thro
         <li id="D1.3"><div class="row"><a class="id" href="#D1.3">D1.3</a><span class="when">It cannot be downloaded for another reason</span><span class="out later">undecided: counts at E6</span>
           <span class="why">Tried once more first (I3). Audio that arrives and cannot be decoded is passed over.</span></div></li>
         <li id="D1.12"><div class="row"><a class="id" href="#D1.12">D1.12</a><span class="when">Its channel is a small one, as <a href="#D7">D7</a> has it</span><span class="out no">dropped: a small channel</span>
-          <span class="why">Known now: the upload's page came with its audio. Nothing more of it is fetched, and it is not listened to.</span></div></li>
+          <span class="why">Known now: the upload's page came with its audio. Nothing more of it is fetched, and it is not listened to. What the page says of the channel, and the first 600 characters of the upload's description, are kept with the video for the judge (judge page, V1).</span></div></li>
         <li id="D1.4"><div class="row"><a class="id" href="#D1.4">D1.4</a><span class="when">It is not the song (<a href="#R0">R0</a>)</span><span class="out no">different</span>
           <span class="why">Not this song; or the track is only part of this video; or only part of the track is in it.</span></div></li>
         <li id="D1.5"><div class="row"><a class="id" href="#D1.5">D1.5</a><span class="q">Is the track the better audio? (<a href="#R6">R6</a>)</span></div>

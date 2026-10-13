@@ -188,10 +188,14 @@ Result scan(const QStringList &rootsIn, Database &db, const std::atomic<bool> *c
                     continue;
                 }
                 // Skipped for its title or its length by a rule that has
-                // changed since (a "TV size" track): looked up after all.
-                // Talk between songs is skipped by its sound as well, which
-                // the lookup settles.
-                if (old->state == QLatin1String("skipped") && !Matcher::isNonMvTrack(*old) && !Matcher::isTalkTitle(old->title)) {
+                // changed since (a "TV size" track): looked up after all
+                // (A9). Talk between songs is skipped by its sound as well,
+                // which the lookup settles. In judge mode no rule skips, so
+                // every rule's skip is asked once (Q5); the judge's own
+                // skips stand until the tags change (Q4).
+                const bool judged = old->message.startsWith(QLatin1String("the judge"));
+                if (old->state == QLatin1String("skipped") && !judged && !Matcher::isNonMvTrack(*old)
+                    && (Matcher::judgeRunsLookups() || !Matcher::isTalkTitle(old->title))) {
                     TrackInfo t = *old;
                     t.state = QStringLiteral("pending");
                     t.message.clear();

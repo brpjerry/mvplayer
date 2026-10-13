@@ -16,6 +16,7 @@ Item {
     }
     signal backRequested()
     signal sectionRequested(string section) // library | review | orphans
+    signal acceptJudgedRequested() // "Accept all" confirmed (import-rules-judge X4)
 
     implicitHeight: 64
 
@@ -173,6 +174,58 @@ Item {
         anchors.rightMargin: windowControls.visible ? 14 : 24
         anchors.verticalCenter: parent.verticalCenter
         spacing: 8
+
+        // Advice mode: the judge's answer for every card at once (X2), and
+        // its confident answers carried out as verdicts, once confirmed (X4).
+        readonly property bool adviceTools: App.videos.section === "review" && App.judgeMode === "advice" && App.reviewCount > 0
+        property var judgePlan: null // {accept, reject} while "Accept all" waits for a yes
+        FlatButton {
+            visible: tools.adviceTools && tools.judgePlan === null
+            anchors.verticalCenter: parent.verticalCenter
+            icon: Icons.review
+            text: App.adviceLeft > 0 ? "Reviewing · " + App.adviceLeft + " left" : "Review all"
+            enabled: App.adviceLeft === 0
+            opacity: enabled ? 1 : 0.6
+            onClicked: App.askJudgeAll()
+        }
+        FlatButton {
+            id: acceptAll
+            visible: tools.adviceTools && tools.judgePlan === null
+            anchors.verticalCenter: parent.verticalCenter
+            icon: Icons.check
+            text: nothing.running ? "Nothing the judge is sure of" : "Accept all"
+            enabled: App.adviceLeft === 0 && !nothing.running
+            opacity: enabled ? 1 : 0.6
+            onClicked: {
+                const plan = App.judgePlan()
+                if (plan.accept + plan.reject === 0)
+                    nothing.restart()
+                else
+                    tools.judgePlan = plan
+            }
+            Timer { id: nothing; interval: 2500 }
+        }
+        Text {
+            visible: tools.judgePlan !== null
+            anchors.verticalCenter: parent.verticalCenter
+            text: tools.judgePlan === null ? "" : "Accept " + tools.judgePlan.accept + " · reject " + tools.judgePlan.reject + "?"
+            color: Theme.text
+            font.pixelSize: 12
+            font.weight: Font.DemiBold
+        }
+        FlatButton {
+            visible: tools.judgePlan !== null
+            anchors.verticalCenter: parent.verticalCenter
+            primary: true
+            text: "Go"
+            onClicked: { tools.judgePlan = null; root.acceptJudgedRequested() }
+        }
+        FlatButton {
+            visible: tools.judgePlan !== null
+            anchors.verticalCenter: parent.verticalCenter
+            text: "Cancel"
+            onClicked: tools.judgePlan = null
+        }
 
         ImportPill {
             id: pill

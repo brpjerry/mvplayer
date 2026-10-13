@@ -73,6 +73,14 @@ ApplicationWindow {
     // An accepted video leaves the review list; it stops rather than play on
     // out of sight, and its file is tidied up meanwhile. Among the orphans
     // the verdict is on an orphan, and a kept one leaves that list alike.
+    // "Accept all" (X4): the judge's confident answers as verdicts. The
+    // playing video may be among them.
+    function acceptJudged() {
+        if (player.current && player.current.review === true)
+            player.stop()
+        App.acceptJudged()
+    }
+
     function approveVideo(id) {
         if (player.current && player.current.videoId === id)
             player.stop()
@@ -314,6 +322,7 @@ ApplicationWindow {
                 current: player.current
                 onBackRequested: window.showGrid()
                 onSectionRequested: (section) => window.showSection(section)
+                onAcceptJudgedRequested: window.acceptJudged()
                 onSearchTextChanged: {
                     App.videos.searchText = searchText
                     if (searchText.length > 0 && window.view === "player")
@@ -525,6 +534,8 @@ ApplicationWindow {
         // The Claude API key for judging: judge-key <key>, judge-key (removes it), judge-check
         case "judge-key": return (arg === "" ? (App.removeJudgeKey(), "") : App.setJudgeKey(arg)) || "ok"
         case "judge-check": App.checkJudgeKey(); return "ok"
+        case "review-all": App.askJudgeAll(); return "ok" // advice mode: the judge on every card
+        case "accept-all": if (arg === "go") { window.acceptJudged(); return "ok" } return JSON.stringify(App.judgePlan()) // X4: what it would do, or do it
         case "retry": App.retryUnmatched(); return "ok"
         case "rescan": App.rescan(); return "ok"
         case "cookies": return (arg === "" ? (App.removeCookies(), "") : App.importCookies(arg)) || "ok"
@@ -627,7 +638,7 @@ ApplicationWindow {
                 playing: player.current ? player.current.title : null, index: player.index,
                 position: mpv.position, duration: mpv.duration, paused: mpv.paused, active: mpv.active, muted: mpv.muted,
                 hwdec: mpv.hwdec, videoSize: mpv.videoSize.width + "x" + mpv.videoSize.height,
-                audioTrack: mpv.audioTrack, audioTracks: mpv.audioTracks.length,
+                audioTrack: mpv.audioTrack, audioTracks: mpv.audioTracks.length, libraryHere: controlBar.libraryHere, librarySpans: controlBar.libSpans.length,
                 busy: App.busy, scanning: App.scanning, status: App.statusText, counts: App.trackCounts,
                 untracked: App.untrackedCount, autoExpand: App.autoExpand, subtitleOutline: App.subtitleOutline, subtitleShadow: App.subtitleShadow,
                 subtitleLangs: App.subtitleLangs, subtitlesOn: App.subtitlesOn, hasSubtitles: window.mpv.hasSubtitles,
@@ -646,7 +657,7 @@ ApplicationWindow {
                 panelFile: reviewPanel.file ? reviewPanel.file.path : null, panelYt: reviewPanel.ytTitle,
                 undo: App.undoAvailable, undoLabel: App.undoLabel,
                 settingsOpen: settings.opened, settingsTab: settings.tab,
-                judgeKey: App.judgeKeySet, judgeKeyHint: App.judgeKeyHint, judgeChecking: App.judgeChecking, judgeState: App.judgeState, judgeStatus: App.judgeStatus,
+                judgeKey: App.judgeKeySet, judgeKeyHint: App.judgeKeyHint, judgeChecking: App.judgeChecking, judgeState: App.judgeState, judgeStatus: App.judgeStatus, adviceLeft: App.adviceLeft, judgeThreads: App.judgeThreads, keepEverything: App.keepEverything,
                 replacing: App.replacing, replaceStage: App.replaceStage, replaceDialog: replaceDialog.opened, replaceOptions: replaceDialog.options.length, replaceMode: replaceDialog.mode,
                 accent: "" + Theme.accent, accentMode: App.accent, theme: App.themeMode, dark: Theme.dark,
                 systemDark: App.systemDark, bg: "" + Theme.bg, musicDirs: App.musicDirs, frameColor: "" + mpv.frameColor,

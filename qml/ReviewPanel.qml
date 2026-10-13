@@ -220,6 +220,111 @@ Rectangle {
                     }
                 }
             }
+            // The judge's advice on this candidate (docs/import-rules-judge.html,
+            // X2): keep, not this one, or unsure, with how sure it is, and
+            // under the chip what it made of the upload, in its words. In
+            // advice mode it is asked when the card first shows.
+            Item {
+                id: advice
+                property var answer: ({ asked: false })
+                readonly property bool unsure: answer.asked && !answer.error && answer.probability > 0.4 && answer.probability < 0.6
+                readonly property int percent: answer.asked ? Math.round((answer.keep ? answer.probability : 1 - answer.probability) * 100) : 0
+                function refresh() {
+                    if (root.videoId < 0 || root.candidate === null || App.judgeMode === "off") {
+                        answer = { asked: false }
+                        return
+                    }
+                    answer = App.judgeAdvice(root.videoId, root.candidate.trackId)
+                    if (!answer.asked && App.judgeMode === "advice")
+                        App.askJudge(root.videoId, root.candidate.trackId, false)
+                }
+                Connections {
+                    target: App
+                    function onAdviceChanged(videoId) { if (videoId === root.videoId) advice.refresh() }
+                    function onSettingsChanged() { advice.refresh() }
+                }
+                Connections {
+                    target: root
+                    function onCandidateChanged() { advice.refresh() }
+                }
+                Component.onCompleted: refresh()
+                visible: App.judgeMode !== "off" && root.videoId >= 0
+                width: parent.width
+                height: visible ? (adviceDetails.visible ? 24 + adviceDetails.implicitHeight : 22) : 0
+                Rectangle {
+                    id: adviceChip
+                    anchors.left: parent.left
+                    anchors.top: parent.top
+                    anchors.topMargin: 2
+                    width: adviceText.implicitWidth + 14
+                    height: 18
+                    radius: 9
+                    color: !advice.answer.asked || advice.answer.error ? Theme.raised
+                        : advice.unsure ? Theme.raised
+                        : advice.answer.keep ? Theme.accentSoft : Qt.rgba(1, 0.36, 0.36, 0.18)
+                    Text {
+                        id: adviceText
+                        anchors.centerIn: parent
+                        text: !advice.answer.asked ? "Judge: asking…"
+                            : advice.answer.error ? "Judge: could not answer"
+                            : advice.unsure ? "Judge: unsure"
+                            : (advice.answer.keep ? "Judge: keep · " : "Judge: not this one · ") + advice.percent + "%"
+                        color: !advice.answer.asked || advice.answer.error || advice.unsure ? Theme.textDim
+                            : advice.answer.keep ? Theme.accentHi : "#ff7a7a"
+                        font.pixelSize: 10
+                        font.weight: Font.DemiBold
+                    }
+                }
+                // For when the words or the model change.
+                Text {
+                    visible: advice.answer.asked
+                    anchors.left: adviceChip.right
+                    anchors.leftMargin: 8
+                    anchors.verticalCenter: adviceChip.verticalCenter
+                    text: "Ask again"
+                    color: againMouse.containsMouse ? Theme.text : Theme.textFaint
+                    font.pixelSize: 10
+                    MouseArea {
+                        id: againMouse
+                        anchors.fill: parent
+                        hoverEnabled: true
+                        cursorShape: Qt.PointingHandCursor
+                        onClicked: { advice.answer = { asked: false }; App.askJudge(root.videoId, root.candidate.trackId, true) }
+                    }
+                }
+                // What the judge made of the upload: its note in full, the
+                // facts it settled on, and where the answer came from.
+                Column {
+                    id: adviceDetails
+                    visible: advice.answer.asked
+                    anchors.top: parent.top
+                    anchors.topMargin: 24
+                    width: parent.width
+                    spacing: 2
+                    Text {
+                        width: parent.width
+                        text: advice.answer.asked ? advice.answer.note : ""
+                        color: Theme.textDim
+                        font.pixelSize: 11
+                        wrapMode: Text.Wrap
+                    }
+                    Text {
+                        visible: advice.answer.asked && !advice.answer.error
+                        width: parent.width
+                        text: advice.answer.asked ? advice.answer.kind + " · " + advice.answer.source + " · " + advice.answer.version + " · " + advice.answer.whole : ""
+                        color: Theme.textFaint
+                        font.pixelSize: 10
+                        wrapMode: Text.Wrap
+                    }
+                    Text {
+                        width: parent.width
+                        text: advice.answer.asked ? (advice.answer.mode === "judge" ? "Given during the lookup" : "Asked from this card") + " · " + advice.answer.model : ""
+                        color: Theme.textFaint
+                        font.pixelSize: 10
+                        elide: Text.ElideRight
+                    }
+                }
+            }
         }
     }
 

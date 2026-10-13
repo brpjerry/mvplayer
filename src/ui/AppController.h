@@ -91,6 +91,7 @@ class AppController : public QObject
     // Whether the account is used where YouTube refuses a guest with its
     // bot check ("Sign in to confirm you're not a bot"): for the user to say.
     Q_PROPERTY(bool accountOnBotCheck READ accountOnBotCheck WRITE setAccountOnBotCheck NOTIFY settingsChanged)
+    Q_PROPERTY(bool keepEverything READ keepEverything WRITE setKeepEverything NOTIFY settingsChanged)
     // Claude, for judging the review queue: whether an API key is stored,
     // how it reads with its middle left out, and what the last check of it
     // found (judgeState: ok | bad | error, empty before a check).
@@ -99,6 +100,17 @@ class AppController : public QObject
     Q_PROPERTY(bool judgeChecking READ judgeChecking NOTIFY judgeChanged)
     Q_PROPERTY(QString judgeState READ judgeState NOTIFY judgeChanged)
     Q_PROPERTY(QString judgeStatus READ judgeStatus NOTIFY judgeChanged)
+    // What the judge does (docs/import-rules-judge.html, X4): "off",
+    // "advice" (a recommendation on cards under review) or "judge" (it runs
+    // the lookup); which model; and how many lookups it has settled alone
+    // and left for your verdict.
+    Q_PROPERTY(QString judgeMode READ judgeMode WRITE setJudgeMode NOTIFY settingsChanged)
+    Q_PROPERTY(QString judgeModel READ judgeModel WRITE setJudgeModel NOTIFY settingsChanged)
+    Q_PROPERTY(int judgeThreads READ judgeThreads WRITE setJudgeThreads NOTIFY settingsChanged)
+    Q_PROPERTY(QVariantList judgeModels READ judgeModels CONSTANT)
+    Q_PROPERTY(int judgeAlone READ judgeAlone NOTIFY judgeChanged)
+    Q_PROPERTY(int judgeLeft READ judgeLeft NOTIFY judgeChanged)
+    Q_PROPERTY(int adviceLeft READ adviceLeft NOTIFY adviceQueueChanged)
 
     // Replacing a video by hand: whether a search, check or replacement
     // runs, what it is doing, and for which video.
@@ -235,7 +247,35 @@ public:
     Q_INVOKABLE QString setJudgeKey(const QString &key);
     Q_INVOKABLE void removeJudgeKey();
     Q_INVOKABLE void checkJudgeKey();
+    QString judgeMode() const { return m_cfg.judgeMode; }
+    void setJudgeMode(const QString &mode);
+    QString judgeModel() const { return m_cfg.judgeModel; }
+    int judgeThreads() const { return m_cfg.judgeThreads; }
+    void setJudgeThreads(int n);
+    void setJudgeModel(const QString &model);
+    QVariantList judgeModels() const;
+    int judgeAlone() const { return m_judgeAlone; }
+    int judgeLeft() const { return m_judgeLeft; }
+    // The judge's advice on a video under review for one of its candidates
+    // (X2): {asked, keep, probability, kind, source, version, whole, note,
+    // mode, model, error}. askJudge asks for it (advice mode), or again.
+    Q_INVOKABLE QVariantMap judgeAdvice(qint64 videoId, qint64 trackId);
+    Q_INVOKABLE void askJudge(qint64 videoId, qint64 trackId, bool again);
+    // "Review all": every card without an answer (X2); adviceLeft counts
+    // the questions still queued.
+    Q_INVOKABLE void askJudgeAll();
+    int adviceLeft() const { return m_adviceLeft; }
+    // "Accept all" (X4): what the judge's confident answers would decide,
+    // {accept, reject} counts; acceptJudged carries them out as verdicts.
+    Q_INVOKABLE QVariantMap judgePlan() const;
+    Q_INVOKABLE void acceptJudged();
     bool accountOnBotCheck() const { return m_cfg.accountOnBotCheck; }
+    // Keeping everything for a replay (README): the capture folder under
+    // the videos folder; captureSizeText says how much it holds.
+    bool keepEverything() const { return m_keepEverything; }
+    void setKeepEverything(bool on);
+    Q_INVOKABLE QString captureFolder() const;
+    Q_INVOKABLE QString captureSizeText() const;
     void setAccountOnBotCheck(bool v);
     bool checkingQuality() const;
     Q_INVOKABLE void checkQuality();
@@ -308,6 +348,8 @@ signals:
     void candidatesChanged();
     void undoChanged();
     void judgeChanged();
+    void adviceChanged(qint64 videoId);
+    void adviceQueueChanged();
     void facetsChanged();
     void settingsChanged();
     void activityChanged();
@@ -357,6 +399,8 @@ private:
     int m_sessionDone = 0;
     bool m_ignoreSmallChannels = true;
     int m_minSubscribers = 5000;
+    int m_judgeAlone = 0, m_judgeLeft = 0, m_adviceLeft = 0;
+    bool m_keepEverything = false;
     int m_reviewCount = 0;  // videos waiting for review
     int m_reviewVideos = 0;
     int m_orphanCount = 0;

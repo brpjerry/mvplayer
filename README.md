@@ -215,7 +215,13 @@ fits outright, and then waits for you:
   on the chip in the bottom bar, goes on to the next audio the file has and
   round again at the same place: each candidate's that is better than
   YouTube's, then YouTube's own. The chip says which is playing — "Library
-  audio 1/2 (FLAC 24/96)", "YouTube audio" — and carries the key.
+  audio 1/2 (FLAC 24/96)", "YouTube audio" — and carries the key. The change
+  is gapless: every audio track is decoded at once and the chip only changes
+  which one is heard. Where the track's audio does not reach (the video has
+  an intro the track lacks, or runs on after it), the library track carries
+  YouTube's audio instead; there the chip says so ("YouTube audio · library
+  from 0:12") and the key does nothing, and the seek bar shows the stretch
+  the track's audio covers.
 - While the queue is shown, a panel beside the sidebar takes the place of
   the bottom bar's music-file popup. It is about the video that plays, or
   until one does, the first in the queue, and shows one candidate at a
@@ -392,8 +398,11 @@ retried after two weeks. Lookups that could not be completed (a download
 error, typically YouTube throttling) are not treated as "no video": they are
 retried after 30 minutes, then at doubling intervals.
 
-If YouTube starts refusing requests altogether (HTTP 429, a bot check, or
-eight downloads failing in a row), the whole queue pauses instead of failing
+If YouTube starts refusing requests altogether (HTTP 429, a bot check, a
+search answered with no results at all when a probe search right after it
+gets none either, which is how a guest is refused after about a hundred
+searches in a few minutes, or eight downloads failing in a row), the whole
+queue pauses instead of failing
 track after track: 10 minutes at first, doubling up to two hours while the
 block lasts, then one job tests the water before the rest follow. The import
 panel shows the pause and has a "Resume now" button; `pauseSeconds` under
@@ -519,6 +528,68 @@ command.
 ./build/mvplayer-import check-video video.mkv            # still image or real video?
 ```
 
+## The judge
+
+Claude can take part in importing, through the API with a key of your own
+(Settings → Judge; the key is stored beside the settings, for this user only).
+Its rules are a page of their own, `docs/import-rules-judge.html`, with the
+words it is given and how it measured against hand verdicts. Two modes:
+
+- **Advice**: lookups run by the rules as before, and each card under review
+  shows whether the judge would keep the video for the candidate on show, and
+  how sure it is ("Judge: keep · 92%"), with its reasons when the pointer
+  rests on it. It is asked once per video and candidate, from the video's own
+  file; "Ask again" asks anew. Nothing is decided by it.
+- **Judge**: it runs each lookup — writes the search, picks what to listen to
+  from the results, and gives the verdict once every pick has been listened to
+  and looked at (five frames of each), told each upload's channel, its
+  subscribers, upload date and the first 600 characters of its description,
+  which the library keeps with every video from now on. A verdict it is at least 85% sure of
+  stands by itself; anything less, a cut, an interrupted video, one the audio
+  check doubts or a still picture is left for you, with its advice on the
+  card. Your verdicts on cards stand as before. It also decides, from the
+  tags, which tracks are not worth a search (an instrumental, a talk track),
+  told how a talk-titled track sounds; turning judge mode on asks it once
+  about every track the rules had skipped, and what it skips stays skipped
+  until the file's tags change.
+- In advice mode, "Review all" above the queue asks about every card at
+  once, each card wears the answer for its candidate on show, and "Accept
+  all" carries out the answers the judge is at least 85% sure of as
+  verdicts, after saying what it will do. How many questions run at once is
+  a setting on the Judge tab (one unless you raise it).
+
+The model is yours to pick: Haiku 5.5, Sonnet 5.5 (the default) or Opus 5.5.
+Every answer is logged as a `judge` event in the import log, with what it cost.
+The headless importer takes `--judge off|advice|judge`, `--judge-model` and
+`--claude-key-file`.
+
+## Keeping everything for a replay
+
+Settings → Import → "Keep everything for a replay" (headless: `--capture
+<dir>`) keeps, for good, everything a lookup touches: every search YouTube
+answers (`search/<key>.json`, listed in `search/index.jsonl`), and for every
+video its audio with the page that came with it, its page where one was read
+on its own, its preview, the video with its thumbnail, its subtitles, and the
+account's answers (`video/<id>/`); and every question to the judge with its
+answer (`judge/<hash>.json`, the request as sent, frames included). The
+folder is `.mvplayer/capture` under the videos folder; the Import tab says
+how much it holds. Nothing is pruned: it is yours to delete.
+
+A replay runs a lookup again from a capture: `mvplayer-import --replay <dir>`
+answers searches, pages, downloads and the judge from the folder wherever it
+has the item, and asks YouTube or the API as usual where it has not (keeping
+that too, with `--capture` on). To run a past lookup again as it went, point
+a scratch library at the capture and ask for the track:
+
+```
+mvplayer-import --replay ~/Videos/MVs/.mvplayer/capture --mv-dir /tmp/replay \
+    --music-dir ~/Music --reimport "~/Music/Artist/Album/01 Song.flac" --judge judge
+```
+
+With the judge's words unchanged its answers come from the capture; with new
+words the same frames and facts go to the API again, which is how a change to
+the words is tried against what the judge once saw.
+
 ## Using it
 
 - Clicking a video grows its thumbnail into the player. `Esc` (or the back
@@ -589,7 +660,8 @@ flick) and `wheelStep` (pixels per mouse-wheel notch, default 170).
 
 Environment: `MVPLAYER_HWDEC` (mpv `hwdec` value, default `auto-safe`),
 `MVPLAYER_MPV_OPTS` (`name=value,name=value` extra mpv options),
-`MVPLAYER_YTDLP` (the yt-dlp program to run instead of the default one).
+`MVPLAYER_YTDLP` (the yt-dlp program to run instead of the default one),
+`MVPLAYER_CLAUDE_API` (another server in place of the Claude API, for tests).
 
 ## Porting notes
 

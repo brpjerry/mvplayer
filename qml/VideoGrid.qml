@@ -78,6 +78,7 @@ Item {
             current: videoId === root.currentVideoId
             playing: current && root.currentPlaying
             orphanView: App.videos.section === "orphans"
+            judgeOn: App.judgeMode !== "off"
             canDelete: !App.scanning
             onActivated: root.activated(index)
             onApproved: root.approved(videoId)

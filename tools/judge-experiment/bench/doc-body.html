@@ -1,0 +1,298 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>MV Player import rules: the judge</title>
+<style>
+$style
+pre.words { white-space: pre-wrap; font: 13px/1.6 var(--sans); color: var(--text); background: var(--raised); border: 1px solid var(--line); border-radius: 8px; padding: .9rem 1rem; margin: 0; max-width: 100ch; }
+.fields { font-size: 13.5px; color: var(--dim); max-width: 100ch; }
+.fields b { color: var(--text); font-weight: 600; }
+.modes { display: grid; grid-template-columns: repeat(auto-fit, minmax(19rem, 1fr)); gap: 1rem; }
+</style>
+</head>
+<body>
+<main>
+
+<div class="head">
+  <h1>MV Player import rules: the judge</h1>
+  <p>How a track comes to have a music video when a model is asked instead of the rules of thumb. Two things the judge can do, chosen in Settings → Judge. In <b>judge mode</b> it runs the lookup: it writes the search, picks what is listened to and gives the verdict on every upload; what the main page drops on sight, whose channel an upload is on, version and fan words, small channels and the score no longer apply, and what stays are the audio check, the length check and your verdict on what the judge is not sure of. In <b>advice mode</b> nothing in the lookup changes: each card under review shows what the judge would do and how sure it is. Rules of the <a href="import-rules.html">main page</a> are cited by their ids (R0, G1); this page's own are Q1, S2 …</p>
+  <p class="proposal" hidden>A new page, proposed: not approved yet, and nothing in the code implements it. The words the judge is given (K) were refined against $n_lab of your own verdicts and measured on three models (M); the numbers under N follow from that.</p>
+  <div class="stamp">Drafted $date · measured against your verdicts of 8–11 October 2026 · ids (Q2, W1) are stable, for pointing at</div>
+  <div class="legend" aria-label="Legend">
+    <span><span class="q">A question</span> its answers hang below</span>
+    <span><span class="out ok">has its video</span></span>
+    <span><span class="out review">waits for your verdict</span></span>
+    <span><span class="out no">this upload is out</span></span>
+    <span><span class="out none">the track has no video</span></span>
+    <span><span class="out later">decided later</span></span>
+    <span><span class="out go">goes on to …</span></span>
+  </div>
+</div>
+
+<nav aria-label="Stages of a lookup with the judge">
+  <ol class="flow">
+    <li><a href="#Q"><b>Q</b> Is the track looked up, and how?</a></li>
+    <li><a href="#S"><b>S</b> Search and the pick</a></li>
+    <li><a href="#L"><b>L</b> Listening: what stays</a></li>
+    <li><a href="#V"><b>V</b> The judge's verdict</a></li>
+    <li><a href="#W"><b>W</b> What the track gets</a></li>
+    <li><a href="#X"><b>X</b> Your verdict, and the advice</a></li>
+  </ol>
+  <ul class="flow aside">
+    <li><a href="#K"><b>K</b> What the judge is told</a></li>
+    <li><a href="#M"><b>M</b> Measured</a></li>
+    <li><a href="#N"><b>N</b> Numbers</a></li>
+  </ul>
+</nav>
+
+<section id="modes">
+  <header>
+    <h2>The two modes</h2>
+  </header>
+  <div class="modes">
+    <div class="def" id="judge-mode"><h3><span class="id">Judge mode</span>The judge runs the lookup</h3>
+      <p>Q → S → L → V → W, then your verdict (X) on what it leaves. Of the main page, A1 and A6–A11 (when a track is looked up again), the search itself (B, I1), downloading and the audio check (D1.1–D1.3, R0–R3, R6, R9), bringing a video in (F), your verdict (G), re-import (H), pauses (I) and replacing by hand (J) stay as they are. Everything in C, the rest of D and all of E is replaced by this page.</p></div>
+    <div class="def" id="advice-mode"><h3><span class="id">Advice mode</span>The judge only says what it would do</h3>
+      <p>The lookup runs by the main page, unchanged. A card under review carries the judge's answer to the one question of V for the candidate showing: keep, not this one, or unsure, with how sure it is and why (X2). Nothing is decided by it.</p></div>
+  </div>
+</section>
+
+<!-- ===================================================================== Q -->
+<section id="Q">
+  <header>
+    <h2><span class="tag">Q</span> Is the track looked up, and how?</h2>
+    <p>Asked of every file found in the music folders, and again when a lookup starts. The judge replaces A2–A4: it is handed the track and says whether there is anything to look for, and what to search.</p>
+    <div class="where">LibraryScanner::scan · AudioPrint::sameRecording · Judge::query</div>
+  </header>
+  <div class="scroll">
+  <ul class="tree">
+    <li><div class="row"><span class="q order">A file in the music folders</span></div>
+      <ul>
+        <li id="Q1"><div class="row"><a class="id" href="#Q1">Q1</a><span class="when">It sounds like a recording already known (A1)</span><span class="out go">one more file of that recording</span>
+          <span class="why">As on the main page: one lookup and one video per recording, the best file the one listened to.</span></div></li>
+        <li id="Q2"><div class="row"><a class="id" href="#Q2">Q2</a><span class="when">The judge is handed the track's tags and says there is nothing to look for</span><span class="out none">skipped, with the judge's reason</span>
+          <span class="why">It is given the title, artist, album artist, album, year, length, audio format, genre and the folder the file is in, and the words under K. An instrumental, off-vocal or karaoke version, a talk track, a jingle, a skit: it says so in a few words, and the track is skipped as A2–A4 skipped it. Those three rules no longer apply; what they said (1:20, the audio-only and talk words) is in the judge's words as guidance. A skipped track is looked up again when the words change (A9).</span></div></li>
+        <li id="Q3"><div class="row"><a class="id" href="#Q3">Q3</a><span class="when">Otherwise</span><span class="out go"><a href="#S">searched for the judge's queries: S</a></span>
+          <span class="why">One or two queries, best first. The judge writes the title and artist as YouTube knows them (the original script where the tags are romanised, the official romanisation where that is how the channel writes it) and adds MV or Music Video where that helps. The second query is asked only when the first gives nothing the judge would listen to (S3).</span></div></li>
+      </ul>
+    </li>
+  </ul>
+  </div>
+  <p class="lede">When a track is looked up again, A6–A11 hold as they stand: no video after 14 days, a failed lookup after 30 minutes doubling, a re-import at once (H). The judge's answers are kept a day with the search results, so a lookup repeated within the day asks nothing twice.</p>
+</section>
+
+<!-- ===================================================================== S -->
+<section id="S">
+  <header>
+    <h2><span class="tag">S</span> Search and the pick</h2>
+    <p>The queries are asked as on the main page (B): ten results each, as a guest (I1), remembered for a day. What replaces C: nothing is dropped on sight, there is no score, and the judge picks what is listened to from the listing.</p>
+    <div class="where">YtDlp::search · Judge::pick · ImportManager::runJob</div>
+  </header>
+  <div class="scroll">
+  <ul class="tree">
+    <li><div class="row"><span class="q order">The results of a query</span></div>
+      <ul>
+        <li id="S1"><div class="row"><a class="id" href="#S1">S1</a><span class="when">YouTube refuses the query, or answers it with nothing</span><span class="out later">pause: I5</span>
+          <span class="why">An empty answer to a guest is how YouTube refuses one it has had enough of; it is not "no video" (today's B4 takes it for that, and 143 tracks in the library have "none of 0 search results" to show for it). The query is asked again after the pause.</span></div></li>
+        <li id="S2"><div class="row"><a class="id" href="#S2">S2</a><span class="when">Results come back</span><span class="out go">the listing is handed to the judge</span>
+          <span class="why">For each result: its id, title, channel, whether the channel is verified, length, view count, and which query and rank it came from; with the track's tags again. Left out, as your standing verdicts: an upload you turned down for this track (D0) and any from a channel you denied (G8). A channel you allowed (G7) is marked as one.</span></div></li>
+        <li id="S3"><div class="row"><a class="id" href="#S3">S3</a><span class="q order">The judge's pick</span></div>
+          <ul>
+            <li><div class="row"><span class="when">It picks one or more uploads worth listening to</span><span class="out go"><a href="#L">each is listened to, in its order: L</a></span>
+              <span class="why">At most <span class="num">4</span>, best first. Several when the listing does not say which is the real one. Nothing dropped on sight: C1–C8 do not apply, nor the score; a "- Topic" upload, a short one, one with a version or fan word is the judge's to pick or pass over.</span></div></li>
+            <li><div class="row"><span class="when">It picks none, and a second query is left (Q3)</span><span class="out go">the second query is asked</span></div></li>
+            <li id="S4"><div class="row"><a class="id" href="#S4">S4</a><span class="when">It picks none, and no query is left</span><span class="out none">no video: A6</span>
+              <span class="why">"The judge found nothing that looks like the track's official video among N results."</span></div></li>
+          </ul>
+        </li>
+      </ul>
+    </li>
+  </ul>
+  </div>
+  <p class="lede">On a re-import the track's own video and every video under review it is a candidate of are judged as well, whether or not the search returns them (H4, H8), by the judge (V): they go on the list beside its picks, from their files, with nothing downloaded for them.</p>
+</section>
+
+<!-- ===================================================================== L -->
+<section id="L">
+  <header>
+    <h2><span class="tag">L</span> Listening: what stays</h2>
+    <p>Each pick, in the judge's order: its audio is downloaded and laid against the track as today (D1.1–D1.3, I3), and the audio check measures what it measures (R0–R3, R6, R9). The rules of thumb of D are gone; what is left are gates. A gate never takes a video outright and never throws one out that the judge would keep: it decides between outright and your verdict.</p>
+    <div class="where">ImportManager::runJob · AudioAlign::align · YtDlp::pageInfo · Judge::frames</div>
+  </header>
+  <div class="scroll">
+  <ul class="tree">
+    <li><div class="row"><span class="q order">A pick, once its audio is here</span></div>
+      <ul>
+        <li id="L1"><div class="row"><a class="id" href="#L1">L1</a><span class="when">It is not the song (R0)</span><span class="out later">a gate: never outright (W2)</span>
+          <span class="why">Fingerprints under 50% of the video, or under 50% of the track. The judge is shown it all the same, with the audio check in front of it: an upload it would keep that the audio says is not the song waits for your verdict, and one it would not keep is dropped. The library audio cannot be laid into such a video; it plays YouTube's.</span></div></li>
+        <li id="L2"><div class="row"><a class="id" href="#L2">L2</a><span class="when">It is not the whole song: a cut, under <span class="num">90%</span> of the track (R1), or under half of it, or over twice it or 4 minutes longer (C3, C4); or interrupted, more than <span class="num">15 s</span> of other audio inside the song (R1)</span><span class="out later">a gate: never outright (W2)</span>
+          <span class="why">Your own verdicts on cuts went both ways (M): a short version from the artist's channel was kept for one track and turned down for another. So the judge says what it would do, and you decide.</span></div></li>
+        <li id="L3"><div class="row"><a class="id" href="#L3">L3</a><span class="when">The upload's page</span><span class="out go">read with its audio, as today (D1.12)</span>
+          <span class="why">The channel's id, name, handle, subscriber count, whether it is verified, the upload date and view count are kept and told to the judge (V1). The small-channel rule (D7, D1.12) and the denied-channel check by id (D8, C10) are not gates: a channel you denied is left out at S2, and a small channel is the judge's to weigh.</span></div></li>
+        <li id="L4"><div class="row"><a class="id" href="#L4">L4</a><span class="when">The picture never changes (D1.9)</span><span class="out no">dropped: a still</span>
+          <span class="why">The smallest video stream of at least 360p is fetched, as today, and the still check run on it whether or not "Skip still-image videos" is on: a still picture set to the audio is never kept, whoever uploaded it. The answer is remembered per upload, as today.</span></div></li>
+        <li id="L4.1"><div class="row"><a class="id" href="#L4.1">L4.1</a><span class="when">It moves</span><span class="out go">five frames and a picture check for the judge</span>
+          <span class="why">Frames taken at <span class="num">10, 35, 50, 65 and 90%</span> of the video, scaled to 768 px wide, and the picture check: how much of the picture ever changes between them, compared at <span class="num">192 px</span> wide, a pixel counting as changed over <span class="num">24</span> grey levels, and whether that change sits only along the top or bottom edge. A still with a spectrum bar, a progress bar or a ticker laid over it passes the still check (D1.9 counts the bar as movement) and is the judge's to catch: the frames and the picture check show it, and K3 says a still is never kept, where any real change to the picture itself (the words of the song appearing, an illustration that moves, zooms or glows, a visualiser in the picture) is enough, and reads the check: under about <span class="num">3%</span> with only an edge differing is a still, <span class="num">10%</span> or more moves whatever the frames look like at a glance. You kept two such stills by hand (M). A picture that cannot be fetched is told to the judge as such, and the upload is never taken outright (W2).</span></div></li>
+        <li id="L5"><div class="row"><a class="id" href="#L5">L5</a><span class="when">It is in the library already: another track has it (D4), or it is under review with other candidates (D5)</span><span class="out go">judged for this track like any pick (V)</span>
+          <span class="why">Measured against the upload's own audio in its file, nothing downloaded. One track, one video (R8) stands: where the judge would keep it for this track and another has it, the closer fit (R9) decides who, as D4.6 has it; a video under review gains this track as a candidate where the judge would keep it for it (W2).</span></div></li>
+        <li id="L6"><div class="row"><a class="id" href="#L6">L6</a><span class="when">All picks listened to</span><span class="out go"><a href="#V">the judge is asked once, with all of them: V</a></span>
+          <span class="why">Side by side, as your own verdicts were given and as it was measured (M); not one at a time. At most 4 downloads of audio and of a small picture stream per lookup, where today's shortlist downloaded audio for up to 4 and the picture for the one taken.</span></div></li>
+      </ul>
+    </li>
+  </ul>
+  </div>
+</section>
+
+<!-- ===================================================================== V -->
+<section id="V">
+  <header>
+    <h2><span class="tag">V</span> The judge's verdict</h2>
+    <p>One question, asked once per lookup in judge mode (L6) and once per card in advice mode (X2). The words it is given are under K; they are the rule, and a change to them is a change to this page first.</p>
+    <div class="where">Judge::verdict</div>
+  </header>
+  <div class="defs">
+    <div class="def" id="V1"><h3><span class="id">V1</span>What it is shown</h3>
+      <ul>
+        <li><b>The track:</b> title, artist, album artist, album, year, length, audio format (lossless, or codec and bitrate); and the other tracks the audio check matched to these uploads, named as such.</li>
+        <li><b>Each upload:</b> title, channel (every name it is listed under; verified; subscribers, upload date and view count when known; "a channel you allowed"), length, resolution.</li>
+        <li><b>The audio check:</b> fingerprints, as a share of the video; same waveform, as a share of the track; other audio inside the song, in seconds; placed by offset (R2).</li>
+        <li><b>The picture:</b> the five frames and the picture check (L4.1).</li>
+      </ul></div>
+    <div class="def" id="V2"><h3><span class="id">V2</span>What it answers</h3>
+      <ul>
+        <li><b>For each upload:</b> its kind (music video, re-upload of one, lyric video or visualiser, live, cover or other version, fan video, still image, different song, other); its <b>source</b> (the artist's channel · the label, circle or publisher · an official partner · a third party · cannot tell); its <b>version</b> (the same recording · another master or mix of it · another version or performance · cannot tell); whether it is the <b>whole song</b> (whole · a cut · interrupted); whether the library should <b>keep</b> it, and the <b>probability</b> (0 to 1) that it should, which is what the advice shows (X2); a note of one sentence.</li>
+        <li><b>For the track:</b> a verdict, accept (and which upload), reject all, or unsure; a confidence; a reason.</li>
+      </ul></div>
+    <div class="def" id="V3"><h3><span class="id">V3</span>Its standard, in short</h3>
+      <p>Drawn from your verdicts (M) and spelt out under K:</p>
+      <ul>
+        <li><b>Who uploaded it</b> comes first: a credited artist's channel, the label or circle that released the track, the composer's channel, or an official partner (the anime, game, film, publisher or brand the song was made for). A fan's upload, an aggregator channel, a re-upload of the real video: not kept, whatever the picture.</li>
+        <li><b>The same version:</b> the recording the track is, read off the titles' version words, the credited singer, and the waveform.</li>
+        <li><b>The whole song:</b> a cut or an interrupted video is a judgement for you (L2).</li>
+        <li><b>The picture must move:</b> a still is never kept, even with a bar or a ticker over it, whoever uploaded it; a lyric video, a moving illustration or a visualiser on an acceptable channel is kept when no music video is shown; live footage only for a live track; animation is never a sign of a fan work.</li>
+      </ul></div>
+    <div class="def" id="V4"><h3><span class="id">V4</span>Its confidence</h3>
+      <p>The probability that you would make the same call: 0.95 and above only when nothing speaks against it; 0.6–0.8 when something does; around 0.5 when the evidence is mixed; "unsure" when it cannot tell. Measured, a confidence of $gate and above was right $gate_pct of the time or better on every model (M), which is where the gate stands (W1).</p></div>
+    <div class="def" id="V5"><h3><span class="id">V5</span>When it cannot answer</h3>
+      <p>No key, a key the API refuses, no network, a refusal, or an answer that is not the JSON asked for twice running: the lookup is postponed as for a pause (I5), and the pause says why. Nothing falls back to the rules of thumb; the track is tried again when the pause ends. A lookup already past V is finished by what the judge said.</p></div>
+  </div>
+</section>
+
+<!-- ===================================================================== W -->
+<section id="W">
+  <header>
+    <h2><span class="tag">W</span> What the track gets</h2>
+    <p>Once the judge has answered. Replaces E.</p>
+    <div class="where">ImportManager::runJob, from the verdict to finish()</div>
+  </header>
+  <div class="scroll">
+  <ul class="tree">
+    <li><div class="row"><span class="q order">The judge's verdict for the track</span></div>
+      <ul>
+        <li id="W1"><div class="row"><a class="id" href="#W1">W1</a><span class="when">Accept, with confidence of at least <span class="num">$gate</span>, and the upload passes the gates (the song, L1; the whole song, L2; a picture seen, and moving, L4)</span><span class="out ok">it is the track's video: brought in (F)</span>
+          <span class="why">Which audio it plays is F3, unchanged: the track's where at least 72% is the same waveform or it is placed by offset and the track is the better audio (R6); else YouTube's. The track is no longer a candidate of any video under review; a video left with no candidate is deleted. A video another track had goes to this one where it is the closer fit (L5), and that track goes back to the queue. The verdict vouches for the upload as this track's video (R5), as yours would.</span></div></li>
+        <li id="W2"><div class="row"><a class="id" href="#W2">W2</a><span class="when">Accept below the gate, or the upload it chose fails a gate</span><span class="out review">a card under review, with this track as a candidate and the judge's advice on it (X2)</span>
+          <span class="why">Every other upload the judge would keep for the track is a card too, with its advice; those it would not keep are dropped. An upload already under review gains this track as a candidate (D5.6); the track's own video, on a re-import, goes back to the queue (H4).</span></div></li>
+        <li id="W3"><div class="row"><a class="id" href="#W3">W3</a><span class="when">Reject all, with confidence of at least <span class="num">$gate</span></span><span class="out none">no video: A6</span>
+          <span class="why">The uploads are dropped and remembered as turned down for this track, as yours are (D0), until a re-import asks the judge again. A card under review that the track was a candidate of loses it as a candidate; one left with no candidate is deleted.</span></div></li>
+        <li id="W4"><div class="row"><a class="id" href="#W4">W4</a><span class="when">Reject all below the gate, or unsure</span><span class="out review">each upload that is the song is a card under review, with the judge's advice</span>
+          <span class="why">The ones the audio says are not the song (L1) are dropped here: the judge would not keep them either.</span></div></li>
+        <li id="W5"><div class="row"><a class="id" href="#W5">W5</a><span class="when">No pick could be examined (D1.3, L4.1)</span><span class="out later">failed: A7</span></div></li>
+      </ul>
+    </li>
+  </ul>
+  </div>
+  <p class="lede">A lookup takes minutes, and another one may settle the videos a track is a candidate of in the meantime. What the track is a candidate of is read again before its result is written, as on the main page (E).</p>
+</section>
+
+<!-- ===================================================================== X -->
+<section id="X">
+  <header>
+    <h2><span class="tag">X</span> Your verdict, and the advice</h2>
+    <p>Your verdict is what it is on the main page (G1–G10): accept, reject, allow or deny a channel, undo. The judge has no standing on a card once it is yours.</p>
+    <div class="where">ImportManager::approveVideo · rejectVideo · Judge::advise · ReviewPanel.qml</div>
+  </header>
+  <div class="scroll">
+  <ul class="tree">
+    <li id="X1"><div class="row"><a class="id" href="#X1">X1</a><span class="q">Your verdict</span>
+      <span class="why">G stands, every rule of it. Allowing a channel (G7) judges its videos under review again by the main page's R1 in rules mode; in judge mode they are not judged again, since the judge weighed the channel already, but the judge is told of the channel from then on (S2, V1). Denying one (G8) is as it was in either mode.</span></div></li>
+    <li id="X2"><div class="row"><a class="id" href="#X2">X2</a><span class="q">The advice on a card</span>
+      <span class="why">For the candidate showing (G3): "Judge: keep · 92%", "Judge: not this one · 85%", or "Judge: unsure", in the review panel under the candidate's name, with its note, source, version and whole-song answer when the pointer rests on it. In judge mode it is the verdict already given (V2) for that upload and candidate. In advice mode it is asked when the card first shows, for the candidate showing with the other candidates named, from the video's own file and what the library kept of the upload: nothing is fetched from YouTube. Asked once per video and candidate, and kept in the library; "Ask again" is in the panel for when the words or the model change. Advice mode changes nothing else: the lookup runs by the main page.</span></div></li>
+    <li id="X3"><div class="row"><a class="id" href="#X3">X3</a><span class="q">What is logged</span>
+      <span class="why">Every answer of the judge, as an event <code>judge</code> in the import log: the question (query, pick or verdict), the model, the track and the uploads, the answer, tokens and cost. Your verdict on a card that carried advice is logged beside it. That is what the next measurement (M) reads: your verdicts against its advice, so that the words under K can be refined again.</span></div></li>
+    <li id="X4"><div class="row"><a class="id" href="#X4">X4</a><span class="q">Settings → Judge</span>
+      <span class="why">The key, as it is. The mode: off, advice, judge. The model: Haiku 5.5, Sonnet 5.5 or Opus 5.5, each with what a lookup costs (M); Sonnet 5.5 by default. In judge mode the gate is fixed (N) and the tab says how many lookups the judge has decided alone and how many it left for you. Switching modes changes nothing in the library: a lookup already under way finishes as it began, and the next starts in the new mode.</span></div></li>
+  </ul>
+  </div>
+</section>
+
+<!-- ===================================================================== K -->
+<section id="K">
+  <header>
+    <h2><span class="tag">K</span> What the judge is told</h2>
+    <p>The three sets of words, verbatim. Each is followed by the facts of the case as V1 and S2 list them, and the judge answers in the fields of V2. These words are the rule: refining them is a change to this page.</p>
+    <div class="where">Judge.cpp: kQueryWords · kPickWords · kVerdictWords</div>
+  </header>
+  <h3 id="K1">K1 · The query (Q2, Q3)</h3>
+  <pre class="words">$prompt_query</pre>
+  <p class="fields"><b>Answers:</b> lookup (yes or no) · skip_reason · queries (one or two) · song_known (what it knows of the song, one sentence).</p>
+  <h3 id="K2">K2 · The pick (S3)</h3>
+  <pre class="words">$prompt_pick</pre>
+  <p class="fields"><b>Answers:</b> picks (ids, best first, with a few words each; empty for none) · reason.</p>
+  <h3 id="K3">K3 · The verdict (V, X2)</h3>
+  <pre class="words">$prompt_final</pre>
+  <p class="fields"><b>Answers:</b> for each upload: index · kind · source · version · whole · keep · confidence · note. For the track: verdict (accept, reject all, unsure) · chosen · confidence · reason.</p>
+</section>
+
+<!-- ===================================================================== M -->
+<section id="M">
+  <header>
+    <h2><span class="tag">M</span> Measured</h2>
+    <p>Against your own verdicts. On 8 October 2026 the review queue was frozen as judge input (594 videos, their frames and the audio check's figures), before your hand review of it; by 11 October you had decided $n_lab of those groups: $n_acc accepted, $n_rej with every option rejected, $n_part in part ($n_opt uploads in all). The judge was asked the verdict question (K3) about each group with five frames per upload, and its answers read against yours. The words went through four versions, each refined on what the one before got wrong, on all three models; a fifth then took out every named channel, artist and scene-specific word list, so that the words hold for any library and not only the part of this one they were refined on: the table shows what the generality cost. A sixth rules out stills (L4) and is given the picture check (L4.1); a seventh, the wording adopted, makes the check decisive, after the sixth had called moving pictures stills on the strength of the frames alone (one changed 62% of the picture, another 98%). Two of the uploads you kept by hand are a still with a spectrum bar or a ticker over it (Installed on Firefly Music and PIKASONIC; REFLECTION [Batsu Remix] on Firefly Music), and those two groups count against the sixth and seventh wordings in the table, as they should. The search question (K1, K2) was measured on the same tracks, and generalised the same way. Spent on the measurement: $$$spent of the key's credit.</p>
+  </header>
+  <h3>The verdict (K3)</h3>
+  <p class="lede">"Decided alone" is what judge mode would have settled without you: a confidence of at least $gate, the chosen upload the whole song (L2). "Agrees with you" counts every group, including those it would have left for your verdict.</p>
+  <div class="scroll">
+  $measured
+  </div>
+  <p class="lede">What the disagreements were, once the words were refined: cuts and interrupted videos from the artist's own channel, which you kept for some tracks and turned down for others (hence L2); a netlabel's lyric video or moving illustration with a spectrum bar that you kept (Firefly Music, Diversity), which the judge cannot tell from an aggregator's unless told (hence the netlabel line in K3, and allowing the channel, G7); the Vocaloid original on the producer's channel for a track that is a singer's cover of it, which you turned down (hence the singer line in K3); a few re-uploads of a real music video on a nondescript channel, which you turned down (hence "cannot tell" is never kept outright); and a track that is a remix or an extended mix, for which you kept the original's video (hence the remix line in K3: it gained Opus four groups and cost Haiku a few, which it now calls unsure). The adopted wording keeps each of these as a principle (who uploaded it, the credited singer, a small label's channel, a remix track) without the names that taught it.</p>
+  <h3>The search (K1, K2)</h3>
+  <p class="lede">Whether the judge's own query and pick find the upload that ended up kept. Measured on tracks whose video you accepted by hand, on tracks the rules took outright, on tracks you rejected every option of, and on tracks the rules found nothing for. The search was run as a guest at first; YouTube answers a guest it has had enough of with an empty list (S1), which is what stopped that attempt after a hundred queries, and the rest was run signed in. The first wording of K1 declined to search for live tracks, remixes and a tie-in jingle, all of which you had kept videos for, and the first K2 picked the Japanese music video over the English version's for an English-version track; the adopted wording searches for everything but instrumentals and talk, and asks for the track's own version first. The tracks the rules found nothing for are where the judge may find videos the rules could not; whether its picks are right there is not known until they are listened to and judged (V).</p>
+  <div class="scroll">
+  $search_table
+  </div>
+</section>
+
+<!-- ===================================================================== N -->
+<section id="N">
+  <header>
+    <h2><span class="tag">N</span> Numbers</h2>
+    <p>Every figure on this page, with the name it is to have in the code. Those cited from the main page keep theirs.</p>
+  </header>
+  <div class="scroll">
+  <table>
+    <tr><th>Value</th><th>What it decides</th><th>Rule</th><th>In the code</th></tr>
+    <tr><td class="n">$gate</td><td>the judge's confidence from which a verdict stands without you</td><td>W1, W3</td><td><code>Judge kGate</code></td></tr>
+    <tr><td class="n">2</td><td>queries the judge may write</td><td>Q3</td><td><code>Judge kMaxQueries</code></td></tr>
+    <tr><td class="n">4</td><td>uploads the judge may pick to listen to</td><td>S3</td><td><code>Judge kMaxPicks</code></td></tr>
+    <tr><td class="n">10</td><td>results asked of each query, as today</td><td>B</td><td><code>YtDlp::search</code></td></tr>
+    <tr><td class="n">10% · 0.4% · 16</td><td>the still check, as today: the gate at L4</td><td>D1.9</td><td><code>Muxer::checkStill</code></td></tr>
+    <tr><td class="n">5 · 10/35/50/65/90% · 768 px · 360p</td><td>frames for the judge: how many, where, how wide; the stream they come from</td><td>L4.1</td><td><code>Judge::frames</code></td></tr>
+    <tr><td class="n">192 px · 24</td><td>the picture check: the width the frames are compared at, and the grey levels a pixel must move to count as changed</td><td>L4.1</td><td><code>Judge::pictureCheck</code></td></tr>
+    <tr><td class="n">50% · 50% · 80% · 45 s</td><td>the song, as today: the gate at L1</td><td>R0</td><td><code>audioMatches</code></td></tr>
+    <tr><td class="n">90% · 15 s</td><td>a cut; interrupted: the gate at L2</td><td>R1</td><td><code>kShortCut · kMaxInterruptedSec</code></td></tr>
+    <tr><td class="n">0.5 · 2 · 4 min</td><td>an upload's length against the track's: the gate at L2</td><td>C3, C4</td><td><code>Matcher::lengthMismatch</code></td></tr>
+    <tr><td class="n">72%</td><td>same waveform from which the track's audio is put in, as today</td><td>F3</td><td><code>kOwnWaveform</code></td></tr>
+    <tr><td class="n">1 day</td><td>the judge's answers kept with the search results</td><td>Q, S</td><td><code>Judge cache</code></td></tr>
+    <tr><td class="n">Sonnet 5.5 · low</td><td>the model and effort unless you choose another</td><td>X4</td><td><code>Judge kDefaultModel</code></td></tr>
+    <tr><td class="n">2</td><td>malformed answers before the lookup is postponed</td><td>V5</td><td><code>Judge kRetries</code></td></tr>
+  </table>
+  </div>
+  <p class="lede">Prices as of October 2026, per million tokens in and out: Haiku 5.5 $$0.10 and $$0.50; Sonnet 5.5 $$2 and $$10; Opus 5.5 $$4 and $$20. A verdict question with four uploads and five frames each is about 9,000 tokens in and 400 out; a query or pick question under 1,500 in and 300 out.</p>
+</section>
+
+</main>
+</body>
+</html>

@@ -89,7 +89,7 @@ const char *kVideoCols =
     "id, yt_id, path, thumb, title, artist, album_artist, album, genre, year, track_no, duration, "
     "width, height, fps, vcodec, audio_source, audio_detail, yt_title, yt_channel, tags_json, added_at, yt_abr, "
     "review, review_start, review_end, yt_stream, yt_channel_id, yt_channel_subs, yt_channel_verified, yt_channel_handle, vouched, "
-    "yt_date";
+    "yt_date, yt_description";
 
 // Text that was kept, though it may be empty: never the null string, which
 // stands for "not kept".
@@ -139,6 +139,9 @@ VideoInfo readVideo(const QSqlQuery &q)
     v.vouched = q.value(i++).toBool();
     if (!q.value(i).isNull())
         v.ytDate = q.value(i).toString();
+    ++i;
+    if (!q.value(i).isNull())
+        v.ytDescription = q.value(i).toString();
     ++i;
     return v;
 }
@@ -206,7 +209,7 @@ QSqlDatabase Database::conn()
 
 // The layout below is the one this version reads and writes. The one before
 // it is brought up to it (upgradeLayout); any other is refused.
-constexpr int kSchema = 6;
+constexpr int kSchema = 7;
 
 namespace {
 // A track is a recording: its number, or minus the file's id where it has none.
@@ -226,11 +229,19 @@ namespace {
 const char *kChannelListsSql =
     "CREATE TABLE IF NOT EXISTS channel_lists ("
     " channel_id TEXT PRIMARY KEY, list TEXT NOT NULL, name TEXT, handle TEXT, added_at INTEGER NOT NULL DEFAULT 0)";
+// The judge's answer about a video under review, for one of its candidate
+// tracks (docs/import-rules-judge.html, X2): kept with the video.
+const char *kJudgeAdviceSql =
+    "CREATE TABLE IF NOT EXISTS judge_advice ("
+    " video_id INTEGER NOT NULL REFERENCES videos(id) ON DELETE CASCADE, track_key INTEGER NOT NULL,"
+    " mode TEXT NOT NULL, model TEXT NOT NULL, keep INTEGER NOT NULL, probability REAL NOT NULL,"
+    " kind TEXT, source TEXT, version TEXT, whole TEXT, note TEXT, asked_at INTEGER NOT NULL DEFAULT 0,"
+    " PRIMARY KEY (video_id, track_key))";
 }
 
 bool Database::upgradeLayout(int from, QString *error)
 {
-    if (from != 4 && from != 5)
+    if (from != 4 && from != 5 && from != 6)
         return false;
     QSqlDatabase db = conn();
     if (from == 5) {
@@ -264,7 +275,9 @@ bool Database::upgradeLayout(int from, QString *error)
         QStringLiteral("DELETE FROM artist_channels WHERE source = 'approved'"),
         QStringLiteral("PRAGMA user_version = 6"),
     };
-    const QStringList steps = from == 5 ? toSix : QStringList{
+    // Layout 6 to 7: the judge's advice on videos under review.
+    const QStringList toSeven = {QString::fromLatin1(kJudgeAdviceSql), QStringLiteral("PRAGMA user_version = 7")};
+    const QStringList steps = from == 6 ? toSeven : from == 5 ? toSix : QStringList{
         QStringLiteral("CREATE TABLE candidates ("
                        " video_id INTEGER NOT NULL REFERENCES videos(id) ON DELETE CASCADE,"
                        " track_key INTEGER NOT NULL,"
@@ -316,7 +329,9 @@ bool Database::upgradeLayout(int from, QString *error)
             *error = db.lastError().text();
         return false;
     }
-    if (from == 5)
+    if (from == 6)
+        qInfo("[db] library brought up from layout 6: the judge's advice is kept with a video under review");
+    else if (from == 5)
         qInfo("[db] library brought up from layout 5: channels are allowed or denied by you; an accepted video vouches for itself");
     else
         qInfo("[db] library brought up from layout 4: one track per video, review by video");
@@ -413,6 +428,7 @@ bool Database::init(QString *error)
                        " PRIMARY KEY (video_id, track_key))"),
         QStringLiteral("CREATE INDEX IF NOT EXISTS candidates_track ON candidates(track_key)"),
         QString::fromLatin1(kChannelListsSql),
+        QString::fromLatin1(kJudgeAdviceSql),
         QStringLiteral("CREATE INDEX IF NOT EXISTS tracks_state ON tracks(state)"),
         QStringLiteral("CREATE INDEX IF NOT EXISTS tracks_video ON tracks(video_id)"),
         QStringLiteral("CREATE INDEX IF NOT EXISTS tracks_recording ON tracks(recording)"),
@@ -471,8 +487,9 @@ bool Database::init(QString *error)
     // What an upload's page says of its channel, kept since small channels
     // can be ignored: its subscribers and its verified mark, and its handle,
     // by which an exception names it. And when the upload was published.
+    // And the upload's description, for the judge (judge page, V1).
     for (const char *column : {"yt_channel_subs INTEGER", "yt_channel_verified INTEGER NOT NULL DEFAULT 0", "yt_channel_handle TEXT",
-                               "yt_date TEXT"}) {
+                               "yt_date TEXT", "yt_description TEXT"}) {
         QSqlQuery q(db);
         const QString name = QString::fromLatin1(column).section(QLatin1Char(' '), 0, 0);
         bool has = false;
@@ -968,8 +985,8 @@ qint64 Database::insertVideo(const VideoInfo &v)
         "INSERT INTO videos (yt_id, path, thumb, title, artist, album_artist, album, genre, year,"
         " track_no, duration, width, height, fps, vcodec, audio_source, audio_detail, yt_title,"
         " yt_channel, tags_json, added_at, yt_abr, review, review_start, review_end, yt_stream, yt_channel_id,"
-        " yt_channel_subs, yt_channel_verified, yt_channel_handle, vouched, yt_date)"
-        " VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)"));
+        " yt_channel_subs, yt_channel_verified, yt_channel_handle, vouched, yt_date, yt_description)"
+        " VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)"));
     q.addBindValue(v.ytId);
     q.addBindValue(storedPath(v.path));
     q.addBindValue(storedPath(v.thumb));
@@ -1002,6 +1019,7 @@ qint64 Database::insertVideo(const VideoInfo &v)
     q.addBindValue(v.ytChannelHandle.isNull() ? QVariant() : QVariant(v.ytChannelHandle));
     q.addBindValue(v.vouched && !v.review);
     q.addBindValue(v.ytDate.isNull() ? QVariant() : QVariant(v.ytDate));
+    q.addBindValue(v.ytDescription.isEmpty() ? QVariant() : QVariant(v.ytDescription));
     if (!run(q))
         return 0;
     return q.lastInsertId().toLongLong();
@@ -1054,12 +1072,13 @@ void Database::updateVideoChannel(const VideoInfo &v)
     QSqlQuery q(conn());
     // (The page read for the channel says when the upload was published too.)
     q.prepare(QStringLiteral("UPDATE videos SET yt_channel_id = ?, yt_channel_subs = ?, yt_channel_verified = ?,"
-                             " yt_channel_handle = ?, yt_date = COALESCE(?, yt_date) WHERE id = ?"));
+                             " yt_channel_handle = ?, yt_date = COALESCE(?, yt_date), yt_description = COALESCE(?, yt_description) WHERE id = ?"));
     q.addBindValue(keptText(v.ytChannelId));
     q.addBindValue(v.ytChannelSubs > -2 ? QVariant(v.ytChannelSubs) : QVariant());
     q.addBindValue(v.ytChannelVerified);
     q.addBindValue(v.ytChannelHandle.isNull() ? QVariant() : QVariant(v.ytChannelHandle));
     q.addBindValue(v.ytDate.isNull() ? QVariant() : QVariant(v.ytDate));
+    q.addBindValue(v.ytDescription.isEmpty() ? QVariant() : QVariant(v.ytDescription));
     q.addBindValue(v.id);
     run(q);
 }
@@ -1110,6 +1129,76 @@ void Database::clearCandidates(qint64 videoId)
     run(q);
 }
 
+void Database::setVideoReview(qint64 videoId, bool review)
+{
+    QSqlQuery q(conn());
+    q.prepare(QStringLiteral("UPDATE videos SET review = ? WHERE id = ?"));
+    q.addBindValue(review ? 1 : 0);
+    q.addBindValue(videoId);
+    run(q);
+}
+
+void Database::setAdvice(const Advice &a)
+{
+    QSqlQuery q(conn());
+    q.prepare(QStringLiteral("INSERT INTO judge_advice (video_id, track_key, mode, model, keep, probability, kind, source, version, whole, note, asked_at)"
+                             " VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)"
+                             " ON CONFLICT(video_id, track_key) DO UPDATE SET mode = excluded.mode, model = excluded.model, keep = excluded.keep,"
+                             " probability = excluded.probability, kind = excluded.kind, source = excluded.source, version = excluded.version,"
+                             " whole = excluded.whole, note = excluded.note, asked_at = excluded.asked_at"));
+    q.addBindValue(a.videoId);
+    q.addBindValue(a.trackKey);
+    q.addBindValue(a.mode);
+    q.addBindValue(a.model);
+    q.addBindValue(a.keep ? 1 : 0);
+    q.addBindValue(a.probability);
+    q.addBindValue(a.kind);
+    q.addBindValue(a.source);
+    q.addBindValue(a.version);
+    q.addBindValue(a.whole);
+    q.addBindValue(a.note);
+    q.addBindValue(a.askedAt);
+    run(q);
+}
+
+QVector<Database::Advice> Database::advice(qint64 videoId)
+{
+    QVector<Advice> out;
+    QSqlQuery q(conn());
+    q.prepare(QStringLiteral("SELECT track_key, mode, model, keep, probability, kind, source, version, whole, note, asked_at"
+                             " FROM judge_advice WHERE video_id = ?"));
+    q.addBindValue(videoId);
+    if (!run(q))
+        return out;
+    while (q.next()) {
+        Advice a;
+        a.videoId = videoId;
+        int i = 0;
+        a.trackKey = q.value(i++).toLongLong();
+        a.mode = q.value(i++).toString();
+        a.model = q.value(i++).toString();
+        a.keep = q.value(i++).toBool();
+        a.probability = q.value(i++).toDouble();
+        a.kind = q.value(i++).toString();
+        a.source = q.value(i++).toString();
+        a.version = q.value(i++).toString();
+        a.whole = q.value(i++).toString();
+        a.note = q.value(i++).toString();
+        a.askedAt = q.value(i++).toLongLong();
+        out.append(a);
+    }
+    return out;
+}
+
+void Database::clearAdvice(qint64 videoId, qint64 trackKey)
+{
+    QSqlQuery q(conn());
+    q.prepare(QStringLiteral("DELETE FROM judge_advice WHERE video_id = ? AND track_key = ?"));
+    q.addBindValue(videoId);
+    q.addBindValue(trackKey);
+    run(q);
+}
+
 QVector<Database::Candidate> Database::candidates(qint64 videoId)
 {
     QVector<Candidate> out;
@@ -1153,6 +1242,18 @@ QVector<VideoInfo> Database::candidacies(const TrackInfo &track)
     q.prepare(QStringLiteral("SELECT %1 FROM videos WHERE review = 1 AND id IN (SELECT video_id FROM candidates WHERE track_key = ?) ORDER BY id")
                   .arg(QLatin1String(kVideoCols)));
     q.addBindValue(trackKey(track));
+    if (run(q)) {
+        while (q.next())
+            out << resolved(readVideo(q));
+    }
+    return out;
+}
+
+QVector<VideoInfo> Database::videosUnderReview()
+{
+    QVector<VideoInfo> out;
+    QSqlQuery q(conn());
+    q.prepare(QStringLiteral("SELECT %1 FROM videos WHERE review = 1 ORDER BY id").arg(QLatin1String(kVideoCols)));
     if (run(q)) {
         while (q.next())
             out << resolved(readVideo(q));
@@ -1459,6 +1560,7 @@ bool Database::restoreVideo(const VideoInfo &v)
         q.addBindValue(v.ytChannelHandle.isNull() ? QVariant() : QVariant(v.ytChannelHandle));
         q.addBindValue(v.vouched && !v.review);
         q.addBindValue(v.ytDate.isNull() ? QVariant() : QVariant(v.ytDate));
+        q.addBindValue(v.ytDescription.isEmpty() ? QVariant() : QVariant(v.ytDescription));
     };
     QStringList sets;
     for (const QString &c : cols)

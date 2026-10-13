@@ -110,6 +110,11 @@ private:
     void drainEvents();
     void handleProperty(const mpv_event_property *prop);
     void refreshTracks();
+    int audioTrackCount() const;
+    // Every audio track decoded at once and mixed, the chosen one at full
+    // volume: a change of track is then a filter command, with no gap.
+    void setMixer(int tracks, int first);
+    void setMixerVolumes(int track);
     void updateSampling();
     void requestSample();
     void onFramePixels(const QByteArray &rgba); // 16x9 RGBA from the renderer
@@ -124,6 +129,7 @@ private:
     bool m_muted = false;
     int m_audioTrack = 0;
     int m_firstAudioTrack = 1;
+    int m_mixerTracks = 0; // 0: mpv's own track selection
     QVariantList m_audioTracks;
     bool m_hasSubtitles = false;
     bool m_subtitlesVisible = true;

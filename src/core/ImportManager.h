@@ -32,6 +32,19 @@ struct ImportSettings {
     QStringList subtitleLangs;     // subtitles to fetch with a video ("en"); empty: none
     int retryNotFoundDays = 14;
     int pauseBaseSecs = 600;       // first wait after YouTube blocks requests; doubles on repeats
+    // The judge (docs/import-rules-judge.html): "off", "advice" (a
+    // recommendation on cards under review, X2) or "judge" (it runs the
+    // lookup, Q–W); which model ("haiku", "sonnet", "opus"); where the
+    // account's key is kept.
+    QString judgeMode = QStringLiteral("off");
+    QString judgeModel = QStringLiteral("sonnet");
+    int judgeThreads = 1; // advice questions at once (X2): 1–8
+    QString judgeKeyFile;
+    // Keeping everything (README): every yt-dlp exchange, every file a
+    // lookup brings and every question to the judge, kept under captureDir
+    // for good; a replay answers from replayDir wherever it can. Empty: off.
+    QString captureDir;
+    QString replayDir;
 };
 
 struct JobStatus {
@@ -93,8 +106,10 @@ public:
     // candidates wait on what else they are candidates of, or have no video.
     // The verdict is carried out on a thread of its own: videoChanged or
     // videoRemoved says when.
-    void approveVideo(qint64 videoId, qint64 trackId = 0);
-    void rejectVideo(qint64 videoId);
+    // `byJudge`: "Accept all" carrying out the judge's confident advice on
+    // your behalf (import-rules-judge X4); logged as the judge's.
+    void approveVideo(qint64 videoId, qint64 trackId = 0, bool byJudge = false);
+    void rejectVideo(qint64 videoId, bool byJudge = false);
     // The last verdict can be taken back while what it deleted is set aside
     // in `.mvplayer/undo` (G10): the app's verdicts, not the headless
     // importer's, and not those a channel gives. One step: the next verdict
@@ -130,6 +145,17 @@ public:
     // shown: first the one the upload is titled after (and no other), then
     // by how close each one's waveform is to the upload's.
     static QVector<Database::Candidate> candidatesInOrder(Database *db, const VideoInfo &video);
+    // Advice mode (X2): asks the judge whether the video under review is the
+    // official video of its candidate `trackId`, from the video's own file
+    // and what the library kept of the upload; nothing is fetched. Asked
+    // once per video and candidate unless `again`; adviceChanged says when
+    // the answer is in. Carried out on a thread of its own.
+    void askJudge(qint64 videoId, qint64 trackId, bool again = false);
+    // "Review all" (X2): asks about every video under review that has no
+    // answer yet, for each of its candidates, in the queue's order.
+    void askJudgeAll();
+    // Questions queued for the judge and not yet answered (advice mode).
+    int adviceLeft() const { return m_adviceLeft.load(); }
 
     // Looks at every video in the library again with the account's cookies
     // and rebuilds those YouTube now offers in better quality.
@@ -190,6 +216,12 @@ signals:
     void activityChanged();
     void idle();
     void undoChanged();
+    // Judge mode: a lookup the judge settled by itself (W1, W3), or left
+    // for your verdict (W2, W4).
+    void judgeDecided(qint64 trackId, bool alone);
+    // The judge's advice on a video under review changed (X2).
+    void adviceChanged(qint64 videoId);
+    void adviceQueueChanged(int left);
 
 private:
     // What a verdict changed, as it was before: the video and the videos
@@ -256,8 +288,8 @@ private:
     // `byChannel`: accepted because its channel was allowed, not by the
     // user's verdict on the video itself.
     // `undoable`: the user's own verdict in the app, kept so it can be taken back.
-    void approveJob(qint64 videoId, qint64 trackId, const ImportSettings &cfg, bool byChannel = false, bool undoable = false);
-    void rejectJob(qint64 videoId, const QString &why = QString(), bool undoable = false);
+    void approveJob(qint64 videoId, qint64 trackId, const ImportSettings &cfg, bool byChannel = false, bool undoable = false, bool byJudge = false);
+    void rejectJob(qint64 videoId, const QString &why = QString(), bool undoable = false, bool byJudge = false);
     // A video under review judged from its file with its channel taken as an
     // artist's: the candidate whose own recording it is (the closest fit of
     // several), or why it still waits.
@@ -268,6 +300,7 @@ private:
     };
     ChannelVerdict judgeAsArtists(const VideoInfo &video, const ImportSettings &cfg, const std::atomic<bool> *stop);
     void allowJob(const QString &channelId, const ImportSettings &cfg);
+    void adviceJob(qint64 videoId, qint64 trackId, bool again, const ImportSettings &cfg);
     void denyJob(const QString &channelId);
     void requeuePending(); // any thread
     void pump();
@@ -299,6 +332,8 @@ private:
     QThreadPool m_replacePool;
     QThreadPool m_verdictPool;
     QThreadPool m_previewPool;
+    QThreadPool m_judgePool; // advice mode's questions, one at a time
+    std::atomic<int> m_adviceLeft{0};
     std::shared_ptr<std::atomic<bool>> m_previewStop;
     int m_previewTicket = 0;
     bool m_settledOnce = false; // what a library from before needs was asked for, this run

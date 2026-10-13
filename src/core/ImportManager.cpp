@@ -1,6 +1,7 @@
 #include "core/ImportManager.h"
 
 #include "core/ArtistChannels.h"
+#include "core/Judge.h"
 
 #include "core/TalkCheck.h"
 
@@ -349,6 +350,7 @@ ImportManager::ImportManager(Database *db, QObject *parent)
     m_replacePool.setMaxThreadCount(1);
     m_verdictPool.setMaxThreadCount(1);
     m_previewPool.setMaxThreadCount(2);
+    m_judgePool.setMaxThreadCount(qBound(1, m_settings.judgeThreads, 8));
     m_jobPool.setMaxThreadCount(2);
 
     m_debounce.setSingleShot(true);
@@ -394,6 +396,14 @@ void ImportManager::setSettings(const ImportSettings &s)
     QMutexLocker lock(&m_mutex);
     m_settings = s;
     m_jobPool.setMaxThreadCount(qBound(1, s.concurrency, 8));
+    m_judgePool.setMaxThreadCount(qBound(1, s.judgeThreads, 8));
+    YtDlp::setCapture(s.captureDir);
+    YtDlp::setReplay(s.replayDir);
+    Judge::setCapture(s.captureDir);
+    Judge::setReplay(s.replayDir);
+    // Q2: with the judge running the lookups, A2–A4 do not skip a track; the
+    // next scan unskips what they had.
+    Matcher::setJudgeRunsLookups(s.judgeMode == QLatin1String("judge"));
 }
 
 ImportSettings ImportManager::settings() const
@@ -447,6 +457,9 @@ void ImportManager::stop()
     if (m_previewStop)
         *m_previewStop = true;
     m_previewPool.waitForDone();
+    m_judgePool.clear();
+    m_judgePool.waitForDone();
+    m_adviceLeft = 0;
     m_replacing = false;
     m_pending.clear();
     m_active = 0;
@@ -980,14 +993,14 @@ void ImportManager::prepareCandidates(const ImportSettings &cfg)
     }
 }
 
-void ImportManager::approveVideo(qint64 videoId, qint64 trackId)
+void ImportManager::approveVideo(qint64 videoId, qint64 trackId, bool byJudge)
 {
     ++m_reviewJobs;
     emit activityChanged();
     const ImportSettings cfg = settings();
     const bool undoable = m_keepsUndo;
-    m_verdictPool.start([this, videoId, trackId, cfg, undoable] {
-        approveJob(videoId, trackId, cfg, false, undoable);
+    m_verdictPool.start([this, videoId, trackId, cfg, undoable, byJudge] {
+        approveJob(videoId, trackId, cfg, false, undoable, byJudge);
         --m_reviewJobs;
         QMetaObject::invokeMethod(this, [this] {
             emit activityChanged();
@@ -996,13 +1009,13 @@ void ImportManager::approveVideo(qint64 videoId, qint64 trackId)
     });
 }
 
-void ImportManager::rejectVideo(qint64 videoId)
+void ImportManager::rejectVideo(qint64 videoId, bool byJudge)
 {
     ++m_reviewJobs;
     emit activityChanged();
     const bool undoable = m_keepsUndo;
-    m_verdictPool.start([this, videoId, undoable] {
-        rejectJob(videoId, QString(), undoable);
+    m_verdictPool.start([this, videoId, undoable, byJudge] {
+        rejectJob(videoId, QString(), undoable, byJudge);
         --m_reviewJobs;
         QMetaObject::invokeMethod(this, [this] {
             emit activityChanged();
@@ -1011,7 +1024,7 @@ void ImportManager::rejectVideo(qint64 videoId)
     });
 }
 
-void ImportManager::approveJob(qint64 videoId, qint64 trackId, const ImportSettings &cfg, bool byChannel, bool undoable)
+void ImportManager::approveJob(qint64 videoId, qint64 trackId, const ImportSettings &cfg, bool byChannel, bool undoable, bool byJudge)
 {
     std::optional<VideoInfo> v = m_db->video(videoId);
     if (!v || !v->review)
@@ -1133,11 +1146,13 @@ void ImportManager::approveJob(qint64 videoId, qint64 trackId, const ImportSetti
     releaseCandidates(videoId, candidates, keeper ? &*keeper : nullptr,
                       !keeper ? how
                       : (byChannel ? QStringLiteral("“%1” is the video of “%2” [%3]: its channel is one you allowed")
+                         : byJudge ? QStringLiteral("the judge accepted “%1” for “%2” [%3] on your behalf")
                                    : QStringLiteral("you accepted “%1” for “%2” [%3]")).arg(v->ytTitle, keeper->title, keeper->album));
     qInfo().noquote() << (byChannel ? QStringLiteral("[channel] “%1” (%2) is accepted: its channel is one you allowed")
+                          : byJudge ? QStringLiteral("[judge] accepted “%1” (%2) on your behalf")
                                     : QStringLiteral("[review] accepted “%1” (%2)")).arg(v->title, v->ytTitle);
     appendLog({{QStringLiteral("event"), QStringLiteral("verdict")}, {QStringLiteral("verdict"), QStringLiteral("accept")},
-               {QStringLiteral("by"), byChannel ? QStringLiteral("allowed-channel") : QStringLiteral("you")},
+               {QStringLiteral("by"), byChannel ? QStringLiteral("allowed-channel") : byJudge ? QStringLiteral("judge") : QStringLiteral("you")},
                {QStringLiteral("videoId"), videoId}, {QStringLiteral("id"), v->ytId}, {QStringLiteral("title"), v->ytTitle},
                {QStringLiteral("channel"), v->ytChannel},
                {QStringLiteral("tracks"), tracks}, {QStringLiteral("otherCandidates"), others}});
@@ -1149,7 +1164,7 @@ void ImportManager::approveJob(qint64 videoId, qint64 trackId, const ImportSetti
         withdraw(*keeper, m_db->candidacies(*keeper));
 }
 
-void ImportManager::rejectJob(qint64 videoId, const QString &why, bool undoable)
+void ImportManager::rejectJob(qint64 videoId, const QString &why, bool undoable, bool byJudge)
 {
     std::optional<VideoInfo> v = m_db->video(videoId);
     if (!v || !v->review)
@@ -1180,12 +1195,15 @@ void ImportManager::rejectJob(qint64 videoId, const QString &why, bool undoable)
         names.append(QJsonObject{{QStringLiteral("trackId"), c.track.id}, {QStringLiteral("track"), c.track.title}, {QStringLiteral("album"), c.track.album}});
     }
     releaseCandidates(videoId, candidates, nullptr,
-                      why.isEmpty() ? QStringLiteral("you turned down “%1”").arg(v->ytTitle) : QStringLiteral("%1: “%2”").arg(why, v->ytTitle));
+                      !why.isEmpty() ? QStringLiteral("%1: “%2”").arg(why, v->ytTitle)
+                      : byJudge ? QStringLiteral("the judge turned down “%1” on your behalf").arg(v->ytTitle)
+                                : QStringLiteral("you turned down “%1”").arg(v->ytTitle));
     discardVideo(*v);
-    qInfo().noquote() << (why.isEmpty() ? QStringLiteral("[review] rejected “%1” (%2)")
-                                        : QStringLiteral("[channel] “%1” (%2) is deleted: its channel is one you denied")).arg(v->title, v->ytTitle);
+    qInfo().noquote() << (!why.isEmpty() ? QStringLiteral("[channel] “%1” (%2) is deleted: its channel is one you denied")
+                          : byJudge ? QStringLiteral("[judge] rejected “%1” (%2) on your behalf")
+                                    : QStringLiteral("[review] rejected “%1” (%2)")).arg(v->title, v->ytTitle);
     appendLog({{QStringLiteral("event"), QStringLiteral("verdict")}, {QStringLiteral("verdict"), QStringLiteral("reject")},
-               {QStringLiteral("by"), why.isEmpty() ? QStringLiteral("you") : QStringLiteral("denied-channel")},
+               {QStringLiteral("by"), !why.isEmpty() ? QStringLiteral("denied-channel") : byJudge ? QStringLiteral("judge") : QStringLiteral("you")},
                {QStringLiteral("videoId"), videoId}, {QStringLiteral("id"), v->ytId}, {QStringLiteral("title"), v->ytTitle},
                {QStringLiteral("channel"), v->ytChannel}, {QStringLiteral("tracks"), names}});
 }
@@ -1235,6 +1253,114 @@ ImportManager::ChannelVerdict ImportManager::judgeAsArtists(const VideoInfo &vid
     else if (out.reason.isEmpty())
         out.reason = QStringLiteral("it has no candidate track in the music folders");
     return out;
+}
+
+void ImportManager::askJudge(qint64 videoId, qint64 trackId, bool again)
+{
+    const ImportSettings cfg = settings();
+    if (cfg.judgeMode == QLatin1String("off"))
+        return;
+    emit adviceQueueChanged(++m_adviceLeft);
+    m_judgePool.start([this, videoId, trackId, again, cfg] {
+        adviceJob(videoId, trackId, again, cfg);
+        emit adviceQueueChanged(--m_adviceLeft);
+    });
+}
+
+void ImportManager::askJudgeAll()
+{
+    if (settings().judgeMode != QLatin1String("advice"))
+        return;
+    for (const VideoInfo &v : m_db->videosUnderReview()) {
+        const QVector<Database::Advice> have = m_db->advice(v.id);
+        for (const Database::Candidate &c : candidatesInOrder(m_db, v)) {
+            const qint64 key = Database::trackKey(c.track);
+            if (std::any_of(have.cbegin(), have.cend(), [&](const Database::Advice &a) { return a.trackKey == key; }))
+                continue; // answered already
+            askJudge(v.id, c.track.id, false);
+        }
+    }
+}
+
+void ImportManager::adviceJob(qint64 videoId, qint64 trackId, bool again, const ImportSettings &cfg)
+{
+    // Advice mode (X2): the one question of V, about this video for this
+    // candidate, from the file and what the library kept of the upload.
+    const std::optional<VideoInfo> video = m_db->video(videoId);
+    const std::optional<TrackInfo> track = m_db->track(trackId);
+    if (!video || !video->review || !track || m_cancel)
+        return;
+    const qint64 key = Database::trackKey(*track);
+    if (!again) {
+        for (const Database::Advice &a : m_db->advice(videoId)) {
+            if (a.trackKey == key)
+                return; // asked already
+        }
+    }
+    const QString apiKey = Judge::readKey(cfg.judgeKeyFile);
+    const QString model = Judge::modelId(cfg.judgeModel);
+    Judge::Upload u;
+    u.id = video->ytId;
+    u.title = video->ytTitle;
+    u.channel = video->ytChannel;
+    u.handle = video->ytChannelHandle;
+    u.verified = video->ytChannelVerified;
+    u.subscribers = video->ytChannelSubs;
+    u.date = video->ytDate;
+    u.description = video->ytDescription;
+    u.allowed = !video->ytChannelId.isEmpty() && m_db->channelAllowed(video->ytChannelId);
+    u.duration = video->duration;
+    u.width = video->width;
+    u.height = video->height;
+    std::vector<int16_t> ytPcm, pcm;
+    QString error;
+    if (AudioAlign::decodeMono(video->path, &ytPcm, &m_cancel, &error, video->ytStream) && AudioAlign::decodeMono(track->path, &pcm, &m_cancel, &error))
+        u.audio = Judge::audioText(fitted(AudioAlign::align(pcm, ytPcm), *track, video->ytTitle, video->ytChannel));
+    else
+        u.audio = QStringLiteral("not measured (%1)").arg(error);
+    if (m_cancel)
+        return;
+    const QString work = QDir(dataDir(cfg.mvDir)).filePath(QStringLiteral("tmp/advice-%1").arg(videoId));
+    u.picture = Judge::frames(video->path, video->duration, work, &m_cancel);
+    QVector<TrackInfo> others;
+    for (const Database::Candidate &c : m_db->candidates(videoId)) {
+        if (Database::trackKey(c.track) != key)
+            others.append(c.track);
+    }
+    const Judge::Answer a = Judge::ask(apiKey, model, QString::fromUtf8(JudgeWords::kVerdictWords), Judge::verdictContent(*track, others, {u}),
+                                       QString::fromUtf8(JudgeWords::kVerdictSchema), 4000, cacheDir(cfg.mvDir), &m_cancel);
+    QDir(work).removeRecursively();
+    if (m_cancel)
+        return;
+    appendLog({{QStringLiteral("event"), QStringLiteral("judge")}, {QStringLiteral("question"), QStringLiteral("advice")},
+               {QStringLiteral("model"), a.model}, {QStringLiteral("videoId"), videoId}, {QStringLiteral("id"), video->ytId},
+               {QStringLiteral("title"), video->ytTitle}, {QStringLiteral("trackId"), track->id}, {QStringLiteral("track"), track->title},
+               {QStringLiteral("artist"), track->artist}, {QStringLiteral("album"), track->album},
+               {QStringLiteral("answer"), a.json}, {QStringLiteral("error"), a.error}, {QStringLiteral("usage"), a.usage},
+               {QStringLiteral("cost"), a.cost}, {QStringLiteral("seconds"), a.seconds}, {QStringLiteral("cached"), a.cached}});
+    Database::Advice ad;
+    ad.videoId = videoId;
+    ad.trackKey = key;
+    ad.mode = QStringLiteral("advice");
+    ad.model = model;
+    ad.askedAt = QDateTime::currentSecsSinceEpoch();
+    if (!a.error.isEmpty()) {
+        qWarning().noquote() << "[judge] no advice on" << video->ytTitle << ":" << a.error;
+        ad.kind = QStringLiteral("error");
+        ad.note = a.error;
+    } else {
+        const QJsonObject o = Judge::optionAt(a.json, 1);
+        ad.keep = o.value(QLatin1String("official_mv")).toBool();
+        ad.probability = o.value(QLatin1String("confidence")).toDouble();
+        ad.kind = o.value(QLatin1String("kind")).toString();
+        ad.source = o.value(QLatin1String("source")).toString();
+        ad.version = o.value(QLatin1String("version")).toString();
+        ad.whole = o.value(QLatin1String("whole")).toString();
+        ad.note = o.value(QLatin1String("note")).toString();
+        qInfo().noquote() << QStringLiteral("[judge] advice on “%1” for “%2”: %3 %4").arg(video->ytTitle, track->title, ad.keep ? QStringLiteral("keep") : QStringLiteral("not this one")).arg(ad.probability, 0, 'f', 2);
+    }
+    m_db->setAdvice(ad);
+    emit adviceChanged(videoId);
 }
 
 int ImportManager::previewAllowChannel(const QString &channelId)
@@ -2498,6 +2624,7 @@ void ImportManager::replaceWithJob(const VideoInfo &video, const TrackInfo &trac
     v.ytChannelVerified = channelFacts.verified;
     v.ytChannelHandle = channelFacts.handle;
     v.ytDate = YtDlp::publishedOn(ytInfo);
+    v.ytDescription = YtDlp::descriptionOf(ytInfo);
     v.tags = track.tags;
     v.addedAt = QDateTime::currentSecsSinceEpoch();
     const qint64 newId = m_db->insertVideo(v);
@@ -2742,7 +2869,7 @@ void ImportManager::runJob(qint64 trackId, const ImportSettings &cfg)
             {QStringLiteral("match"), QStringLiteral("accept")}, {QStringLiteral("takeover"), QStringLiteral("accept")},
             {QStringLiteral("unconfirmed"), QStringLiteral("review")}, {QStringLiteral("option"), QStringLiteral("review")},
             {QStringLiteral("candidate"), QStringLiteral("review")},
-            {QStringLiteral("error"), QStringLiteral("undecided")},
+            {QStringLiteral("error"), QStringLiteral("undecided")}, {QStringLiteral("judged"), QStringLiteral("undecided")},
         };
         QJsonObject o{
             {QStringLiteral("id"), c.id},
@@ -2906,19 +3033,51 @@ void ImportManager::runJob(qint64 trackId, const ImportSettings &cfg)
         emit jobChanged(st);
     };
 
+    // ---- Judge mode (docs/import-rules-judge.html) ---------------------------
+    // The judge runs the lookup: Q (the query), S (the pick), L (gates),
+    // V (the verdict), W (what the track gets). The rules of thumb of C, D
+    // and E do not apply; what stays of the main page is listed there.
+    const bool judging = cfg.judgeMode == QLatin1String("judge");
+    const QString judgeKey = judging ? Judge::readKey(cfg.judgeKeyFile) : QString();
+    const QString judgeModel = Judge::modelId(cfg.judgeModel);
+    // The judge cannot answer (V5): the lookup is postponed as for a pause,
+    // and the pause says why.
+    auto judgePause = [&](const QString &why) {
+        const QString reason = QStringLiteral("The judge cannot answer: %1").arg(why);
+        if (!m_blocked.exchange(true))
+            QMetaObject::invokeMethod(this, [this, reason] { tripBreaker(reason); }, Qt::QueuedConnection);
+        postpone();
+    };
+    // Every answer of the judge is logged (X3).
+    auto logJudge = [&](const QString &question, const Judge::Answer &a, const QJsonArray &uploads) {
+        appendLog({{QStringLiteral("event"), QStringLiteral("judge")}, {QStringLiteral("question"), question},
+                   {QStringLiteral("model"), a.model}, {QStringLiteral("trackId"), track.id}, {QStringLiteral("track"), track.title},
+                   {QStringLiteral("artist"), track.artist}, {QStringLiteral("album"), track.album}, {QStringLiteral("uploads"), uploads},
+                   {QStringLiteral("answer"), a.json}, {QStringLiteral("error"), a.error}, {QStringLiteral("usage"), a.usage},
+                   {QStringLiteral("cost"), a.cost}, {QStringLiteral("seconds"), a.seconds}, {QStringLiteral("cached"), a.cached}});
+    };
+
     QString why;
-    if (Matcher::isNonMvTrack(track, &why)) {
+    if (!judging && Matcher::isNonMvTrack(track, &why)) {
         finish(QStringLiteral("skipped"), 0, why);
         return;
     }
     // Talk between songs (a stage announcement, an interview) has no video
-    // to find. A title can mislead and so can the sound, so it takes both.
+    // to find. A title can mislead and so can the sound, so it takes both
+    // (A4). In judge mode the judge is told how the track sounds (Q2).
+    QString soundLine;
     if (Matcher::isTalkTitle(track.title)) {
         std::vector<int16_t> pcm;
         QString decodeError;
         if (AudioAlign::decodeMono(track.path, &pcm, &m_cancel, &decodeError)) {
             const TalkCheck::Result talk = TalkCheck::measure(pcm);
-            if (talk.talk) {
+            if (judging) {
+                if (talk.valid)
+                    soundLine = QStringLiteral("Sound: %1% of its moments are far quieter than its average, and its pulse is %2 (speech: at least 40% and at most 0.26). By the library's own measure it sounds like %3.")
+                                    .arg(qRound(talk.pauses * 100))
+                                    .arg(talk.beat, 0, 'f', 2)
+                                    .arg(talk.talk ? QStringLiteral("talk") : QStringLiteral("music"));
+            } else if (talk.talk) {
                 finish(QStringLiteral("skipped"), 0,
                        QStringLiteral("talk, not a song: titled as such and sounds like it (%1% pauses, beat %2)")
                            .arg(qRound(talk.pauses * 100))
@@ -2928,6 +3087,38 @@ void ImportManager::runJob(qint64 trackId, const ImportSettings &cfg)
         }
         if (m_cancel)
             return cleanup();
+    }
+
+    // ---- Q. What to search for ------------------------------------------------
+    // In judge mode the judge replaces A2–A4 (Q2) and writes the queries (Q3).
+    QStringList queries;
+    if (judging) {
+        if (judgeKey.isEmpty())
+            return judgePause(QStringLiteral("no API key is stored (Settings → Judge)"));
+        report(QStringLiteral("Asking the judge"));
+        const Judge::Answer a = Judge::ask(judgeKey, judgeModel, QString::fromUtf8(JudgeWords::kQueryWords), Judge::queryContent(track, soundLine),
+                                           QString::fromUtf8(JudgeWords::kQuerySchema), 1500, cacheDir(cfg.mvDir), &m_cancel);
+        if (m_cancel)
+            return cleanup();
+        logJudge(QStringLiteral("query"), a, {});
+        if (!a.error.isEmpty())
+            return judgePause(a.error);
+        if (!a.json.value(QLatin1String("lookup")).toBool()) {
+            const QString skip = a.json.value(QLatin1String("skip_reason")).toString().trimmed();
+            finish(QStringLiteral("skipped"), 0, QStringLiteral("the judge: %1").arg(skip.isEmpty() ? QStringLiteral("nothing to look for") : skip));
+            return;
+        }
+        for (const QJsonValue &q : a.json.value(QLatin1String("queries")).toArray()) {
+            const QString query = q.toString().trimmed();
+            if (!query.isEmpty() && queries.size() < Judge::kMaxQueries && !queries.contains(query))
+                queries << query;
+        }
+        if (queries.isEmpty()) {
+            finish(QStringLiteral("skipped"), 0, QStringLiteral("the judge gave no query"));
+            return;
+        }
+    } else {
+        queries = Matcher::searchQueries(track);
     }
 
     // ---- 1. Search ---------------------------------------------------------
@@ -2952,13 +3143,22 @@ void ImportManager::runJob(qint64 trackId, const ImportSettings &cfg)
                 || ArtistChannels::isArtistChannel(*m_db, Matcher::artistNames(track), c.channelId, c.channel);
         });
         for (YtCandidate &c : candidates) {
+            if (judging && c.rejectReason != QLatin1String("from a channel you denied"))
+                c.rejectReason.clear(); // S3: nothing is dropped on sight
             if (c.rejectReason.isEmpty() && m_db->channelDenied(c.channelId))
                 c.rejectReason = QStringLiteral("from a channel you denied");
         }
     };
-    for (const QString &query : Matcher::searchQueries(track)) {
+    // Judge mode: what it picked from the listing (S3), best first, and
+    // where each result came from (S2).
+    QStringList picked;
+    QString pickReason;
+    QHash<QString, QPair<int, int>> cameFrom; // id -> query, rank
+    int queryNo = 0;
+    for (const QString &query : std::as_const(queries)) {
         QVector<YtCandidate> found;
         ++nSearch;
+        ++queryNo;
         if (!yt.search(query, 10, &found, &error)) {
             if (m_cancel)
                 return cleanup();
@@ -2972,17 +3172,92 @@ void ImportManager::runJob(qint64 trackId, const ImportSettings &cfg)
         // Only a download proves the pause is over (see withRetry).
         m_failStreak = 0;
         logQueries.append(QJsonObject{{QStringLiteral("q"), query}, {QStringLiteral("results"), found.size()}});
+        if (found.isEmpty()) {
+            // An empty answer is how YouTube refuses a guest it has had
+            // enough of; but a query can match nothing too. The probe tells
+            // the two apart: a search whose answer is empty only when
+            // YouTube refuses, asked fresh, its results not looked at.
+            QVector<YtCandidate> probe;
+            QString probeError;
+            ++nSearch;
+            const bool answered = yt.search(QStringLiteral("official music video"), 10, &probe, &probeError, true);
+            if (m_cancel)
+                return cleanup();
+            logQueries.append(answered ? QJsonObject{{QStringLiteral("probe"), true}, {QStringLiteral("results"), probe.size()}}
+                                       : QJsonObject{{QStringLiteral("probe"), true}, {QStringLiteral("error"), probeError}});
+            if (!answered && noteFailure(probeError))
+                return postpone();
+            if (answered && !probe.isEmpty()) {
+                // B6 (S5 in judge mode): nothing matched the query. Asked
+                // again it would find nothing again: the next query.
+                searched = true;
+                continue;
+            }
+            // B5 (S1 in judge mode): refused; it is not "no video". The
+            // query is asked again after the pause.
+            const QString reason = QStringLiteral("YouTube answered the search “%1” with nothing, and the probe after it likewise: refused").arg(query);
+            if (!m_blocked.exchange(true))
+                QMetaObject::invokeMethod(this, [this, reason] { tripBreaker(reason); }, Qt::QueuedConnection);
+            return postpone();
+        }
         searched = true;
+        int rank = 0;
         for (YtCandidate &c : found) {
+            ++rank;
             if (seen.contains(c.id))
                 continue;
             seen.insert(c.id);
+            cameFrom.insert(c.id, {queryNo, rank});
             if (!candidates.isEmpty())
                 c.rank += 2; // results of fallback queries rank slightly lower
             candidates.append(c);
         }
         rankAll();
-        if (std::any_of(candidates.begin(), candidates.end(), usable))
+        if (!judging) {
+            if (std::any_of(candidates.begin(), candidates.end(), usable))
+                break;
+            continue;
+        }
+        // S2: the listing to the judge, without what you turned down for
+        // this track (D0) or denied (G8), a channel you allowed marked (G7).
+        QVector<Judge::Upload> listing;
+        QJsonArray logListing;
+        for (const YtCandidate &c : std::as_const(candidates)) {
+            if (!c.rejectReason.isEmpty() || m_db->videoRejectedFor(track, c.id))
+                continue;
+            Judge::Upload u;
+            u.id = c.id;
+            u.title = c.title;
+            u.channel = c.channel;
+            u.verified = c.verified;
+            u.views = c.views > 0 ? c.views : -1;
+            u.duration = c.duration;
+            u.allowed = !c.channelId.isEmpty() && m_db->channelAllowed(c.channelId);
+            u.query = cameFrom.value(c.id).first;
+            u.rank = cameFrom.value(c.id).second;
+            listing.append(u);
+            logListing.append(QJsonObject{{QStringLiteral("id"), c.id}, {QStringLiteral("title"), c.title}, {QStringLiteral("channel"), c.channel}});
+        }
+        if (listing.isEmpty())
+            continue;
+        // S3: its pick ends the search; none, and the next query is asked.
+        report(QStringLiteral("Asking the judge what to listen to"));
+        const Judge::Answer a = Judge::ask(judgeKey, judgeModel, QString::fromUtf8(JudgeWords::kPickWords), Judge::pickContent(track, listing),
+                                           QString::fromUtf8(JudgeWords::kPickSchema), 1500, cacheDir(cfg.mvDir), &m_cancel);
+        if (m_cancel)
+            return cleanup();
+        logJudge(QStringLiteral("pick"), a, logListing);
+        if (!a.error.isEmpty())
+            return judgePause(a.error);
+        picked.clear();
+        pickReason = a.json.value(QLatin1String("reason")).toString();
+        for (const QJsonValue &pick : a.json.value(QLatin1String("picks")).toArray()) {
+            const QString id = pick.toObject().value(QLatin1String("id")).toString();
+            if (picked.size() < Judge::kMaxPicks && !picked.contains(id)
+                && std::any_of(listing.cbegin(), listing.cend(), [&](const Judge::Upload &u) { return u.id == id; }))
+                picked << id;
+        }
+        if (!picked.isEmpty())
             break;
     }
     if (!searched) {
@@ -2996,7 +3271,9 @@ void ImportManager::runJob(qint64 trackId, const ImportSettings &cfg)
     // subscribers the channel has. One request, nothing downloaded.
     enum class Page { Known, Postponed, Cancelled };
     const auto knowChannel = [&](VideoInfo &v) {
-        if (v.ytChannelSubs != -2)
+        // (The judge is told the upload's description too, V1: a video from
+        // before the library kept it has its page read once for it.)
+        if (v.ytChannelSubs != -2 && (!judging || !v.ytDescription.isEmpty()))
             return Page::Known;
         QJsonObject page;
         QString why;
@@ -3024,6 +3301,8 @@ void ImportManager::runJob(qint64 trackId, const ImportSettings &cfg)
         v.ytChannelHandle = channel.handle;
         if (v.ytDate.isNull())
             v.ytDate = YtDlp::publishedOn(page);
+        if (v.ytDescription.isEmpty())
+            v.ytDescription = YtDlp::descriptionOf(page);
         m_db->updateVideoChannel(v);
         return Page::Known;
     };
@@ -3089,7 +3368,7 @@ void ImportManager::runJob(qint64 trackId, const ImportSettings &cfg)
     int best = 0; // usable search results taken
     for (const YtCandidate &c : std::as_const(candidates)) {
         const bool isPrior = prior && c.id == prior->ytId;
-        const bool result = returned.contains(c.id) && usable(c) && best < 4;
+        const bool result = judging ? picked.contains(c.id) : (returned.contains(c.id) && usable(c) && best < 4);
         if (result)
             ++best;
         // The track's own video is listened to whether it looks official or
@@ -3120,7 +3399,14 @@ void ImportManager::runJob(qint64 trackId, const ImportSettings &cfg)
     // A cut of the song (the 90 seconds used as a show's opening) is its
     // video only for want of a full one: uploads of about the track's length
     // are examined first.
-    if (track.duration > 0) {
+    if (judging) {
+        // In the judge's order (S3); the track's own video and those under
+        // review after its picks (S4).
+        std::stable_sort(shortlisted.begin(), shortlisted.end(), [&](const YtCandidate &a, const YtCandidate &b) {
+            const int ia = picked.indexOf(a.id), ib = picked.indexOf(b.id);
+            return (ia < 0 ? 1000 : ia) < (ib < 0 ? 1000 : ib);
+        });
+    } else if (track.duration > 0) {
         std::stable_partition(shortlisted.begin(), shortlisted.end(), [&track](const YtCandidate &c) {
             return c.duration <= 0 || c.duration >= 0.6 * track.duration;
         });
@@ -3135,8 +3421,12 @@ void ImportManager::runJob(qint64 trackId, const ImportSettings &cfg)
     };
 
     if (shortlisted.isEmpty()) {
+        // (S4 in judge mode.)
         finish(QStringLiteral("not_found"), 0,
-               QStringLiteral("none of %1 search results looked like an official video").arg(candidates.size())
+               (judging ? QStringLiteral("the judge found nothing that looks like the track's official video among %1 results%2")
+                              .arg(candidates.size()).arg(pickReason.isEmpty() ? QString() : QStringLiteral(": ") + pickReason)
+                        : candidates.isEmpty() ? QStringLiteral("the search matched nothing (YouTube answered the probe, B6)")
+                                               : QStringLiteral("none of %1 search results looked like an official video").arg(candidates.size()))
                    + (priorRejected ? QStringLiteral("; ") + reasons.join(QStringLiteral("; ")) : QString()));
         return;
     }
@@ -3174,6 +3464,41 @@ void ImportManager::runJob(qint64 trackId, const ImportSettings &cfg)
         AudioAlign::Result align; // the track against the upload's own audio
     };
     QVector<Join> joins;
+
+    // Judge mode: what the lookup gathers about each pick for the verdict
+    // (V1); nothing is decided until the judge has answered (L6).
+    struct JudgeCase {
+        YtCandidate c;
+        QString dir, audio; // a new download: its folder and its audio
+        QJsonObject info;
+        AudioAlign::Result align;
+        bool song = false;  // L1: the audio says it is the song
+        Judge::Upload upload;
+        std::optional<VideoInfo> existing; // in the library already: under review, or the track's own (H4, H8)
+    };
+    QVector<JudgeCase> cases;
+    QStringList caseClaims;
+    const auto uploadOf = [&](const YtCandidate &c, const YtDlp::Channel &channel, const QString &channelId, const QString &date, qint64 views, int height,
+                              const QString &description) {
+        Judge::Upload u;
+        u.id = c.id;
+        u.title = c.title;
+        u.channel = channel.several || channel.name.isEmpty() ? c.channel : channel.name;
+        if (u.channel.isEmpty())
+            u.channel = c.channel;
+        u.handle = channel.handle;
+        u.verified = channel.verified || c.verified;
+        u.subscribers = channel.subscribers;
+        u.date = date;
+        u.description = description;
+        u.views = views > 0 ? views : -1;
+        u.allowed = !channelId.isEmpty() && m_db->channelAllowed(channelId);
+        u.duration = c.duration;
+        u.height = height;
+        u.query = cameFrom.value(c.id).first;
+        u.rank = cameFrom.value(c.id).second;
+        return u;
+    };
 
     // Downloads fail transiently (throttling, expired stream URLs); one more
     // try after a short pause settles most of them.
@@ -3237,7 +3562,7 @@ void ImportManager::runJob(qint64 trackId, const ImportSettings &cfg)
             // A channel the user denied (known by now, where the library had
             // not kept its id when it was denied), or a small one.
             const bool denied = m_db->channelDenied(existing->ytChannelId);
-            if (denied || smallChannel(existing->ytChannelSubs, existing->ytChannelVerified, m_db->channelAllowed(existing->ytChannelId), cfg)) {
+            if (denied || (!judging && smallChannel(existing->ytChannelSubs, existing->ytChannelVerified, m_db->channelAllowed(existing->ytChannelId), cfg))) {
                 const QString small = denied ? QStringLiteral("its channel is one you denied") : smallChannelReason(existing->ytChannelSubs, cfg);
                 const QString result = denied ? QStringLiteral("denied-channel") : QStringLiteral("small-channel");
                 anyChecked = true;
@@ -3264,6 +3589,52 @@ void ImportManager::runJob(qint64 trackId, const ImportSettings &cfg)
                 }
                 reasons << (denied ? QStringLiteral("“%1” is from a channel you denied").arg(c.title)
                                    : QStringLiteral("“%1” is from a small channel (%2 subscribers)").arg(c.title).arg(existing->ytChannelSubs));
+                continue;
+            }
+            if (judging && (theTracks || existing->review)) {
+                // The track's own video (H4) and a video under review (H8,
+                // D5) are the judge's to weigh, from their files (L5).
+                if (existing->review && !candidateOf) {
+                    const Page page = knowChannel(*existing);
+                    if (page == Page::Cancelled)
+                        return cleanup();
+                    if (page == Page::Postponed)
+                        return postpone();
+                }
+                std::vector<int16_t> pcm;
+                if (!QFile::exists(existing->path) || !AudioAlign::decodeMono(existing->path, &pcm, &m_cancel, &error, existing->ytStream)) {
+                    if (m_cancel)
+                        return cleanup();
+                    checked(c, QStringLiteral("error"), QStringLiteral("in the library already, but its file cannot be read: %1").arg(error));
+                    undecided = true;
+                    reasons << QStringLiteral("“%1”: its file cannot be read").arg(c.title);
+                    continue;
+                }
+                anyChecked = true;
+                JudgeCase jc;
+                jc.c = c;
+                jc.align = fitted(AudioAlign::align(trackPcm, pcm), track, existing->ytTitle, existing->ytChannel);
+                jc.song = audioMatches(jc.align);
+                jc.existing = existing;
+                YtDlp::Channel channel;
+                channel.id = existing->ytChannelId;
+                channel.name = existing->ytChannel;
+                channel.subscribers = existing->ytChannelSubs;
+                channel.verified = existing->ytChannelVerified;
+                channel.handle = existing->ytChannelHandle;
+                jc.upload = uploadOf(c, channel, existing->ytChannelId, existing->ytDate, -1, existing->height, existing->ytDescription);
+                jc.upload.width = existing->width;
+                jc.upload.audio = Judge::audioText(jc.align);
+                report(QStringLiteral("Looking at the picture"), -1, c.title);
+                jc.upload.picture = Judge::frames(existing->path, existing->duration, QDir(workDir).filePath(c.id + QStringLiteral("/frames")), &m_cancel);
+                if (m_cancel)
+                    return cleanup();
+                qInfo().noquote() << QStringLiteral("[align] %1 ~ “%2” [%3] (%4): %5").arg(track.title, c.title, c.id, theTracks ? QStringLiteral("its video until now") : QStringLiteral("under review"), jc.align.summary());
+                checked(c, QStringLiteral("judged"), QStringLiteral("%1; for the judge: %2").arg(theTracks ? QStringLiteral("the track's video until now") : QStringLiteral("under review"),
+                                                                                            jc.song ? QStringLiteral("the song by its fingerprints") : mismatchReason(jc.align)), &jc.align);
+                cases.append(jc);
+                keepClaim = true;
+                caseClaims << c.id;
                 continue;
             }
             if (theTracks) {
@@ -3588,7 +3959,7 @@ void ImportManager::runJob(qint64 trackId, const ImportSettings &cfg)
             QDir(dir).removeRecursively();
             continue;
         }
-        if (smallChannel(channel.subscribers, channel.verified || c.verified, m_db->channelAllowed(channelId), cfg)) {
+        if (!judging && smallChannel(channel.subscribers, channel.verified || c.verified, m_db->channelAllowed(channelId), cfg)) {
             anyChecked = true;
             checked(c, QStringLiteral("small-channel"), smallChannelReason(channel.subscribers, cfg), nullptr,
                     {{QStringLiteral("subscribers"), channel.subscribers}});
@@ -3607,7 +3978,7 @@ void ImportManager::runJob(qint64 trackId, const ImportSettings &cfg)
         anyChecked = true;
         const AudioAlign::Result ar = fitted(AudioAlign::align(trackPcm, mvPcm), track, c.title, c.channel);
         qInfo().noquote() << QStringLiteral("[align] %1 ~ “%2” [%3]: %4").arg(track.title, c.title, c.id, ar.summary());
-        if (!audioMatches(ar)) {
+        if (!judging && !audioMatches(ar)) {
             checked(c, QStringLiteral("different"), mismatchReason(ar), &ar);
             reasons << QStringLiteral("“%1” is a different recording").arg(c.title);
             QDir(dir).removeRecursively();
@@ -3624,7 +3995,7 @@ void ImportManager::runJob(qint64 trackId, const ImportSettings &cfg)
         // (By the channel's id as the upload's page has it, where the search results gave none.)
         const bool knownChannel = ArtistChannels::isArtistChannel(*m_db, Matcher::artistNames(track), channelId, c.channel);
         const bool artistChannel = c.ownChannel || knownChannel;
-        if (cfg.replaceAudio && libraryIsBetter(track, youtubeQuality(info))
+        if (!judging && cfg.replaceAudio && libraryIsBetter(track, youtubeQuality(info))
             && !ownRecording(ar, track, c.title, c.channel, artistChannel, knownChannel)) {
             bool premiumWins = false;
             if (!track.lossless && yt.hasCookies()) {
@@ -3646,14 +4017,15 @@ void ImportManager::runJob(qint64 trackId, const ImportSettings &cfg)
 
         // Where the track is not the better audio there is no
         // review either: such a video is simply not the song's.
-        if (!forReview && interrupted(ar)) {
+        if (!judging && !forReview && interrupted(ar)) {
             checked(c, QStringLiteral("different"), interruptedReason(ar), &ar);
             reasons << QStringLiteral("“%1” interrupts the song").arg(c.title);
             QDir(dir).removeRecursively();
             continue;
         }
 
-        if (cfg.skipStillImages) {
+        QString preview; // judge mode: the picture stream, for the frames (L4.1)
+        if (cfg.skipStillImages || judging) {
             report(QStringLiteral("Checking video"), -1, c.title);
             // A still image is one for every track that has it as a candidate.
             Muxer::StillCheck check;
@@ -3663,8 +4035,8 @@ void ImportManager::runJob(qint64 trackId, const ImportSettings &cfg)
                 check.still = known.value(QLatin1String("still")).toBool();
                 check.movingShare = known.value(QLatin1String("movingShare")).toDouble();
                 check.samples = known.value(QLatin1String("samples")).toInt();
-            } else {
-                QString preview;
+            }
+            if (!check.valid || (judging && !check.still)) {
                 ++nPreview;
                 if (!withRetry([&] { return yt.downloadPreview(c.id, dir, &preview, &error); })) {
                     if (m_cancel)
@@ -3678,15 +4050,18 @@ void ImportManager::runJob(qint64 trackId, const ImportSettings &cfg)
                     QDir(dir).removeRecursively();
                     continue;
                 }
-                check = Muxer::checkStill(preview, false, &m_cancel);
-                QFile::remove(preview);
-                if (m_cancel)
-                    return cleanup();
-                if (check.valid) {
-                    yt.setNote(c.id, QStringLiteral("picture"),
-                               {{QStringLiteral("still"), check.still}, {QStringLiteral("movingShare"), check.movingShare},
-                                {QStringLiteral("samples"), check.samples}});
+                if (!check.valid) {
+                    check = Muxer::checkStill(preview, false, &m_cancel);
+                    if (m_cancel)
+                        return cleanup();
+                    if (check.valid) {
+                        yt.setNote(c.id, QStringLiteral("picture"),
+                                   {{QStringLiteral("still"), check.still}, {QStringLiteral("movingShare"), check.movingShare},
+                                    {QStringLiteral("samples"), check.samples}});
+                    }
                 }
+                if (!judging)
+                    QFile::remove(preview);
             }
             const QJsonObject picture{{QStringLiteral("movingShare"), std::round(check.movingShare * 1000) / 1000},
                                       {QStringLiteral("framePairs"), qMax(0, check.samples - 1)}};
@@ -3705,6 +4080,33 @@ void ImportManager::runJob(qint64 trackId, const ImportSettings &cfg)
                 QDir(dir).removeRecursively();
                 continue;
             }
+        }
+
+        if (judging) {
+            // Nothing is decided here: the judge is asked once, with all of
+            // them (L6).
+            JudgeCase jc;
+            jc.c = c;
+            jc.dir = dir;
+            jc.audio = audioFile;
+            jc.info = info;
+            jc.align = ar;
+            jc.song = audioMatches(ar);
+            jc.upload = uploadOf(c, channel, channelId, YtDlp::publishedOn(info),
+                                 c.views > 0 ? c.views : qint64(info.value(QLatin1String("view_count")).toDouble()), YtDlp::bestHeight(info),
+                                 YtDlp::descriptionOf(info));
+            jc.upload.audio = Judge::audioText(ar);
+            report(QStringLiteral("Looking at the picture"), -1, c.title);
+            jc.upload.picture = Judge::frames(preview, c.duration > 0 ? c.duration : ar.videoSec, QDir(dir).filePath(QStringLiteral("frames")), &m_cancel);
+            if (m_cancel)
+                return cleanup();
+            QFile::remove(preview);
+            checked(c, QStringLiteral("judged"), QStringLiteral("for the judge: %1").arg(jc.song ? QStringLiteral("the song by its fingerprints") : mismatchReason(ar)), &ar,
+                    {{QStringLiteral("youtubeKbps"), qRound(YtDlp::audioKbps(info))}, {QStringLiteral("pictureChanged"), std::round(jc.upload.picture.changed * 1000) / 1000}});
+            cases.append(jc);
+            keepClaim = true;
+            caseClaims << c.id;
+            continue;
         }
 
         if (forReview) {
@@ -3730,6 +4132,175 @@ void ImportManager::runJob(qint64 trackId, const ImportSettings &cfg)
         alignment = ar;
         keepClaim = true;
         break;
+    }
+
+    // ---- V. The judge's verdict; W. what the track gets -----------------------
+    bool judgeReview = false; // W2, W4: cards under review whatever the audio says
+    bool judgeVouch = false;  // W1: the verdict vouches for the upload (R5)
+    QHash<QString, Database::Advice> adviceById;
+    QString judgeSays;
+    if (judging) {
+        // (Claimed again below, as every lookup claims what it brings in.)
+        for (const QString &id : std::as_const(caseClaims))
+            releaseVideo(id);
+        if (cases.isEmpty()) {
+            // W5: no pick could be examined; or every one was turned down for
+            // the track already.
+            const bool open = undecided || !anyChecked;
+            finish(open ? QStringLiteral("failed") : QStringLiteral("not_found"), 0, reasons.join(QStringLiteral("; ")));
+            return;
+        }
+        report(QStringLiteral("Asking the judge for its verdict"));
+        QVector<Judge::Upload> uploads;
+        QJsonArray logUploads;
+        QVector<TrackInfo> others;
+        QSet<qint64> otherKeys{Database::trackKey(track)};
+        for (const JudgeCase &jc : std::as_const(cases)) {
+            uploads.append(jc.upload);
+            logUploads.append(QJsonObject{{QStringLiteral("id"), jc.c.id}, {QStringLiteral("title"), jc.c.title}, {QStringLiteral("channel"), jc.upload.channel},
+                                          {QStringLiteral("duration"), qRound(jc.c.duration)}, {QStringLiteral("song"), jc.song},
+                                          {QStringLiteral("audio"), jc.upload.audio}, {QStringLiteral("picture"), Judge::pictureText(jc.upload.picture)},
+                                          {QStringLiteral("existing"), jc.existing ? jc.existing->id : 0}});
+            if (jc.existing && jc.existing->review) {
+                for (const Database::Candidate &o : m_db->candidates(jc.existing->id)) {
+                    if (!otherKeys.contains(Database::trackKey(o.track))) {
+                        otherKeys.insert(Database::trackKey(o.track));
+                        others.append(o.track);
+                    }
+                }
+            }
+        }
+        const Judge::Answer v = Judge::ask(judgeKey, judgeModel, QString::fromUtf8(JudgeWords::kVerdictWords), Judge::verdictContent(track, others, uploads),
+                                           QString::fromUtf8(JudgeWords::kVerdictSchema), 4000, cacheDir(cfg.mvDir), &m_cancel);
+        if (m_cancel)
+            return cleanup();
+        logJudge(QStringLiteral("verdict"), v, logUploads);
+        if (!v.error.isEmpty())
+            return judgePause(v.error);
+        const QString verdict = v.json.value(QLatin1String("verdict")).toString();
+        const int chosenIdx = v.json.value(QLatin1String("chosen")).toInt();
+        const double confidence = v.json.value(QLatin1String("confidence")).toDouble();
+        judgeSays = v.json.value(QLatin1String("reason")).toString();
+        const bool accept = verdict == QLatin1String("accept") && chosenIdx >= 1 && chosenIdx <= cases.size();
+        for (int i = 0; i < cases.size(); ++i) {
+            const QJsonObject o = Judge::optionAt(v.json, i + 1);
+            Database::Advice ad;
+            ad.trackKey = Database::trackKey(track);
+            ad.mode = QStringLiteral("judge");
+            ad.model = judgeModel;
+            ad.keep = o.value(QLatin1String("official_mv")).toBool() || (accept && i + 1 == chosenIdx);
+            ad.probability = o.value(QLatin1String("confidence")).toDouble();
+            ad.kind = o.value(QLatin1String("kind")).toString();
+            ad.source = o.value(QLatin1String("source")).toString();
+            ad.version = o.value(QLatin1String("version")).toString();
+            ad.whole = o.value(QLatin1String("whole")).toString();
+            ad.note = o.value(QLatin1String("note")).toString();
+            ad.askedAt = QDateTime::currentSecsSinceEpoch();
+            adviceById.insert(cases[i].c.id, ad);
+        }
+        qInfo().noquote() << QStringLiteral("[judge] %1 — %2: %3 %4 (%5): %6").arg(st.artist, st.title, verdict).arg(chosenIdx).arg(confidence, 0, 'f', 2).arg(judgeSays);
+        // The gates (L1, L2, L4.1): between outright and your verdict.
+        const auto passes = [&](const JudgeCase &jc) {
+            return jc.song && jc.upload.picture.valid && !shortCut(jc.align) && !interrupted(jc.align)
+                && Matcher::lengthMismatch(track, jc.align.videoSec > 0 ? jc.align.videoSec : jc.c.duration).isEmpty();
+        };
+        const auto dropCase = [&](const JudgeCase &jc) {
+            if (!jc.dir.isEmpty())
+                QDir(jc.dir).removeRecursively();
+        };
+        bool outright = false;
+        if (accept && confidence >= Judge::kGate && passes(cases[chosenIdx - 1])) {
+            // W1: the track's video.
+            const JudgeCase &jc = cases[chosenIdx - 1];
+            if (!jc.existing || (prior && jc.existing->id == prior->id)) {
+                if (!claimVideo(jc.c.id))
+                    return cleanup();
+                chosen = jc.c;
+                chosenDir = jc.dir;
+                ytAudio = jc.audio;
+                ytInfo = jc.info;
+                alignment = jc.align;
+                judgeVouch = true;
+                outright = true;
+            } else if (jc.existing->review && cfg.replaceAudio && audioReplaceable(jc.align) && libraryIsBetter(track, storedYoutubeQuality(*jc.existing))) {
+                // Under review with other tracks as its candidates: this
+                // track's, and no longer a question (D5.6 as a lookup has it).
+                if (!claimVideo(jc.c.id))
+                    return cleanup();
+                const QVector<Database::Candidate> were = m_db->candidates(jc.existing->id);
+                if (putLibraryAudioIn(*jc.existing, track, jc.align, cfg, &error)) {
+                    releaseCandidates(jc.existing->id, were, &track, QStringLiteral("“%1” is the video of “%2” [%3]").arg(jc.c.title, track.title, track.album));
+                    for (const JudgeCase &other : std::as_const(cases))
+                        dropCase(other);
+                    leaving = m_db->candidacies(track);
+                    emit videoChanged(jc.existing->id);
+                    emit judgeDecided(track.id, true);
+                    finish(QStringLiteral("done"), jc.existing->id, QStringLiteral("takes “%1” out of review — the judge: %2").arg(jc.c.title, judgeSays));
+                    releaseVideo(jc.c.id);
+                    return;
+                }
+                releaseVideo(jc.c.id);
+                if (m_cancel)
+                    return cleanup();
+                // Could not be made over: a card with this track as a candidate instead (W2).
+            }
+            // (A video under review that would keep YouTube's audio becomes
+            // a card with this track as a candidate, W2: taking it out of
+            // review for a track whose audio it cannot carry is your call.)
+        }
+        if (outright) {
+            for (int i = 0; i < cases.size(); ++i) {
+                if (i + 1 != chosenIdx)
+                    dropCase(cases[i]);
+            }
+            emit judgeDecided(track.id, true);
+        } else if (verdict == QLatin1String("reject all") && confidence >= Judge::kGate) {
+            // W3: no video; the uploads are remembered as turned down for
+            // this track (D0), and a card loses it as a candidate.
+            for (const JudgeCase &jc : std::as_const(cases)) {
+                if (!jc.existing) {
+                    m_db->rejectVideoFor(track, jc.c.id);
+                    dropCase(jc);
+                } else if (prior && jc.existing->id == prior->id) {
+                    priorRejected = true;
+                    priorReason = QStringLiteral("the judge: %1").arg(judgeSays);
+                } else if (jc.existing->review && held.contains(jc.existing->id)) {
+                    m_db->removeCandidate(jc.existing->id, track);
+                    held.remove(jc.existing->id);
+                    if (m_db->candidateCount(jc.existing->id) == 0)
+                        discardVideo(*jc.existing);
+                    else
+                        emit videoChanged(jc.existing->id);
+                }
+            }
+            emit judgeDecided(track.id, true);
+            finish(QStringLiteral("not_found"), 0, QStringLiteral("the judge: %1").arg(judgeSays));
+            return;
+        } else {
+            // W2, W4: cards under review, each with the judge's advice (X2).
+            // Accepted below the gate (or gated): the uploads it would keep;
+            // rejected below the gate, or unsure: those that are the song.
+            judgeReview = true;
+            for (int i = 0; i < cases.size(); ++i) {
+                const JudgeCase &jc = cases[i];
+                const bool card = accept ? adviceById.value(jc.c.id).keep : jc.song;
+                if (!card) {
+                    dropCase(jc);
+                    continue;
+                }
+                if (!jc.existing)
+                    unconfirmed.append({jc.c, jc.dir, jc.audio, jc.info, jc.align, false});
+                else if (prior && jc.existing->id == prior->id)
+                    unconfirmed.append({jc.c, QString(), QString(), QJsonObject(), jc.align, true});
+                else if (jc.existing->review)
+                    joins.append({*jc.existing, jc.align});
+            }
+            if (unconfirmed.isEmpty() && joins.isEmpty()) {
+                finish(QStringLiteral("not_found"), 0, QStringLiteral("the judge: %1").arg(judgeSays));
+                return;
+            }
+            emit judgeDecided(track.id, false);
+        }
     }
 
     QVector<Pick> picks;
@@ -3766,12 +4337,29 @@ void ImportManager::runJob(qint64 trackId, const ImportSettings &cfg)
         const VideoInfo v = *prior;
         const double ytQuality = storedYoutubeQuality(v);
         AudioAlign::Result al = pick.align;
-        needsReview = needsReview && libraryIsBetter(track, ytQuality);
-        if (needsReview) {
-            al = placedWhole(pick.align);
-            needsReview = al.byOffset;
-        }
         const bool replace = cfg.replaceAudio && audioReplaceable(pick.align) && libraryIsBetter(track, ytQuality);
+        if (judgeReview && needsReview && !replace) {
+            // The judge's card, with YouTube's audio: the track's cannot be
+            // laid in (L1), or it is the lesser one.
+            report(QStringLiteral("Preparing for review"), -1, pick.c.title);
+            m_db->setVideoReview(v.id, true);
+            m_db->addCandidate(v.id, track, v.audioSource == QLatin1String("library") ? 1 : 0, qMax(pick.align.likeness, 1e-6), v.audioDetail);
+            if (!m_db->unlinkOthers(v.id, track).isEmpty())
+                requeuePending();
+            priorFate = QStringLiteral("review");
+            priorKept = true;
+            *review = true;
+            *videoIdOut = v.id;
+            *summary = QStringLiteral("%1 · kept, now for review").arg(pick.c.title);
+            return Got::Ok;
+        }
+        if (!judgeReview) {
+            needsReview = needsReview && libraryIsBetter(track, ytQuality);
+            if (needsReview) {
+                al = placedWhole(pick.align);
+                needsReview = al.byOffset;
+            }
+        }
         if (needsReview) {
             // It goes back to the queue, with this track as its candidate.
             report(QStringLiteral("Preparing for review"), -1, pick.c.title);
@@ -3876,14 +4464,20 @@ void ImportManager::runJob(qint64 trackId, const ImportSettings &cfg)
     plan.track = track;
     plan.ytId = chosen.id;
     plan.align = alignment;
-    // (With the account's audio a lossy track may have become the lesser one.)
-    needsReview = needsReview && libraryIsBetter(track, youtubeQuality(ytInfo));
-    if (needsReview) {
-        plan.align = placedWhole(alignment);
-        needsReview = plan.align.byOffset;
+    if (judgeReview) {
+        // The judge's card: the track's audio beside YouTube's where it can
+        // be laid in (F3), YouTube's alone where not (L1).
+        plan.replaceAudio = cfg.replaceAudio && audioReplaceable(alignment) && libraryIsBetter(track, youtubeQuality(ytInfo));
+    } else {
+        // (With the account's audio a lossy track may have become the lesser one.)
+        needsReview = needsReview && libraryIsBetter(track, youtubeQuality(ytInfo));
+        if (needsReview) {
+            plan.align = placedWhole(alignment);
+            needsReview = plan.align.byOffset;
+        }
+        plan.replaceAudio = needsReview
+            || (cfg.replaceAudio && audioReplaceable(alignment) && libraryIsBetter(track, youtubeQuality(ytInfo)));
     }
-    plan.replaceAudio = needsReview
-        || (cfg.replaceAudio && audioReplaceable(alignment) && libraryIsBetter(track, youtubeQuality(ytInfo)));
 
     report(plan.replaceAudio ? QStringLiteral("Muxing library audio") : QStringLiteral("Muxing"), -1, chosen.title);
     QString audioDetail;
@@ -3948,6 +4542,7 @@ void ImportManager::runJob(qint64 trackId, const ImportSettings &cfg)
     v.audioDetail = audioDetail;
     v.ytAbr = YtDlp::audioKbps(ytInfo);
     v.review = needsReview;
+    v.vouched = judgeVouch && !needsReview;
     v.reviewStart = span.start;
     v.reviewEnd = span.end;
     v.ytTitle = chosen.title;
@@ -3958,6 +4553,7 @@ void ImportManager::runJob(qint64 trackId, const ImportSettings &cfg)
     v.ytChannelVerified = channel.verified || chosen.verified;
     v.ytChannelHandle = channel.handle;
     v.ytDate = YtDlp::publishedOn(ytInfo);
+    v.ytDescription = YtDlp::descriptionOf(ytInfo);
     v.tags = track.tags;
     v.addedAt = QDateTime::currentSecsSinceEpoch();
 
@@ -3976,7 +4572,7 @@ void ImportManager::runJob(qint64 trackId, const ImportSettings &cfg)
     }
     // Under review it is a card of its own, with this track as its candidate.
     if (needsReview)
-        m_db->addCandidate(videoId, track, 1, qMax(alignment.likeness, 1e-6), audioDetail);
+        m_db->addCandidate(videoId, track, plan.replaceAudio ? 1 : 0, qMax(alignment.likeness, 1e-6), audioDetail);
     *review = needsReview;
     *videoIdOut = videoId;
     *summary = QStringLiteral("%1 · %2×%3 · %4").arg(chosen.title).arg(pr.width).arg(pr.height).arg(audioDetail);
@@ -4068,6 +4664,11 @@ void ImportManager::runJob(qint64 trackId, const ImportSettings &cfg)
                                      {QStringLiteral("title"), pick.c.title}, {QStringLiteral("review"), review},
                                      {QStringLiteral("summary"), summary}});
         added << videoId;
+        if (review && adviceById.contains(pick.c.id)) {
+            Database::Advice ad = adviceById.value(pick.c.id);
+            ad.videoId = videoId;
+            m_db->setAdvice(ad);
+        }
         if (!review) {
             // It fits after all (with the account's audio the track is the
             // lesser one): the track's video, and nothing else is needed.
@@ -4099,6 +4700,11 @@ void ImportManager::runJob(qint64 trackId, const ImportSettings &cfg)
                 continue;
             }
             ++joined;
+            if (adviceById.contains(there->ytId)) {
+                Database::Advice ad = adviceById.value(there->ytId);
+                ad.videoId = there->id;
+                m_db->setAdvice(ad);
+            }
             if (firstSummary.isEmpty())
                 firstSummary = there->ytTitle;
             logVideos.append(QJsonObject{{QStringLiteral("videoId"), there->id}, {QStringLiteral("id"), there->ytId},
@@ -4114,7 +4720,7 @@ void ImportManager::runJob(qint64 trackId, const ImportSettings &cfg)
         // A video that fits outright settles it: the track is a candidate
         // of nothing else.
         leaving = m_db->candidacies(track);
-        finish(QStringLiteral("done"), outright, firstSummary);
+        finish(QStringLiteral("done"), outright, judgeSays.isEmpty() ? firstSummary : QStringLiteral("%1 — the judge: %2").arg(firstSummary, judgeSays));
     } else if (added.isEmpty() && joined == 0) {
         // (finish keeps the track waiting on what it is a candidate of.)
         finish(QStringLiteral("failed"), 0, lastError.isEmpty() ? QStringLiteral("could not bring the video in") : lastError);
@@ -4122,7 +4728,8 @@ void ImportManager::runJob(qint64 trackId, const ImportSettings &cfg)
     } else {
         const int waiting = int(m_db->candidacies(track).size());
         finish(QStringLiteral("review"), 0,
-               QStringLiteral("for your review (%1 %2): %3").arg(waiting).arg(waiting == 1 ? QStringLiteral("video") : QStringLiteral("videos"), firstSummary));
+               QStringLiteral("for your review (%1 %2): %3%4").arg(waiting).arg(waiting == 1 ? QStringLiteral("video") : QStringLiteral("videos"), firstSummary,
+                                                               judgeSays.isEmpty() ? QString() : QStringLiteral(" — the judge: ") + judgeSays));
     }
     for (qint64 id : std::as_const(added)) {
         if (prior && id == prior->id)

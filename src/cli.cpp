@@ -13,6 +13,7 @@
 #include "core/AudioAlign.h"
 #include "core/AudioPrint.h"
 #include "core/ImportManager.h"
+#include "core/Judge.h"
 #include "core/Muxer.h"
 #include "core/Subtitles.h"
 #include "core/TagReader.h"
@@ -59,6 +60,11 @@ int main(int argc, char **argv)
         {QStringLiteral("allow-unofficial"), QStringLiteral("Accept uploads that do not look official.")},
         {QStringLiteral("keep-youtube-audio"), QStringLiteral("Never replace the video's audio with the library track.")},
         {QStringLiteral("allow-still-images"), QStringLiteral("Accept videos whose picture never changes.")},
+        {QStringLiteral("judge"), QStringLiteral("The judge (docs/import-rules-judge.html): off, advice, or judge (it runs the lookup)."), QStringLiteral("mode"), QStringLiteral("off")},
+        {QStringLiteral("judge-model"), QStringLiteral("Which model the judge is: haiku, sonnet or opus."), QStringLiteral("model"), QStringLiteral("sonnet")},
+        {QStringLiteral("claude-key-file"), QStringLiteral("The file holding the Claude API key; the app's by default."), QStringLiteral("file")},
+        {QStringLiteral("capture"), QStringLiteral("Keep everything under this folder, for good: every yt-dlp exchange, every file a lookup brings, every question to the judge and its answer."), QStringLiteral("dir")},
+        {QStringLiteral("replay"), QStringLiteral("Replay from a capture: searches, pages, downloads and the judge's answers come from this folder wherever it has them; the rest is asked as usual."), QStringLiteral("dir")},
         {QStringLiteral("min-subscribers"), QStringLiteral("Ignore uploads from channels with fewer subscribers, unless the channel is verified or one of several the upload is listed under; 0 ignores none."),
          QStringLiteral("n"), QStringLiteral("5000")},
         {QStringLiteral("allow-channel"), QStringLiteral("Allow a channel, by its id (UC…), its handle (@name) or the address of its page: an artist's channel for every track, and never ignored as a small one. Its videos under review are judged again at once (repeatable)."),
@@ -243,6 +249,27 @@ int main(int argc, char **argv)
     cfg.allowUnofficial = parser.isSet(QStringLiteral("allow-unofficial"));
     cfg.replaceAudio = !parser.isSet(QStringLiteral("keep-youtube-audio"));
     cfg.skipStillImages = !parser.isSet(QStringLiteral("allow-still-images"));
+    cfg.judgeMode = parser.value(QStringLiteral("judge"));
+    if (cfg.judgeMode != QLatin1String("off") && cfg.judgeMode != QLatin1String("advice") && cfg.judgeMode != QLatin1String("judge")) {
+        out << "error: --judge takes off, advice or judge" << Qt::endl;
+        return 1;
+    }
+    cfg.judgeModel = parser.value(QStringLiteral("judge-model"));
+    if (!Judge::models().contains(cfg.judgeModel)) {
+        out << "error: --judge-model takes haiku, sonnet or opus" << Qt::endl;
+        return 1;
+    }
+    if (parser.isSet(QStringLiteral("capture")))
+        cfg.captureDir = QFileInfo(parser.value(QStringLiteral("capture"))).absoluteFilePath();
+    if (parser.isSet(QStringLiteral("replay")))
+        cfg.replayDir = QFileInfo(parser.value(QStringLiteral("replay"))).absoluteFilePath();
+    cfg.judgeKeyFile = parser.isSet(QStringLiteral("claude-key-file"))
+        ? QFileInfo(parser.value(QStringLiteral("claude-key-file"))).absoluteFilePath()
+        : QDir(QStandardPaths::writableLocation(QStandardPaths::GenericConfigLocation)).filePath(QStringLiteral("mvplayer/claude-api-key"));
+    if (cfg.judgeMode == QLatin1String("judge") && Judge::readKey(cfg.judgeKeyFile).isEmpty()) {
+        out << "error: --judge judge needs a Claude API key in " << cfg.judgeKeyFile << Qt::endl;
+        return 1;
+    }
     cfg.minSubscribers = qMax(0, parser.value(QStringLiteral("min-subscribers")).toInt());
     cfg.ytdlpArgs = parser.values(QStringLiteral("ytdlp-arg"));
     cfg.subtitleLangs = parser.value(QStringLiteral("subtitles")).split(QRegularExpression(QStringLiteral("[,\\s]+")), Qt::SkipEmptyParts);
