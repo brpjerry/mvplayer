@@ -1,4 +1,6 @@
 #include "core/Judge.h"
+#include "core/ChatGptAuth.h"
+#include "core/ChatGptTransport.h"
 
 #include "core/Util.h"
 
@@ -174,17 +176,23 @@ double Judge::cost(const QString &modelId, const QJsonObject &usage)
 // ---- One question ------------------------------------------------------------
 
 Judge::Answer Judge::ask(const QString &key, const QString &modelId, const QString &words, const QJsonArray &content,
-                         const QString &schemaJson, int maxTokens, const QString &cacheDir, const std::atomic<bool> *cancel)
+                         const QString &schemaJson, int maxTokens, const QString &cacheDir, const std::atomic<bool> *cancel,
+                         const QString &provider, const QString &authFile, const QString &accountId)
 {
     Answer a;
+    a.provider = provider;
+    const bool chatgpt = provider == QLatin1String("chatgpt");
+    if (provider != QLatin1String("claude") && !chatgpt) {
+        a.error = QStringLiteral("Unknown judge provider."); a.refused = true; return a;
+    }
     a.model = modelId;
-    if (key.isEmpty()) {
+    if (!chatgpt && key.isEmpty()) {
         a.error = QStringLiteral("no API key");
         a.refused = true;
         return a;
     }
     const QJsonObject schema = QJsonDocument::fromJson(schemaJson.toUtf8()).object();
-    const QJsonObject body{
+    QJsonObject body{
         {QStringLiteral("model"), modelId},
         {QStringLiteral("max_tokens"), maxTokens},
         {QStringLiteral("system"), words},
@@ -192,17 +200,39 @@ Judge::Answer Judge::ask(const QString &key, const QString &modelId, const QStri
         {QStringLiteral("output_config"), QJsonObject{{QStringLiteral("format"), QJsonObject{{QStringLiteral("type"), QStringLiteral("json_schema")}, {QStringLiteral("schema"), schema}}},
                                                       {QStringLiteral("effort"), QStringLiteral("low")}}},
     };
+    if (chatgpt) {
+        if (modelId.isEmpty() || accountId.isEmpty() || !ChatGptAuth::hasSession(authFile, accountId)) {
+            a.error = QStringLiteral("Sign in to ChatGPT and choose a model in Settings → Judge.");
+            a.refused = true;
+            return a;
+        }
+        QJsonArray input;
+        for (const auto &v : content) {
+            const auto block = v.toObject();
+            if (block.value("type").toString() == QLatin1String("text"))
+                input.append(QJsonObject{{"type", "input_text"}, {"text", block.value("text")}});
+            else if (block.value("type").toString() == QLatin1String("image")) {
+                const auto source = block.value("source").toObject();
+                input.append(QJsonObject{{"type", "input_image"}, {"image_url", QStringLiteral("data:%1;base64,%2")
+                    .arg(source.value("media_type").toString(), source.value("data").toString())}});
+            }
+        }
+        body = {{"model", modelId}, {"instructions", words}, {"store", false}, {"stream", true},
+                {"input", QJsonArray{QJsonObject{{"role", "user"}, {"content", input}}}},
+                {"text", QJsonObject{{"format", QJsonObject{{"type", "json_schema"}, {"name", "judge_answer"}, {"strict", true}, {"schema", schema}}}}}};
+    }
     const QByteArray bytes = QJsonDocument(body).toJson(QJsonDocument::Compact);
 
     // Kept a day: the same question gets the same answer without a request.
-    const QString hash = QString::fromLatin1(QCryptographicHash::hash(bytes, QCryptographicHash::Sha256).toHex().left(32));
+    const QString hash = QString::fromLatin1(QCryptographicHash::hash(chatgpt ? QByteArray("chatgpt\n") + bytes : bytes, QCryptographicHash::Sha256).toHex().left(32));
     QString cacheFile;
     if (!cacheDir.isEmpty()) {
         cacheFile = QDir(cacheDir).filePath(QStringLiteral("judge/%1.json").arg(hash));
         QFile f(cacheFile);
         if (f.open(QIODevice::ReadOnly)) {
             const QJsonObject kept = QJsonDocument::fromJson(f.readAll()).object();
-            if (QDateTime::currentSecsSinceEpoch() - kept.value(QLatin1String("t")).toInteger() < 86400) {
+            if (QDateTime::currentSecsSinceEpoch() - kept.value(QLatin1String("t")).toInteger() < 86400
+                && (!chatgpt || ChatGptTransport::matchesSchema(kept.value("answer"), schema))) {
                 a.json = kept.value(QLatin1String("answer")).toObject();
                 a.usage = kept.value(QLatin1String("usage")).toObject();
                 a.cached = true;
@@ -216,7 +246,8 @@ Judge::Answer Judge::ask(const QString &key, const QString &modelId, const QStri
         QFile f(QDir(replay).filePath(QStringLiteral("judge/%1.json").arg(hash)));
         if (f.open(QIODevice::ReadOnly)) {
             const QJsonObject kept = QJsonDocument::fromJson(f.readAll()).object();
-            if (!kept.value(QLatin1String("answer")).toObject().isEmpty()) {
+            if (!kept.value(QLatin1String("answer")).toObject().isEmpty()
+                && (!chatgpt || ChatGptTransport::matchesSchema(kept.value("answer"), schema))) {
                 a.json = kept.value(QLatin1String("answer")).toObject();
                 a.usage = kept.value(QLatin1String("usage")).toObject();
                 a.cached = true;
@@ -233,36 +264,88 @@ Judge::Answer Judge::ask(const QString &key, const QString &modelId, const QStri
             a.error = QStringLiteral("cancelled");
             return a;
         }
-        if (attempt > 0)
-            QThread::msleep(attempt == 1 ? 2000 : 5000);
-        // On the calling thread, with a loop of its own: the import jobs
-        // have none.
-        QNetworkAccessManager net;
-        QNetworkRequest request(QUrl(apiBase() + QStringLiteral("/v1/messages")));
-        request.setRawHeader("x-api-key", key.toUtf8());
-        request.setRawHeader("anthropic-version", "2023-06-01");
-        request.setHeader(QNetworkRequest::ContentTypeHeader, QStringLiteral("application/json"));
-        request.setTransferTimeout(180000);
-        QNetworkReply *reply = net.post(request, bytes);
-        QEventLoop loop;
-        QObject::connect(reply, &QNetworkReply::finished, &loop, &QEventLoop::quit);
-        QTimer poll;
-        QObject::connect(&poll, &QTimer::timeout, &loop, [&] {
-            if (cancel && *cancel)
-                reply->abort();
-        });
-        poll.start(200);
-        loop.exec();
-        reply->deleteLater();
-        const int http = reply->attribute(QNetworkRequest::HttpStatusCodeAttribute).toInt();
-        const QByteArray raw = reply->readAll();
-        const QJsonObject answer = QJsonDocument::fromJson(raw).object();
+        if (attempt > 0) {
+            const int delay = attempt == 1 ? 2000 : 5000;
+            for (int waited = 0; waited < delay; waited += 100) {
+                if (cancel && *cancel) { a.error = QStringLiteral("cancelled"); return a; }
+                QThread::msleep(100);
+            }
+        }
+        int http = 0;
+        QJsonObject answer;
+        QString networkError;
+        if (chatgpt) {
+            QString token = ChatGptAuth::accessToken(authFile, accountId, &a.error, cancel);
+            if (token.isEmpty()) { a.refused = true; return a; }
+            const auto sessionEnded = [&] { return !ChatGptAuth::hasSession(authFile, accountId); };
+            auto response = ChatGptTransport::request(ChatGptAuth::apiBase() + QStringLiteral("/responses"), bytes, token, false, cancel, 180000, sessionEnded);
+            if (response.status == 401 && !(cancel && *cancel)) {
+                token = ChatGptAuth::accessToken(authFile, accountId, &a.error, cancel, token);
+                if (token.isEmpty()) { a.refused = true; return a; }
+                response = ChatGptTransport::request(ChatGptAuth::apiBase() + QStringLiteral("/responses"), bytes, token, false, cancel, 180000, sessionEnded);
+            }
+            if (sessionEnded()) { a.error = QStringLiteral("ChatGPT session ended. Sign in again."); a.refused = true; return a; }
+            http = response.status;
+            networkError = response.error;
+            if (http == 401 || http == 403) {
+                a.error = QStringLiteral("ChatGPT refused this account or model (HTTP %1). Check access or sign in again.").arg(http);
+                a.refused = true;
+                return a;
+            }
+            if (http == 429) {
+                a.error = QStringLiteral("ChatGPT usage or rate limit reached. Check ChatGPT usage and retry later.");
+                continue;
+            }
+            if (http == 200) {
+                if (!response.error.isEmpty()) { a.error = response.error; continue; }
+                const auto completed = ChatGptTransport::completedResponse(response.body, &a.error);
+                if (completed.isEmpty()) continue;
+                QJsonArray blocks;
+                bool refusal = false;
+                for (const auto &item : completed.value("output").toArray()) {
+                    const auto message = item.toObject();
+                    if (message.value("type").toString() != QLatin1String("message")) continue;
+                    for (const auto &v : message.value("content").toArray()) {
+                        const auto block = v.toObject();
+                        if (block.value("type").toString() == QLatin1String("output_text"))
+                            blocks.append(QJsonObject{{"type", "text"}, {"text", block.value("text")}});
+                        else if (block.value("type").toString() == QLatin1String("refusal")) refusal = true;
+                    }
+                }
+                if (refusal) { a.error = QStringLiteral("ChatGPT declined to answer this judge question."); continue; }
+                answer = {{"usage", completed.value("usage")}, {"content", blocks}};
+            }
+        } else {
+            // On the calling thread, with a loop of its own: the import jobs
+            // have none.
+            QNetworkAccessManager net;
+            QNetworkRequest request(QUrl(apiBase() + QStringLiteral("/v1/messages")));
+            request.setRawHeader("x-api-key", key.toUtf8());
+            request.setRawHeader("anthropic-version", "2023-06-01");
+            request.setHeader(QNetworkRequest::ContentTypeHeader, QStringLiteral("application/json"));
+            request.setTransferTimeout(180000);
+            QNetworkReply *reply = net.post(request, bytes);
+            QEventLoop loop;
+            QObject::connect(reply, &QNetworkReply::finished, &loop, &QEventLoop::quit);
+            QTimer poll;
+            QObject::connect(&poll, &QTimer::timeout, &loop, [&] {
+                if (cancel && *cancel)
+                    reply->abort();
+            });
+            poll.start(200);
+            loop.exec();
+            reply->deleteLater();
+            http = reply->attribute(QNetworkRequest::HttpStatusCodeAttribute).toInt();
+            const QByteArray raw = reply->readAll();
+            answer = QJsonDocument::fromJson(raw).object();
+            networkError = reply->errorString();
+        }
         if (cancel && *cancel) {
             a.error = QStringLiteral("cancelled");
             return a;
         }
         if (http == 0) {
-            a.error = QStringLiteral("could not reach the API: %1").arg(reply->errorString());
+            a.error = QStringLiteral("could not reach the API: %1").arg(networkError);
             continue;
         }
         if (http == 401 || http == 403) {
@@ -283,17 +366,24 @@ Judge::Answer Judge::ask(const QString &key, const QString &modelId, const QStri
             return a;
         }
         a.usage = answer.value(QLatin1String("usage")).toObject();
-        a.cost = cost(modelId, a.usage);
+        a.cost = chatgpt ? 0 : cost(modelId, a.usage);
         a.seconds = clock.elapsed() / 1000.0;
         QString text;
         for (const QJsonValue &block : answer.value(QLatin1String("content")).toArray()) {
             if (block.toObject().value(QLatin1String("type")).toString() == QLatin1String("text"))
                 text += block.toObject().value(QLatin1String("text")).toString();
         }
-        const QJsonObject json = QJsonDocument::fromJson(text.toUtf8()).object();
-        if (json.isEmpty()) {
+        QJsonParseError parseError;
+        const QJsonObject json = QJsonDocument::fromJson(text.toUtf8(), &parseError).object();
+        if (json.isEmpty() || (chatgpt && !ChatGptTransport::matchesSchema(json, schema))) {
             // Not the JSON asked for (a refusal, or cut short): asked again (V5).
-            a.error = QStringLiteral("the answer was not the JSON asked for (%1)")
+            if (chatgpt) {
+                if (text.isEmpty()) a.error = QStringLiteral("ChatGPT completed without answer text.");
+                else if (parseError.error != QJsonParseError::NoError)
+                    a.error = QStringLiteral("ChatGPT answer was not valid JSON (%1 at byte %2).")
+                                  .arg(parseError.errorString()).arg(parseError.offset);
+                else a.error = QStringLiteral("ChatGPT answer did not match the required judge schema.");
+            } else a.error = QStringLiteral("the answer was not the JSON asked for (%1)")
                           .arg(answer.value(QLatin1String("stop_reason")).toString());
             continue;
         }
@@ -305,7 +395,7 @@ Judge::Answer Judge::ask(const QString &key, const QString &modelId, const QStri
             QDir().mkpath(folder);
             QSaveFile f(QDir(folder).filePath(hash + QStringLiteral(".json")));
             if (f.open(QIODevice::WriteOnly)) {
-                f.write(QJsonDocument(QJsonObject{{QStringLiteral("t"), QDateTime::currentSecsSinceEpoch()}, {QStringLiteral("model"), modelId},
+                f.write(QJsonDocument(QJsonObject{{QStringLiteral("t"), QDateTime::currentSecsSinceEpoch()}, {QStringLiteral("model"), modelId}, {QStringLiteral("provider"), provider},
                                                   {QStringLiteral("request"), body}, {QStringLiteral("answer"), json}, {QStringLiteral("usage"), a.usage},
                                                   {QStringLiteral("seconds"), a.seconds}})
                             .toJson(QJsonDocument::Compact));

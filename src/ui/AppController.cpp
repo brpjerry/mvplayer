@@ -1,6 +1,7 @@
 #include "ui/AppController.h"
 #include "core/Judge.h"
 #include <QDirIterator>
+#include <QDesktopServices>
 #include <functional>
 
 #include "core/ArtistChannels.h"
@@ -112,6 +113,12 @@ AppController::AppController(const AppOptions &options, QObject *parent)
     connect(m_judge.get(), &Judge::checked, this, &AppController::judgeChanged);
     m_cfg.judgeKeyFile = QFileInfo(m_settings->fileName()).absoluteDir().filePath(QStringLiteral("claude-api-key"));
 
+    m_cfg.chatGptAuthFile = QFileInfo(m_settings->fileName()).absoluteDir().filePath(QStringLiteral("chatgpt.json"));
+    m_chatGpt = std::make_unique<ChatGptAuth>(m_cfg.chatGptAuthFile, this);
+    connect(m_chatGpt.get(), &ChatGptAuth::openBrowser, this, [this](const QUrl &url) {
+        if (!QDesktopServices::openUrl(url)) m_chatGpt->cancelSignIn();
+    });
+
     const QString defaultMvDir =
         QDir(QStandardPaths::writableLocation(QStandardPaths::MoviesLocation)).filePath(QStringLiteral("MVs"));
     m_cfg.musicDirs = m_settings->value(QStringLiteral("library/musicDirs")).toStringList();
@@ -133,6 +140,20 @@ AppController::AppController(const AppOptions &options, QObject *parent)
     m_cfg.judgeModel = m_settings->value(QStringLiteral("import/judgeModel"), QStringLiteral("sonnet")).toString();
     if (!Judge::models().contains(m_cfg.judgeModel))
         m_cfg.judgeModel = QStringLiteral("sonnet");
+    m_cfg.judgeProvider = m_settings->value(QStringLiteral("import/judgeProvider"), QStringLiteral("claude")).toString();
+    if (m_cfg.judgeProvider != QLatin1String("chatgpt")) m_cfg.judgeProvider = QStringLiteral("claude");
+    m_cfg.chatGptAccount = m_chatGpt->account();
+    if (m_cfg.judgeProvider == QLatin1String("chatgpt")) m_cfg.judgeModel = m_chatGpt->model();
+    connect(m_chatGpt.get(), &ChatGptAuth::changed, this, [this] {
+        const QString model = m_cfg.judgeProvider == QLatin1String("chatgpt") ? m_chatGpt->model() : m_cfg.judgeModel;
+        if (m_cfg.chatGptAccount != m_chatGpt->account() || m_cfg.judgeModel != model) {
+            m_cfg.chatGptAccount = m_chatGpt->account();
+            m_cfg.judgeModel = model;
+            if (m_manager) m_manager->setSettings(m_cfg);
+            emit settingsChanged();
+        }
+        emit judgeChanged();
+    });
     m_cfg.judgeThreads = qBound(1, m_settings->value(QStringLiteral("import/judgeThreads"), 1).toInt(), 8);
     m_judgeAlone = m_settings->value(QStringLiteral("judge/alone"), 0).toInt();
     m_judgeLeft = m_settings->value(QStringLiteral("judge/left"), 0).toInt();
@@ -433,7 +454,9 @@ void AppController::saveSettings()
     m_settings->setValue(QStringLiteral("import/ignoreSmallChannels"), m_ignoreSmallChannels);
     m_settings->setValue(QStringLiteral("import/minSubscribers"), m_minSubscribers);
     m_settings->setValue(QStringLiteral("import/judgeMode"), m_cfg.judgeMode);
-    m_settings->setValue(QStringLiteral("import/judgeModel"), m_cfg.judgeModel);
+    m_settings->setValue(QStringLiteral("import/judgeProvider"), m_cfg.judgeProvider);
+    if (m_cfg.judgeProvider == QLatin1String("claude"))
+        m_settings->setValue(QStringLiteral("import/judgeModel"), m_cfg.judgeModel);
     m_settings->setValue(QStringLiteral("import/judgeThreads"), m_cfg.judgeThreads);
     m_settings->setValue(QStringLiteral("judge/alone"), m_judgeAlone);
     m_settings->setValue(QStringLiteral("judge/left"), m_judgeLeft);
@@ -1346,7 +1369,7 @@ QString AppController::displayPath(const QString &path) const
 void AppController::setJudgeMode(const QString &mode)
 {
     const QString m = mode == QLatin1String("advice") || mode == QLatin1String("judge") ? mode : QStringLiteral("off");
-    if (m == m_cfg.judgeMode)
+    if (m == m_cfg.judgeMode || (m != QLatin1String("off") && !judgeReady()))
         return;
     // A lookup under way finishes as it began; the next starts in the new mode (X4).
     m_cfg.judgeMode = m;
@@ -1356,8 +1379,33 @@ void AppController::setJudgeMode(const QString &mode)
     emit settingsChanged();
 }
 
+void AppController::setJudgeProvider(const QString &provider)
+{
+    if ((provider != QLatin1String("claude") && provider != QLatin1String("chatgpt")) || provider == m_cfg.judgeProvider)
+        return;
+    m_cfg.judgeProvider = provider;
+    m_cfg.judgeModel = provider == QLatin1String("chatgpt") ? m_chatGpt->model()
+        : m_settings->value(QStringLiteral("import/judgeModel"), QStringLiteral("sonnet")).toString();
+    if (provider == QLatin1String("claude") && !Judge::models().contains(m_cfg.judgeModel)) m_cfg.judgeModel = QStringLiteral("sonnet");
+    m_settings->setValue(QStringLiteral("import/judgeProvider"), provider);
+    if (m_manager) m_manager->setSettings(m_cfg);
+    emit settingsChanged();
+    emit judgeChanged();
+    if (provider == QLatin1String("chatgpt")) m_chatGpt->refreshModels();
+}
+
+bool AppController::judgeReady() const
+{
+    if (m_cfg.judgeProvider == QLatin1String("claude")) return m_judge->hasKey();
+    if (!m_chatGpt->signedIn() || m_chatGpt->busy()) return false;
+    for (const auto &m : m_chatGpt->models())
+        if (m.toMap().value(QStringLiteral("name")).toString() == m_cfg.judgeModel) return true;
+    return false;
+}
+
 void AppController::setJudgeModel(const QString &model)
 {
+    if (m_cfg.judgeProvider == QLatin1String("chatgpt")) { m_chatGpt->setModel(model); return; }
     if (!Judge::models().contains(model) || model == m_cfg.judgeModel)
         return;
     m_cfg.judgeModel = model;
@@ -1381,6 +1429,7 @@ void AppController::setJudgeThreads(int n)
 
 QVariantList AppController::judgeModels() const
 {
+    if (m_cfg.judgeProvider == QLatin1String("chatgpt")) return m_chatGpt->models();
     // What a lookup's verdict cost on average when measured (M).
     static const QHash<QString, QString> costs = {{QStringLiteral("haiku"), QStringLiteral("about 0.1¢ a lookup")},
                                                   {QStringLiteral("sonnet"), QStringLiteral("about 2¢ a lookup")},
@@ -1413,7 +1462,7 @@ QVariantMap AppController::judgeAdvice(qint64 videoId, qint64 trackId)
 
 void AppController::askJudge(qint64 videoId, qint64 trackId, bool again)
 {
-    if (m_manager && m_judge->hasKey())
+    if (m_manager && judgeReady())
         m_manager->askJudge(videoId, trackId, again);
 }
 
@@ -1453,7 +1502,7 @@ QString AppController::captureSizeText() const
 
 void AppController::askJudgeAll()
 {
-    if (m_manager && m_judge->hasKey())
+    if (m_manager && judgeReady())
         m_manager->askJudgeAll();
 }
 

@@ -34,12 +34,15 @@ struct ImportSettings {
     int pauseBaseSecs = 600;       // first wait after YouTube blocks requests; doubles on repeats
     // The judge (docs/import-rules-judge.html): "off", "advice" (a
     // recommendation on cards under review, X2) or "judge" (it runs the
-    // lookup, Q–W); which model ("haiku", "sonnet", "opus"); where the
-    // account's key is kept.
+    // lookup, Q–W); a Claude family or ChatGPT model slug, and the
+    // selected provider's credential location and account.
     QString judgeMode = QStringLiteral("off");
     QString judgeModel = QStringLiteral("sonnet");
     int judgeThreads = 1; // advice questions at once (X2): 1–8
     QString judgeKeyFile;
+    QString judgeProvider = QStringLiteral("claude");
+    QString chatGptAuthFile;
+    QString chatGptAccount;
     // Keeping everything (README): every yt-dlp exchange, every file a
     // lookup brings and every question to the judge, kept under captureDir
     // for good; a replay answers from replayDir wherever it can. Empty: off.

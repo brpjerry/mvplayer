@@ -23,7 +23,7 @@ extern const char *const kPickSchema;
 extern const char *const kVerdictSchema;
 } // namespace JudgeWords
 
-// Claude, asked through the API: the account's key, kept in a file of this
+// Judge providers, asked through their APIs: the account's key, kept in a file of this
 // user's alone, and whether it works; and the three questions of
 // docs/import-rules-judge.html (the query, the pick, the verdict), asked from
 // any thread.
@@ -77,13 +77,16 @@ public:
         double seconds = 0;
         bool cached = false;
         QString model;
+        QString provider = QStringLiteral("claude");
     };
     // Blocking; any thread. `words`: the system prompt; `content`: the facts
     // of the case (text and image blocks); `schemaJson`: the shape of the
     // answer. Answers are kept a day under `cacheDir` (Q), so a lookup
     // repeated within the day asks nothing twice.
     static Answer ask(const QString &key, const QString &modelId, const QString &words, const QJsonArray &content,
-                      const QString &schemaJson, int maxTokens, const QString &cacheDir, const std::atomic<bool> *cancel);
+                      const QString &schemaJson, int maxTokens, const QString &cacheDir, const std::atomic<bool> *cancel,
+                      const QString &provider = QStringLiteral("claude"), const QString &authFile = QString(),
+                      const QString &accountId = QString());
     // Keeping everything (README): every question and its answer under
     // `dir`/judge, for good; a replay answers from there where the same
     // question (words, facts and frames alike) was asked before, and asks

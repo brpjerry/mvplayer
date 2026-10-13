@@ -16,8 +16,13 @@ export MVPLAYER_MIN_TRACK_SECS=30
 BUILD=${1:-build}
 # On Windows "mvplayer" alone would name the QML module's build folder.
 EXE=; if command -v cygpath >/dev/null; then EXE=.exe; fi
+# Authentication and provider tests use a local stand-in and temporary settings.
+"$BUILD/mvplayer-chatgpt-test$EXE"
 WORK=$(mktemp -d)
 trap 'rm -rf "$WORK"' EXIT
+export XDG_CONFIG_HOME="$WORK/config"
+export XDG_CACHE_HOME="$WORK/cache"
+export XDG_DATA_HOME="$WORK/data"
 
 # A 50 s "song": a slow sequence of chords, so fingerprints have structure.
 ffmpeg -v error -y -f lavfi -i "aevalsrc=0.3*sin(2*PI*t*(220+30*mod(floor(t/1.5)\,7)))+0.2*sin(2*PI*t*(330+45*mod(floor(t/2)\,5)))+0.1*sin(2*PI*t*880*(1+0.5*mod(floor(t*4)\,2))):s=48000:d=50" \
@@ -1260,15 +1265,36 @@ class Handler(http.server.BaseHTTPRequestHandler):
         self.send_response(200); self.send_header('content-type', 'application/json'); self.send_header('content-length', str(len(data))); self.end_headers()
         self.wfile.write(data)
     def do_GET(self):
-        self.reply({'data': [{'id': 'claude-sonnet-5-5'}]})
+        self.reply({'data': [{'id': 'claude-sonnet-5-5'}], 'models': [{'slug': 'test-model', 'display_name': 'Test model', 'visibility': 'list'}]})
     def do_POST(self):
         body = json.loads(self.rfile.read(int(self.headers.get('content-length', 0))))
-        words = body.get('system', '')
+        chatgpt = self.path == '/v1/responses'
+        if chatgpt:
+            assert self.headers.get('Authorization') == 'Bearer smoke-account-token'
+            assert body['store'] is False and body['stream'] is True
+            assert body['text']['format']['strict'] is True
+            content = body['input'][0]['content']
+        else:
+            content = body['messages'][0]['content']
+        words = body.get('instructions' if chatgpt else 'system', '')
         key = 'query' if words.startswith('You help a music-video library find') else 'pick' if words.startswith('You help a music-video library choose') else 'verdict'
         with open(answers + '.asked', 'a') as f:
-            f.write(key + ' ' + body['model'] + ' images=' + str(sum(1 for b in body['messages'][0]['content'] if b.get('type') == 'image'))
-                    + ' sound=' + ('yes' if any('Sound:' in b.get('text', '') for b in body['messages'][0]['content']) else 'no')
-                    + ' desc=' + ('yes' if any('Description:' in b.get('text', '') for b in body['messages'][0]['content']) else 'no') + '\n')
+            f.write(key + ' ' + body['model'] + ' images=' + str(sum(1 for b in content if b.get('type') in ('image', 'input_image')))
+                    + ' sound=' + ('yes' if any('Sound:' in b.get('text', '') for b in content) else 'no')
+                    + ' desc=' + ('yes' if any('Description:' in b.get('text', '') for b in content) else 'no') + '\n')
+        if chatgpt:
+            text = json.dumps(json.load(open(answers))[key])
+            item = {'type': 'message', 'role': 'assistant', 'status': 'completed',
+                    'content': [{'type': 'output_text', 'text': text}]}
+            # A streamed message need not be repeated in the terminal event.
+            response = {'status': 'completed', 'usage': {'input_tokens': 1000, 'output_tokens': 50},
+                        'output': []}
+            events = [{'type': 'response.output_item.done', 'output_index': 0, 'item': item},
+                      {'type': 'response.completed', 'response': response}]
+            data = ''.join('data: ' + json.dumps(event) + '\n\n' for event in events).encode()
+            self.send_response(200); self.send_header('content-type', 'text/event-stream'); self.send_header('content-length', str(len(data))); self.end_headers()
+            self.wfile.write(data)
+            return
         self.reply({'content': [{'type': 'text', 'text': json.dumps(json.load(open(answers))[key])}], 'usage': {'input_tokens': 1000, 'output_tokens': 50},
                     'stop_reason': 'end_turn', 'model': body['model']})
 http.server.HTTPServer(('127.0.0.1', port), Handler).serve_forever()
@@ -1376,6 +1402,33 @@ grep -q '"question":"verdict"' "$WORK/mvlib-j1/.mvplayer/import-log.jsonl"
 # The upload's description, as the page gave it, is kept with the video and told to the judge (V1).
 grep -q "^verdict claude-sonnet-5-5 images=5 sound=no desc=yes" "$WORK/judge-answers.json.asked"
 [[ "$(judge_db mvlib-j1 'SELECT yt_description FROM videos')" == "[('Dee - Five | Out now on every streaming service. | Directed by Dee.',)]" ]]
+# ChatGPT uses the same three questions, with images and structured answers,
+# and records account usage without applying Claude's prices.
+python3 - "$WORK/chatgpt.json" <<'PY'
+import json, os, sys, time
+with open(sys.argv[1], 'w') as f:
+    json.dump({'selected': 'smoke-account', 'accounts': {'smoke-account': {
+        'client_id': 'smoke-account', 'subject': 'test', 'access_token': 'smoke-account-token',
+        'expires_at': int(time.time()) + 3600, 'scopes': ['resource.invoke', 'chatgpt.tokens.use.direct'],
+        'model': 'test-model'}}}, f)
+os.chmod(sys.argv[1], 0o600)
+PY
+rm -f "$WORK/judge-answers.json.asked"
+OUT=$(MVPLAYER_YTDLP="$SITE" MVPLAYER_CHATGPT_API="http://127.0.0.1:$JUDGE_PORT/v1" timeout 120 "$BUILD/mvplayer-import" --music-dir "$WORK/lib5" --mv-dir "$WORK/mvlib-chatgpt" --jobs 1 --judge judge --judge-provider chatgpt --chatgpt-auth-file "$WORK/chatgpt.json" 2>&1)
+[[ "$OUT" == *"Imported"* && "$OUT" == *"the judge: the artist's own upload"* ]]
+[[ "$(judge_db mvlib-chatgpt 'SELECT review, vouched FROM videos')" == "[(0, 1)]" ]]
+[[ "$(grep -c . "$WORK/judge-answers.json.asked")" == 3 ]]
+grep -q '^verdict test-model images=5 sound=no desc=yes' "$WORK/judge-answers.json.asked"
+python3 - "$WORK/mvlib-chatgpt/.mvplayer/import-log.jsonl" <<'PY'
+import json, sys
+raw = open(sys.argv[1]).read()
+rows = [r for r in map(json.loads, raw.splitlines()) if r.get('event') == 'judge']
+assert len(rows) == 3 and all(r['provider'] == 'chatgpt' and r['cost'] is None for r in rows)
+assert 'smoke-account-token' not in raw
+PY
+OUT=$(MVPLAYER_CHATGPT_API="http://127.0.0.1:$JUDGE_PORT/v1" "$BUILD/mvplayer-import" --chatgpt-auth-file "$WORK/chatgpt.json" --chatgpt-models --mv-dir "$WORK/account-command-no-library")
+[[ "$OUT" == *"test-model"* && ! -e "$WORK/account-command-no-library" ]]
+
 # Another model, by name.
 rm -f "$WORK/judge-answers.json.asked"
 OUT=$(judge --mv-dir "$WORK/mvlib-j1b" --judge-model opus)

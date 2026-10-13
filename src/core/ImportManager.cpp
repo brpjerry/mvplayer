@@ -1297,8 +1297,8 @@ void ImportManager::adviceJob(qint64 videoId, qint64 trackId, bool again, const 
                 return; // asked already
         }
     }
-    const QString apiKey = Judge::readKey(cfg.judgeKeyFile);
-    const QString model = Judge::modelId(cfg.judgeModel);
+    const QString apiKey = cfg.judgeProvider == QLatin1String("claude") ? Judge::readKey(cfg.judgeKeyFile) : QString();
+    const QString model = cfg.judgeProvider == QLatin1String("chatgpt") ? cfg.judgeModel : Judge::modelId(cfg.judgeModel);
     Judge::Upload u;
     u.id = video->ytId;
     u.title = video->ytTitle;
@@ -1328,7 +1328,7 @@ void ImportManager::adviceJob(qint64 videoId, qint64 trackId, bool again, const 
             others.append(c.track);
     }
     const Judge::Answer a = Judge::ask(apiKey, model, QString::fromUtf8(JudgeWords::kVerdictWords), Judge::verdictContent(*track, others, {u}),
-                                       QString::fromUtf8(JudgeWords::kVerdictSchema), 4000, cacheDir(cfg.mvDir), &m_cancel);
+                                       QString::fromUtf8(JudgeWords::kVerdictSchema), 4000, cacheDir(cfg.mvDir), &m_cancel, cfg.judgeProvider, cfg.chatGptAuthFile, cfg.chatGptAccount);
     QDir(work).removeRecursively();
     if (m_cancel)
         return;
@@ -1337,7 +1337,8 @@ void ImportManager::adviceJob(qint64 videoId, qint64 trackId, bool again, const 
                {QStringLiteral("title"), video->ytTitle}, {QStringLiteral("trackId"), track->id}, {QStringLiteral("track"), track->title},
                {QStringLiteral("artist"), track->artist}, {QStringLiteral("album"), track->album},
                {QStringLiteral("answer"), a.json}, {QStringLiteral("error"), a.error}, {QStringLiteral("usage"), a.usage},
-               {QStringLiteral("cost"), a.cost}, {QStringLiteral("seconds"), a.seconds}, {QStringLiteral("cached"), a.cached}});
+               {QStringLiteral("provider"), a.provider},
+               {QStringLiteral("cost"), a.provider == QLatin1String("chatgpt") ? QJsonValue() : QJsonValue(a.cost)}, {QStringLiteral("seconds"), a.seconds}, {QStringLiteral("cached"), a.cached}});
     Database::Advice ad;
     ad.videoId = videoId;
     ad.trackKey = key;
@@ -3038,8 +3039,8 @@ void ImportManager::runJob(qint64 trackId, const ImportSettings &cfg)
     // V (the verdict), W (what the track gets). The rules of thumb of C, D
     // and E do not apply; what stays of the main page is listed there.
     const bool judging = cfg.judgeMode == QLatin1String("judge");
-    const QString judgeKey = judging ? Judge::readKey(cfg.judgeKeyFile) : QString();
-    const QString judgeModel = Judge::modelId(cfg.judgeModel);
+    const QString judgeKey = judging && cfg.judgeProvider == QLatin1String("claude") ? Judge::readKey(cfg.judgeKeyFile) : QString();
+    const QString judgeModel = cfg.judgeProvider == QLatin1String("chatgpt") ? cfg.judgeModel : Judge::modelId(cfg.judgeModel);
     // The judge cannot answer (V5): the lookup is postponed as for a pause,
     // and the pause says why.
     auto judgePause = [&](const QString &why) {
@@ -3054,7 +3055,8 @@ void ImportManager::runJob(qint64 trackId, const ImportSettings &cfg)
                    {QStringLiteral("model"), a.model}, {QStringLiteral("trackId"), track.id}, {QStringLiteral("track"), track.title},
                    {QStringLiteral("artist"), track.artist}, {QStringLiteral("album"), track.album}, {QStringLiteral("uploads"), uploads},
                    {QStringLiteral("answer"), a.json}, {QStringLiteral("error"), a.error}, {QStringLiteral("usage"), a.usage},
-                   {QStringLiteral("cost"), a.cost}, {QStringLiteral("seconds"), a.seconds}, {QStringLiteral("cached"), a.cached}});
+                   {QStringLiteral("provider"), a.provider},
+                   {QStringLiteral("cost"), a.provider == QLatin1String("chatgpt") ? QJsonValue() : QJsonValue(a.cost)}, {QStringLiteral("seconds"), a.seconds}, {QStringLiteral("cached"), a.cached}});
     };
 
     QString why;
@@ -3093,11 +3095,11 @@ void ImportManager::runJob(qint64 trackId, const ImportSettings &cfg)
     // In judge mode the judge replaces A2–A4 (Q2) and writes the queries (Q3).
     QStringList queries;
     if (judging) {
-        if (judgeKey.isEmpty())
+        if (cfg.judgeProvider == QLatin1String("claude") && judgeKey.isEmpty())
             return judgePause(QStringLiteral("no API key is stored (Settings → Judge)"));
         report(QStringLiteral("Asking the judge"));
         const Judge::Answer a = Judge::ask(judgeKey, judgeModel, QString::fromUtf8(JudgeWords::kQueryWords), Judge::queryContent(track, soundLine),
-                                           QString::fromUtf8(JudgeWords::kQuerySchema), 1500, cacheDir(cfg.mvDir), &m_cancel);
+                                           QString::fromUtf8(JudgeWords::kQuerySchema), 1500, cacheDir(cfg.mvDir), &m_cancel, cfg.judgeProvider, cfg.chatGptAuthFile, cfg.chatGptAccount);
         if (m_cancel)
             return cleanup();
         logJudge(QStringLiteral("query"), a, {});
@@ -3243,7 +3245,7 @@ void ImportManager::runJob(qint64 trackId, const ImportSettings &cfg)
         // S3: its pick ends the search; none, and the next query is asked.
         report(QStringLiteral("Asking the judge what to listen to"));
         const Judge::Answer a = Judge::ask(judgeKey, judgeModel, QString::fromUtf8(JudgeWords::kPickWords), Judge::pickContent(track, listing),
-                                           QString::fromUtf8(JudgeWords::kPickSchema), 1500, cacheDir(cfg.mvDir), &m_cancel);
+                                           QString::fromUtf8(JudgeWords::kPickSchema), 1500, cacheDir(cfg.mvDir), &m_cancel, cfg.judgeProvider, cfg.chatGptAuthFile, cfg.chatGptAccount);
         if (m_cancel)
             return cleanup();
         logJudge(QStringLiteral("pick"), a, logListing);
@@ -4171,7 +4173,7 @@ void ImportManager::runJob(qint64 trackId, const ImportSettings &cfg)
             }
         }
         const Judge::Answer v = Judge::ask(judgeKey, judgeModel, QString::fromUtf8(JudgeWords::kVerdictWords), Judge::verdictContent(track, others, uploads),
-                                           QString::fromUtf8(JudgeWords::kVerdictSchema), 4000, cacheDir(cfg.mvDir), &m_cancel);
+                                           QString::fromUtf8(JudgeWords::kVerdictSchema), 4000, cacheDir(cfg.mvDir), &m_cancel, cfg.judgeProvider, cfg.chatGptAuthFile, cfg.chatGptAccount);
         if (m_cancel)
             return cleanup();
         logJudge(QStringLiteral("verdict"), v, logUploads);

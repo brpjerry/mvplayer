@@ -2,6 +2,7 @@
 
 #include "core/ImportManager.h"
 #include "core/Judge.h"
+#include "core/ChatGptAuth.h"
 #include "ui/SystemTheme.h"
 #include "ui/VideoModel.h"
 
@@ -107,7 +108,10 @@ class AppController : public QObject
     Q_PROPERTY(QString judgeMode READ judgeMode WRITE setJudgeMode NOTIFY settingsChanged)
     Q_PROPERTY(QString judgeModel READ judgeModel WRITE setJudgeModel NOTIFY settingsChanged)
     Q_PROPERTY(int judgeThreads READ judgeThreads WRITE setJudgeThreads NOTIFY settingsChanged)
-    Q_PROPERTY(QVariantList judgeModels READ judgeModels CONSTANT)
+    Q_PROPERTY(QVariantList judgeModels READ judgeModels NOTIFY judgeChanged)
+    Q_PROPERTY(QString judgeProvider READ judgeProvider WRITE setJudgeProvider NOTIFY judgeChanged)
+    Q_PROPERTY(bool judgeReady READ judgeReady NOTIFY judgeChanged)
+    Q_PROPERTY(QObject *chatGpt READ chatGpt CONSTANT)
     Q_PROPERTY(int judgeAlone READ judgeAlone NOTIFY judgeChanged)
     Q_PROPERTY(int judgeLeft READ judgeLeft NOTIFY judgeChanged)
     Q_PROPERTY(int adviceLeft READ adviceLeft NOTIFY adviceQueueChanged)
@@ -254,6 +258,10 @@ public:
     void setJudgeThreads(int n);
     void setJudgeModel(const QString &model);
     QVariantList judgeModels() const;
+    QString judgeProvider() const { return m_cfg.judgeProvider; }
+    void setJudgeProvider(const QString &provider);
+    bool judgeReady() const;
+    QObject *chatGpt() const { return m_chatGpt.get(); }
     int judgeAlone() const { return m_judgeAlone; }
     int judgeLeft() const { return m_judgeLeft; }
     // The judge's advice on a video under review for one of its candidates
@@ -386,6 +394,7 @@ private:
     int m_cookiesCheck = 0; // counts checks, so that a late answer about replaced cookies is dropped
     QString m_cookiesState, m_cookiesStatus;
     std::unique_ptr<Judge> m_judge;
+    std::unique_ptr<ChatGptAuth> m_chatGpt;
 
     std::unique_ptr<Database> m_db;
     std::unique_ptr<ImportManager> m_manager;

@@ -12,6 +12,7 @@ endif()
 find_package(Qt6 6.5 REQUIRED COMPONENTS Core Sql Network)
 qt_standard_project_setup(REQUIRES 6.5)
 
+find_package(OpenSSL 3.0 REQUIRED COMPONENTS Crypto)
 find_package(PkgConfig REQUIRED)
 pkg_check_modules(TAGLIB REQUIRED IMPORTED_TARGET taglib)
 pkg_check_modules(CHROMAPRINT REQUIRED IMPORTED_TARGET libchromaprint)
@@ -34,10 +35,12 @@ qt_add_library(mvcore STATIC
     src/core/ArtistChannels.h src/core/ArtistChannels.cpp
     src/core/LibraryScanner.h src/core/LibraryScanner.cpp
     src/core/ImportManager.h src/core/ImportManager.cpp
+    src/core/ChatGptAuth.h src/core/ChatGptAuth.cpp
+    src/core/ChatGptTransport.h src/core/ChatGptTransport.cpp
     src/core/Judge.h src/core/Judge.cpp src/core/JudgePrompts.cpp
 )
 target_include_directories(mvcore PUBLIC src)
-target_link_libraries(mvcore PUBLIC Qt6::Core Qt6::Sql Qt6::Network PkgConfig::TAGLIB PkgConfig::CHROMAPRINT)
+target_link_libraries(mvcore PUBLIC Qt6::Core Qt6::Sql Qt6::Network OpenSSL::Crypto PkgConfig::TAGLIB PkgConfig::CHROMAPRINT)
 
 # Windows: the icon and version details shown by Explorer.
 if(WIN32)
@@ -49,6 +52,14 @@ endif()
 # Headless importer: same pipeline, no display needed.
 qt_add_executable(mvplayer-import src/cli.cpp ${MV_WINDOWS_RC})
 target_link_libraries(mvplayer-import PRIVATE mvcore)
+
+include(CTest)
+if(BUILD_TESTING)
+    find_package(Qt6 REQUIRED COMPONENTS Test)
+    qt_add_executable(mvplayer-chatgpt-test tests/ChatGptTest.cpp)
+    target_link_libraries(mvplayer-chatgpt-test PRIVATE mvcore Qt6::Test)
+    add_test(NAME chatgpt COMMAND mvplayer-chatgpt-test)
+endif()
 
 option(MV_BUILD_GUI "Build the graphical player" ON)
 if(NOT MV_BUILD_GUI)

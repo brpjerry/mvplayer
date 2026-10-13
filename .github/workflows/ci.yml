@@ -15,7 +15,7 @@ jobs:
         run: |
           pacman -Sy --noconfirm archlinux-keyring
           pacman -Syu --noconfirm git cmake ninja qt6-base qt6-declarative qt6-shadertools \
-            mpv taglib chromaprint ffmpeg yt-dlp python
+            openssl mpv taglib chromaprint ffmpeg yt-dlp python
       - uses: actions/checkout@v7
       - name: Configure and build
         run: |
@@ -33,7 +33,7 @@ jobs:
         run: |
           pacman -Sy --noconfirm archlinux-keyring
           pacman -Syu --noconfirm git cmake ninja qt6-base qt6-declarative qt6-shadertools \
-            mpv taglib chromaprint ffmpeg yt-dlp
+            openssl mpv taglib chromaprint ffmpeg yt-dlp
       - uses: actions/checkout@v7
       - name: Build the pacman package from this tree
         run: ci/makepkg.sh
@@ -56,7 +56,7 @@ jobs:
           install: git
           pacboy: >-
             gcc:p cmake:p ninja:p pkgconf:p qt6-base:p qt6-declarative:p qt6-shadertools:p
-            mpv:p taglib:p chromaprint:p ffmpeg:p ntldd:p python:p
+            openssl:p mpv:p taglib:p chromaprint:p ffmpeg:p ntldd:p python:p
       - uses: actions/checkout@v7
       - name: Configure and build
         run: |
