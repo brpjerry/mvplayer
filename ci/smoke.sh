@@ -128,8 +128,13 @@ rank() { "$BUILD/mvplayer-import" rank-check "$@" | tr -d '\r'; }
 [[ $(rank "Twins" "Clara" "Clara 『Twins』 MV" "Sunny Music (Japan)") == "trusted, names the artist" ]]
 # "LIVE Ver." names the live version, which both sides carry as a word already.
 [[ $("$BUILD/mvplayer-import" same-version "Neuro (feat. Rime) [Live at Virtual, 2022]" "Live" "Neuro feat. Rime (from Live) - Rim (LIVE Ver.)" | tr -d '\r') == same ]]
-# A channel named twice over is the artist's by either name.
+# A channel named twice over is the artist's by either name; so is "A and B",
+# how YouTube names an upload listed under several channels.
 [[ $(rank "Comet" "Nayu" "Comet - Nayu ft.初音ミク MV" "Nayu Official / Nayutan Seijin") == "the artist's channel, names the artist" ]]
+[[ $(rank "Comet" "Echo" "Echo - Comet (Official Music Video)" "Nayu and Echo") == "the artist's channel, names the artist" ]]
+# Spaces aside: "DJGenki" is "DJ Genki".
+[[ $(rank "Nekroz" "DJ Genki" "07.DJ Genki - Nekroz" "DJGenki") == "the artist's channel, names the artist" ]]
+[[ $(rank "Nekroz" "DJ Genki" "07.DJ Genki - Nekroz" "DJGenki Fan Uploads") == "not trusted, names the artist" ]]
 # A synthesised voice credited on the artist's own channel is not another version; a human singer is.
 [[ $("$BUILD/mvplayer-import" same-version "Comet" "Comet" "Comet (ft.初音ミク) OFFICIAL MUSIC VIDEO" own | tr -d '\r') == same ]]
 [[ $("$BUILD/mvplayer-import" same-version "Comet" "Comet" "Comet feat. Somebody OFFICIAL MUSIC VIDEO" own | tr -d '\r') == different ]]
@@ -417,6 +422,36 @@ grep -q '"fromCache"' "$WORK/mvlib5/.mvplayer/import-log.jsonl"
 REPORT=$(python3 "$(dirname "$0")/../tools/import-report.py" "$WORK/mvlib5")
 echo "$REPORT" | tail -1 | cut -c1-200
 [[ "$REPORT" == *"review → you: reject"* && "$REPORT" == *"46%"* ]]
+# The same upload for a lossy copy of the track, the lesser audio next to
+# YouTube's: it waits for the user all the same (D1.14), with YouTube's
+# audio alone. Being the song is not enough to take it outright.
+mkdir -p "$WORK/lib5b/Dee"
+ffmpeg -v error -y -i "$WORK/lib5/Dee/five.flac" -c:a libopus -b:a 32k -metadata title="Five" -metadata artist=Dee "$WORK/lib5b/Dee/five.opus"
+touch -d "10 seconds ago" "$WORK/lib5b/Dee/five.opus"
+OUT=$(MVPLAYER_YTDLP="$SITE" timeout 120 "$BUILD/mvplayer-import" --allow-still-images --music-dir "$WORK/lib5b" --mv-dir "$WORK/mvlib5b" 2>&1)
+echo "$OUT" | grep -E "^\[import\]|^done:"
+[[ "$OUT" == *"done: 0 videos and 1 for review; tracks: review=1"* ]]
+[[ "$(cd "$WORK/mvlib5b/Dee" && ffprobe -v error -show_entries stream=codec_name -of csv=p=0 "Five [liv].mkv" | tr -d '\r' | tr '\n' ' ')" == "h264 opus " ]]
+[[ "$(python3 -c "import sqlite3, sys; print(sqlite3.connect(sys.argv[1]).execute('SELECT review, audio_source FROM videos').fetchall())" "$WORK/mvlib5b/.mvplayer/library.db")" == "[(1, 'youtube')]" ]]
+# The track's own recording on the artist's channel, but titled as another
+# version: a live performance or a dance practice carries the studio audio
+# whole, and is not the music video. Not taken outright, however much of the
+# waveform is the track's (D1.13, R3): it waits for the user.
+ffmpeg -v error -y -i "$WORK/lib5/Dee/five.flac" -c:a libopus -b:a 96k "$WORK/site-audio.opus"
+echo '{"entries": [{"id": "lve", "ie_key": "Youtube", "title": "Dee - Five (Live at the Hall)", "channel": "Dee", "duration": 40, "view_count": 1000, "channel_is_verified": true}]}' > "$WORK/site-search.json"
+OUT=$(MVPLAYER_YTDLP="$SITE" timeout 120 "$BUILD/mvplayer-import" --allow-still-images --music-dir "$WORK/lib5" --mv-dir "$WORK/mvlib5c" 2>&1)
+echo "$OUT" | grep -E "^\[import\]|^done:"
+[[ "$OUT" == *"done: 0 videos and 1 for review; tracks: review=1"* ]]
+grep -q "marked as different versions" "$WORK/mvlib5c/.mvplayer/import-log.jsonl"
+# Titled as the song, it is taken outright.
+echo '{"entries": [{"id": "stu", "ie_key": "Youtube", "title": "Dee - Five (Official Video)", "channel": "Dee", "duration": 40, "view_count": 1000, "channel_is_verified": true}]}' > "$WORK/site-search.json"
+OUT=$(MVPLAYER_YTDLP="$SITE" timeout 120 "$BUILD/mvplayer-import" --allow-still-images --music-dir "$WORK/lib5" --mv-dir "$WORK/mvlib5d" 2>&1)
+echo "$OUT" | grep -E "^\[import\]|^done:"
+[[ "$OUT" == *"done: 1 videos; tracks: done=1"* ]]
+grep -q "the track's recording: 100% of it" "$WORK/mvlib5d/.mvplayer/import-log.jsonl"
+# (The stand-in site back to the upload the tests below expect.)
+ffmpeg -v error -y -i "$WORK/lib5/Dee/five.flac" -af atempo=1.004 -c:a libopus -b:a 96k "$WORK/site-audio.opus"
+echo '{"entries": [{"id": "liv", "ie_key": "Youtube", "title": "Dee - Five", "channel": "Dee", "duration": 40, "view_count": 1000, "channel_is_verified": true}]}' > "$WORK/site-search.json"
 
 echo "== an empty video file"
 # A machine that goes down while a video is being written can leave its file

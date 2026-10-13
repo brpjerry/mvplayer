@@ -311,6 +311,7 @@ private:
     void onJobFinished(qint64 trackId);
     void runJob(qint64 trackId, const ImportSettings &cfg);
     // Rebuilds a video's file with the track's audio as its main audio.
+    bool keepYoutubeAudio(const VideoInfo &video, const TrackInfo &track, QString *error);
     bool putLibraryAudioIn(const VideoInfo &video, const TrackInfo &track, const AudioAlign::Result &align,
                            const ImportSettings &cfg, QString *error, bool review = false);
     void upgradeVideos(const ImportSettings &cfg);

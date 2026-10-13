@@ -147,17 +147,9 @@ constexpr double kOwnWaveform = 0.72;
 
 bool audioReplaceable(const AudioAlign::Result &r)
 {
-    if (r.byOffset)
-        return true;
     const double whole = std::min(r.trackSec, r.videoSec);
-    return !r.segments.isEmpty() && r.goodSec >= kOwnWaveform * whole && r.goodSec >= 0.6 * r.fpMatchedSec;
+    return !r.segments.isEmpty() && r.goodSec >= kOwnWaveform * whole;
 }
-
-// Where track and video name different versions ("prompt αU ver." against
-// none), the waveform has to overrule the names: a version made over the
-// original keeps its backing and some of its lines, and showed 90%; the
-// same recording under another label 99.8% and more.
-constexpr double kOwnWaveformOtherVersion = 0.97;
 
 // A video already in the library plays its first track's audio, and later
 // tracks were measured against that. So the English version of a song, looked
@@ -200,35 +192,22 @@ QString interruptedReason(const AudioAlign::Result &r)
         .arg(qRound(other)).arg(places).arg(places == 1 ? QStringLiteral("place") : QStringLiteral("places"));
 }
 
-// The same bar holds where the upload names none of the track's artists, in
-// its title or as its channel. Another performer over the same backing
-// measured 79-93% and was taken: another unit's video, a voice-synth
-// version, a cover that does not call itself one. An artist's own upload
-// under a name in another script is as good as always above the bar.
-// And only on the artist's own channel. A third party's copy of the song's
-// video fits as well as the real one, and a label's upload may be a cut:
-// those are for the user to judge, in review.
-// `artistChannel`: the channel is the artist's; `knownChannel`: MusicBrainz
-// or the user said so, which is as good as the artist's name on it (the
-// name test is for the producer's channel with another singer's version,
-// and for tags and uploads in different scripts).
-//
-// All of that but whose channel it is and how much of the song the video
-// has: the track is the recording in the upload.
-bool sameRecordingAs(const AudioAlign::Result &r, const TrackInfo &track, const QString &videoTitle, const QString &channel,
-                     bool artistChannel, bool knownChannel)
+// R1, the track's own recording: what lets an upload be taken outright.
+// Only on the artist's own channel: a third party's copy of the song's
+// video fits as well as the real one, and a label's upload may be a cut.
+// Only the same version by its words (R3): a live performance, a dance
+// practice or a crossfade on the artist's channel carries the studio audio
+// all but whole, and is not the music video. Everything else that is the
+// song waits for the user (D1.14). Which audio the track has is no part of
+// it (R6, F3).
+bool sameRecordingAs(const AudioAlign::Result &r, const TrackInfo &track, const QString &videoTitle, bool artistChannel)
 {
-    if (!audioReplaceable(r) || interrupted(r))
-        return false;
-    return r.byOffset
-        || (Matcher::sameVersion(track, videoTitle, artistChannel) && (knownChannel || Matcher::namesArtist(track, videoTitle, channel)))
-        || r.goodSec >= kOwnWaveformOtherVersion * std::min(r.trackSec, r.videoSec);
+    return audioReplaceable(r) && !interrupted(r) && Matcher::sameVersion(track, videoTitle, artistChannel);
 }
 
-bool ownRecording(const AudioAlign::Result &r, const TrackInfo &track, const QString &videoTitle, const QString &channel,
-                  bool artistChannel, bool knownChannel = false)
+bool ownRecording(const AudioAlign::Result &r, const TrackInfo &track, const QString &videoTitle, bool artistChannel)
 {
-    return artistChannel && !shortCut(r) && sameRecordingAs(r, track, videoTitle, channel, artistChannel, knownChannel);
+    return artistChannel && !shortCut(r) && sameRecordingAs(r, track, videoTitle, artistChannel);
 }
 
 // What a candidate that is not taken as the track's recording lacks.
@@ -244,17 +223,12 @@ QString unconfirmedReason(const AudioAlign::Result &r, const TrackInfo &track, c
     if (audioReplaceable(r) && !artistChannel)
         return QStringLiteral("%1% of it is demonstrably the track's waveform, but “%2” is not known as the artist's channel")
             .arg(share).arg(channel);
-    if (audioReplaceable(r)) {
-        return QStringLiteral("%1% of it is demonstrably the track's waveform, but %2 (%3% needed then)")
-            .arg(share)
-            .arg(!Matcher::sameVersion(track, videoTitle, artistChannel) ? QStringLiteral("track and video are marked as different versions")
-                                                           : QStringLiteral("the upload names none of the track's artists (the producer's channel, another singer)"))
-            .arg(qRound(100 * kOwnWaveformOtherVersion));
-    }
+    if (audioReplaceable(r))
+        return QStringLiteral("%1% of it is demonstrably the track's waveform, but track and video are marked as different versions").arg(share);
     return QStringLiteral("only %1% of it is demonstrably the track's waveform (%2% needed)%3")
         .arg(share)
         .arg(qRound(100 * kOwnWaveform))
-        .arg(Matcher::sameVersion(track, videoTitle) ? QString() : QStringLiteral("; track and video are marked as different versions"));
+        .arg(Matcher::sameVersion(track, videoTitle, artistChannel) ? QString() : QStringLiteral("; track and video are marked as different versions"));
 }
 
 // The whole track at the one offset at which the loudness of the two rises
@@ -286,28 +260,6 @@ AudioAlign::Result placedWhole(AudioAlign::Result r, bool *exact = nullptr)
     return r;
 }
 
-// The same performance in another mix — reverb added, the voice at another
-// level — has the waveform of the track only here and there, like a cover
-// over the same backing. The waveforms cannot tell those apart; what the two
-// are called can. So when the fingerprints cover the song, the waveforms
-// agree in places at the offset the loudness gives, and neither side is
-// marked as a version the other is not (live, remix, cover, ...), it is taken
-// for the track's recording, and the track is placed whole at that offset.
-AudioAlign::Result fitted(AudioAlign::Result r, const TrackInfo &track, const QString &videoTitle, const QString &channel)
-{
-    if (r.segments.isEmpty() || audioReplaceable(r))
-        return r;
-    const double whole = std::min(r.trackSec, r.videoSec);
-    // Another singer over the same backing fits all of this as well, and so
-    // does somebody's re-upload with other audio under it: this much trust
-    // in so little waveform is for the artist's own channel alone.
-    if (r.fpMatchedSec < 0.8 * whole || r.goodSec < 0.2 * whole || r.contourCorr < 0.5
-        || !Matcher::sameVersion(track, videoTitle, true) || !Matcher::isOwnChannel(track, channel))
-        return r;
-    bool exact = false;
-    const AudioAlign::Result placed = placedWhole(r, &exact);
-    return exact ? placed : r;
-}
 
 // The library's file is the better audio: it is what the video must play.
 // YouTube's is only ever the main audio when the file is the lesser one.
@@ -797,6 +749,23 @@ bool ImportManager::putLibraryAudioIn(const VideoInfo &video, const TrackInfo &t
     return true;
 }
 
+// The video plays YouTube's audio alone, as this track's: the track is the
+// lesser audio, or its own is switched off (F3). Any candidate's audio the
+// file carried goes, and the video is out of review.
+bool ImportManager::keepYoutubeAudio(const VideoInfo &video, const TrackInfo &track, QString *error)
+{
+    if (!Muxer::keepAudio(video.path, -1, video.ytStream, track, video.ytId, &m_cancel, error))
+        return false;
+    VideoInfo v = video;
+    v.audioSource = QStringLiteral("youtube");
+    v.audioDetail = QStringLiteral("YouTube");
+    v.ytStream = 0;
+    v.review = false;
+    m_db->updateVideoMedia(v);
+    emit videoChanged(v.id);
+    return true;
+}
+
 void ImportManager::discardVideo(const VideoInfo &v)
 {
     m_db->removeVideo(v.id);
@@ -959,7 +928,7 @@ bool ImportManager::measureCandidates(qint64 videoId, const ImportSettings &cfg)
                 return false;
             continue;
         }
-        const AudioAlign::Result ar = fitted(AudioAlign::align(trackPcm, ytPcm), c.track, v->ytTitle, v->ytChannel);
+        const AudioAlign::Result ar = AudioAlign::align(trackPcm, ytPcm);
         if (m_cancel)
             return false;
         if (c.stream > 0) {
@@ -1218,7 +1187,6 @@ ImportManager::ChannelVerdict ImportManager::judgeAsArtists(const VideoInfo &vid
         out.reason = QStringLiteral("its file cannot be read");
         return out;
     }
-    const double ytQuality = storedYoutubeQuality(video);
     double bestFit = -1;
     for (const Database::Candidate &c : candidatesInOrder(m_db, video)) {
         if (stop && *stop)
@@ -1229,12 +1197,11 @@ ImportManager::ChannelVerdict ImportManager::judgeAsArtists(const VideoInfo &vid
                 out.reason = QStringLiteral("“%1” cannot be read").arg(c.track.title);
             continue;
         }
-        const AudioAlign::Result ar = fitted(AudioAlign::align(pcm, ytPcm), c.track, video.ytTitle, video.ytChannel);
+        const AudioAlign::Result ar = AudioAlign::align(pcm, ytPcm);
         // As a lookup has it for a video the track is a candidate of
         // already (runJob), with the channel a vouched one.
-        const bool own = cfg.replaceAudio && libraryIsBetter(c.track, ytQuality);
-        const bool recording = audioMatches(ar) && ownRecording(ar, c.track, video.ytTitle, video.ytChannel, true, true);
-        if (own && recording) {
+        const bool recording = audioMatches(ar) && ownRecording(ar, c.track, video.ytTitle, true);
+        if (recording) {
             if (ar.likeness > bestFit) {
                 bestFit = ar.likeness;
                 out.accept = true;
@@ -1244,8 +1211,7 @@ ImportManager::ChannelVerdict ImportManager::judgeAsArtists(const VideoInfo &vid
         }
         if (out.reason.isEmpty()) {
             out.reason = !audioMatches(ar) ? mismatchReason(ar)
-                : !own ? QStringLiteral("the track is the lesser audio")
-                : unconfirmedReason(ar, c.track, video.ytTitle, video.ytChannel, true);
+                                           : unconfirmedReason(ar, c.track, video.ytTitle, video.ytChannel, true);
         }
     }
     if (out.accept)
@@ -1315,7 +1281,7 @@ void ImportManager::adviceJob(qint64 videoId, qint64 trackId, bool again, const 
     std::vector<int16_t> ytPcm, pcm;
     QString error;
     if (AudioAlign::decodeMono(video->path, &ytPcm, &m_cancel, &error, video->ytStream) && AudioAlign::decodeMono(track->path, &pcm, &m_cancel, &error))
-        u.audio = Judge::audioText(fitted(AudioAlign::align(pcm, ytPcm), *track, video->ytTitle, video->ytChannel));
+        u.audio = Judge::audioText(AudioAlign::align(pcm, ytPcm));
     else
         u.audio = QStringLiteral("not measured (%1)").arg(error);
     if (m_cancel)
@@ -1577,7 +1543,7 @@ bool ImportManager::settleShared(qint64 videoId, const ImportSettings &cfg)
         std::vector<int16_t> pcm;
         AudioAlign::Result ar;
         if (AudioAlign::decodeMono(t.path, &pcm, &m_cancel, &error))
-            ar = fitted(AudioAlign::align(pcm, ytPcm), t, v->ytTitle, v->ytChannel);
+            ar = AudioAlign::align(pcm, ytPcm);
         if (m_cancel)
             return false;
         measured.append(QJsonObject{{QStringLiteral("trackId"), t.id}, {QStringLiteral("track"), t.title}, {QStringLiteral("album"), t.album},
@@ -1977,7 +1943,7 @@ QString ImportManager::upgradeVideo(const VideoInfo &video, const ImportSettings
         std::vector<int16_t> trackPcm, mvPcm;
         if (AudioAlign::decodeMono(source->path, &trackPcm, &m_cancel, &error)
             && AudioAlign::decodeMono(audioFile, &mvPcm, &m_cancel, &error)) {
-            plan.align = fitted(AudioAlign::align(trackPcm, mvPcm), *source, video.ytTitle, video.ytChannel);
+            plan.align = AudioAlign::align(trackPcm, mvPcm);
             plan.track = *source;
             plan.replaceAudio = audioMatches(plan.align) && audioReplaceable(plan.align)
                 && libraryIsBetter(*source, youtubeQuality(audioInfo));
@@ -2249,7 +2215,7 @@ static Heard listenTo(YtDlp &yt, const TrackInfo &track, const std::vector<int16
         return h;
     }
     h.ok = true;
-    h.ar = fitted(AudioAlign::align(trackPcm, pcm), track, title, channel);
+    h.ar = AudioAlign::align(trackPcm, pcm);
     if (!audioMatches(h.ar)) {
         h.reason = mismatchReason(h.ar);
         return h;
@@ -2521,9 +2487,6 @@ void ImportManager::replaceWithJob(const VideoInfo &video, const TrackInfo &trac
     QString channel = ytInfo.value(QLatin1String("channel")).toString();
     if (channel.isEmpty())
         channel = ytInfo.value(QLatin1String("uploader")).toString();
-    if (heard)
-        ar = fitted(ar, track, title, channel);
-
     report(QStringLiteral("Downloading"), 0, title);
     QString videoFile, thumbFile;
     double lastShown = -1;
@@ -3615,7 +3578,7 @@ void ImportManager::runJob(qint64 trackId, const ImportSettings &cfg)
                 anyChecked = true;
                 JudgeCase jc;
                 jc.c = c;
-                jc.align = fitted(AudioAlign::align(trackPcm, pcm), track, existing->ytTitle, existing->ytChannel);
+                jc.align = AudioAlign::align(trackPcm, pcm);
                 jc.song = audioMatches(jc.align);
                 jc.existing = existing;
                 YtDlp::Channel channel;
@@ -3653,7 +3616,7 @@ void ImportManager::runJob(qint64 trackId, const ImportSettings &cfg)
                     continue;
                 }
                 anyChecked = true;
-                const AudioAlign::Result ar = fitted(AudioAlign::align(trackPcm, pcm), track, existing->ytTitle, existing->ytChannel);
+                const AudioAlign::Result ar = AudioAlign::align(trackPcm, pcm);
                 qInfo().noquote() << QStringLiteral("[align] %1 ~ “%2” [%3] (its video until now): %4").arg(track.title, c.title, c.id, ar.summary());
                 auto turnDown = [&](const QString &result, const QString &reason) {
                     priorRejected = true;
@@ -3666,16 +3629,12 @@ void ImportManager::runJob(qint64 trackId, const ImportSettings &cfg)
                     continue;
                 }
                 // (An upload the user accepted counts as on the artist's channel.)
-                const bool knownChannel = existing->vouched
+                const bool artistChannel = c.ownChannel || existing->vouched
                     || ArtistChannels::isArtistChannel(*m_db, Matcher::artistNames(track), c.channelId, c.channel);
-                const bool artistChannel = c.ownChannel || knownChannel;
-                const double ytQuality = storedYoutubeQuality(*existing);
-                const bool forReview = cfg.replaceAudio && libraryIsBetter(track, ytQuality)
-                    && !ownRecording(ar, track, c.title, c.channel, artistChannel, knownChannel);
-                if (!forReview && interrupted(ar)) {
-                    turnDown(QStringLiteral("different"), interruptedReason(ar));
-                    continue;
-                }
+                // D1.13, D1.14: taken outright only as the track's own
+                // recording; the song otherwise waits for a verdict,
+                // whatever audio the track has.
+                const bool forReview = !ownRecording(ar, track, c.title, artistChannel);
                 if (cfg.skipStillImages) {
                     report(QStringLiteral("Checking video"), -1, c.title);
                     Muxer::StillCheck check;
@@ -3718,11 +3677,8 @@ void ImportManager::runJob(qint64 trackId, const ImportSettings &cfg)
                     continue;
                 }
                 checked(c, QStringLiteral("match"),
-                        QStringLiteral("the track's video until now, and by today's rules outright: %1")
-                            .arg(ar.byOffset ? QStringLiteral("the same performance in another mix")
-                                 : libraryIsBetter(track, ytQuality) && cfg.replaceAudio
-                                     ? QStringLiteral("%1% of it is demonstrably the same waveform").arg(qRound(100 * waveformShare(ar)))
-                                     : QStringLiteral("the song by its fingerprints; YouTube's audio is kept")),
+                        QStringLiteral("the track's video until now, and by today's rules outright: %1% of it is demonstrably the same waveform")
+                            .arg(qRound(100 * waveformShare(ar))),
                         &ar, {{QStringLiteral("youtubeKbps"), qRound(existing->ytAbr)}});
                 chosen = c;
                 chosenDir.clear();
@@ -3745,11 +3701,11 @@ void ImportManager::runJob(qint64 trackId, const ImportSettings &cfg)
                 continue;
             }
             anyChecked = true;
-            const AudioAlign::Result ar = fitted(AudioAlign::align(trackPcm, pcm), track, existing->ytTitle, existing->ytChannel);
+            const AudioAlign::Result ar = AudioAlign::align(trackPcm, pcm);
             qInfo().noquote() << QStringLiteral("[align] %1 ~ “%2” [%3] (in the library): %4").arg(track.title, c.title, c.id, ar.summary());
-            // The track is the better audio: the video would have to play it.
+            // The track is the better audio: the video is to play it (F3).
             const bool own = cfg.replaceAudio && libraryIsBetter(track, storedYoutubeQuality(*existing));
-            const bool recording = audioMatches(ar) && ownRecording(ar, track, existing->ytTitle, existing->ytChannel, vouchedExisting, knownExisting);
+            const bool recording = audioMatches(ar) && ownRecording(ar, track, existing->ytTitle, vouchedExisting);
 
             if (existing->review) {
                 const bool mine = held.contains(existing->id);
@@ -3762,14 +3718,15 @@ void ImportManager::runJob(qint64 trackId, const ImportSettings &cfg)
                         reasons << QStringLiteral("“%1” is a different recording").arg(c.title);
                     continue;
                 }
-                if (own && recording) {
+                if (recording) {
                     // It waits for a verdict as the video of tracks that are
                     // only the song (a live take, looked up first; or this
                     // track, under yesterday's rules). This track is
                     // demonstrably its recording: the video is this track's,
-                    // and no longer a question.
+                    // and no longer a question. It plays the track's audio
+                    // where that is the better one, YouTube's otherwise (F3).
                     const QVector<Database::Candidate> were = m_db->candidates(existing->id);
-                    if (putLibraryAudioIn(*existing, track, ar, cfg, &error)) {
+                    if (own ? putLibraryAudioIn(*existing, track, ar, cfg, &error) : keepYoutubeAudio(*existing, track, &error)) {
                         releaseCandidates(existing->id, were, &track,
                                           QStringLiteral("“%1” is the video of “%2” [%3]").arg(c.title, track.title, track.album));
                         checked(c, QStringLiteral("match"),
@@ -3788,8 +3745,7 @@ void ImportManager::runJob(qint64 trackId, const ImportSettings &cfg)
                 if (mine) {
                     checked(c, QStringLiteral("option"),
                             QStringLiteral("the track is a candidate of it already; still: %1")
-                                .arg(!own ? QStringLiteral("the track is the lesser audio")
-                                          : unconfirmedReason(ar, track, existing->ytTitle, existing->ytChannel, vouchedExisting)),
+                                .arg(unconfirmedReason(ar, track, existing->ytTitle, existing->ytChannel, vouchedExisting)),
                             &ar);
                     continue;
                 }
@@ -3845,24 +3801,16 @@ void ImportManager::runJob(qint64 trackId, const ImportSettings &cfg)
             if (unfit.isEmpty() && shortCut(ar))
                 unfit = QStringLiteral("the video is a cut of the song: %1 s of %2 s").arg(qRound(ar.videoSec)).arg(qRound(ar.trackSec));
             // One that no track in the music folders has is this track's on
-            // the terms of an upload just found, short of asking the user.
-            const bool takes = unfit.isEmpty() && (holders.isEmpty() ? (!own || recording) : ar.likeness > theirFit);
+            // the terms of an upload just found (D1.13, D1.14).
+            const bool takes = unfit.isEmpty() && (holders.isEmpty() ? recording : ar.likeness > theirFit);
             if (takes) {
                 // The video plays this track's audio where it is the better
                 // one and demonstrably the recording; otherwise YouTube's.
                 bool ok = true;
-                if (own && audioReplaceable(ar)) {
+                if (own && audioReplaceable(ar))
                     ok = putLibraryAudioIn(*existing, track, ar, cfg, &error);
-                } else if (existing->audioSource == QLatin1String("library")) {
-                    ok = Muxer::keepAudio(existing->path, -1, existing->ytStream, track, existing->ytId, &m_cancel, &error);
-                    if (ok) {
-                        VideoInfo v = *existing;
-                        v.audioSource = QStringLiteral("youtube");
-                        v.audioDetail = QStringLiteral("YouTube");
-                        v.ytStream = 0;
-                        m_db->updateVideoMedia(v);
-                    }
-                }
+                else if (existing->audioSource == QLatin1String("library"))
+                    ok = keepYoutubeAudio(*existing, track, &error);
                 if (m_cancel)
                     return cleanup();
                 if (!ok) {
@@ -3913,10 +3861,29 @@ void ImportManager::runJob(qint64 trackId, const ImportSettings &cfg)
                     requeuePending();
                 return;
             }
+            if (holders.isEmpty() && unfit.isEmpty()) {
+                // No track has it, and this one is the song without being
+                // demonstrably its recording: a card with this track as its
+                // candidate (D1.14), as a new upload would be.
+                if (!addCandidate(*existing, track, ar, cfg, &error)) {
+                    if (m_cancel)
+                        return cleanup();
+                    checked(c, QStringLiteral("error"), QStringLiteral("already in the library with no track; could not be made over for review: %1").arg(error), &ar);
+                    undecided = true;
+                    reasons << QStringLiteral("“%1”: %2").arg(c.title, error);
+                    continue;
+                }
+                m_db->setVideoReview(existing->id, true);
+                emit videoChanged(existing->id);
+                checked(c, QStringLiteral("candidate"),
+                        QStringLiteral("already in the library, and no track in the music folders has it; this track is the song but %1: it waits for your verdict with this track as its candidate")
+                            .arg(unconfirmedReason(ar, track, existing->ytTitle, existing->ytChannel, vouchedExisting)),
+                        &ar);
+                reasons << QStringLiteral("“%1” waits for your review").arg(c.title);
+                continue;
+            }
             checked(c, QStringLiteral("has-its-track"),
                     !unfit.isEmpty() ? QStringLiteral("already in the library as the video of “%1”, and not one for this track: %2").arg(theirTitle, unfit)
-                    : holders.isEmpty() ? QStringLiteral("already in the library; this track is the song but cannot be confirmed as its recording: %1")
-                                              .arg(unconfirmedReason(ar, track, existing->ytTitle, existing->ytChannel, vouchedExisting))
                     : QStringLiteral("already in the library as the video of “%1”, which is the closer fit to the upload: %2% against this track's %3%")
                           .arg(theirTitle).arg(100 * theirFit, 0, 'f', 1).arg(100 * ar.likeness, 0, 'f', 1),
                     &ar, {{QStringLiteral("fit"), std::round(ar.likeness * 1000) / 1000},
@@ -3978,7 +3945,7 @@ void ImportManager::runJob(qint64 trackId, const ImportSettings &cfg)
             continue;
         }
         anyChecked = true;
-        const AudioAlign::Result ar = fitted(AudioAlign::align(trackPcm, mvPcm), track, c.title, c.channel);
+        const AudioAlign::Result ar = AudioAlign::align(trackPcm, mvPcm);
         qInfo().noquote() << QStringLiteral("[align] %1 ~ “%2” [%3]: %4").arg(track.title, c.title, c.id, ar.summary());
         if (!judging && !audioMatches(ar)) {
             checked(c, QStringLiteral("different"), mismatchReason(ar), &ar);
@@ -3987,44 +3954,15 @@ void ImportManager::runJob(qint64 trackId, const ImportSettings &cfg)
             continue;
         }
 
-        // The library's audio is the better one but cannot be shown to be
-        // the recording in this video: a live take, a cover, another mix.
-        // YouTube's audio must not take its place, and the track's may not
-        // belong there: that is for the user to say. Such a video is only
-        // taken, for review, when no candidate fits outright. (A lossy file
-        // may still be the lesser one next to the account's audio.)
-        bool forReview = false;
-        // (By the channel's id as the upload's page has it, where the search results gave none.)
-        const bool knownChannel = ArtistChannels::isArtistChannel(*m_db, Matcher::artistNames(track), channelId, c.channel);
-        const bool artistChannel = c.ownChannel || knownChannel;
-        if (!judging && cfg.replaceAudio && libraryIsBetter(track, youtubeQuality(info))
-            && !ownRecording(ar, track, c.title, c.channel, artistChannel, knownChannel)) {
-            bool premiumWins = false;
-            if (!track.lossless && yt.hasCookies()) {
-                QString premiumFile;
-                QJsonObject premiumInfo;
-                ++nAudio;
-                if (yt.downloadAudio(c.id, dir, &premiumFile, &premiumInfo, &error, true)
-                    && !libraryIsBetter(track, youtubeQuality(premiumInfo))) {
-                    premiumWins = true;
-                    audioFile = premiumFile;
-                    info = premiumInfo;
-                }
-                if (m_cancel)
-                    return cleanup();
-            }
-            if (!premiumWins)
-                forReview = true;
-        }
-
-        // Where the track is not the better audio there is no
-        // review either: such a video is simply not the song's.
-        if (!judging && !forReview && interrupted(ar)) {
-            checked(c, QStringLiteral("different"), interruptedReason(ar), &ar);
-            reasons << QStringLiteral("“%1” interrupts the song").arg(c.title);
-            QDir(dir).removeRecursively();
-            continue;
-        }
+        // The song, but not demonstrably the track's own recording (R1): a
+        // live take, a cover, another mix, a third party's copy. That is for
+        // the user to say (D1.14), whatever audio the track has; only the
+        // track's own recording on the artist's channel is taken outright
+        // (D1.13). (The channel by its id as the upload's page has it, where
+        // the search results gave none.)
+        const bool artistChannel = c.ownChannel
+            || ArtistChannels::isArtistChannel(*m_db, Matcher::artistNames(track), channelId, c.channel);
+        const bool forReview = !judging && !ownRecording(ar, track, c.title, artistChannel);
 
         QString preview; // judge mode: the picture stream, for the frames (L4.1)
         if (cfg.skipStillImages || judging) {
@@ -4121,11 +4059,7 @@ void ImportManager::runJob(qint64 trackId, const ImportSettings &cfg)
         }
 
         checked(c, QStringLiteral("match"),
-                ar.byOffset ? QStringLiteral("the same performance in another mix: fingerprints cover the song, loudness agrees, neither is marked as another version")
-                : libraryIsBetter(track, youtubeQuality(info)) && cfg.replaceAudio
-                    ? QStringLiteral("the track's recording: %1% of it is demonstrably the same waveform")
-                          .arg(qRound(100 * ar.goodSec / qMax(1.0, std::min(ar.trackSec, ar.videoSec))))
-                    : QStringLiteral("the song by its fingerprints; YouTube's audio is kept (the track is the lesser one, or library audio is switched off)"),
+                QStringLiteral("the track's recording: %1% of it is demonstrably the same waveform").arg(qRound(100 * waveformShare(ar))),
                 &ar, {{QStringLiteral("youtubeKbps"), qRound(YtDlp::audioKbps(info))}});
         chosen = c;
         chosenDir = dir;
@@ -4339,10 +4273,15 @@ void ImportManager::runJob(qint64 trackId, const ImportSettings &cfg)
         const VideoInfo v = *prior;
         const double ytQuality = storedYoutubeQuality(v);
         AudioAlign::Result al = pick.align;
-        const bool replace = cfg.replaceAudio && audioReplaceable(pick.align) && libraryIsBetter(track, ytQuality);
-        if (judgeReview && needsReview && !replace) {
-            // The judge's card, with YouTube's audio: the track's cannot be
-            // laid in (L1), or it is the lesser one.
+        const bool better = cfg.replaceAudio && libraryIsBetter(track, ytQuality);
+        const bool replace = better && audioReplaceable(pick.align);
+        // A card plays the track laid whole at the offset where the loudness
+        // agrees, where the track is the better audio (F3).
+        if (needsReview && !judgeReview && better)
+            al = placedWhole(pick.align);
+        if (needsReview && (judgeReview ? !replace : !al.byOffset)) {
+            // A card with YouTube's audio: the track's cannot be laid in
+            // (the judge's, L1), or it is the lesser one.
             report(QStringLiteral("Preparing for review"), -1, pick.c.title);
             m_db->setVideoReview(v.id, true);
             m_db->addCandidate(v.id, track, v.audioSource == QLatin1String("library") ? 1 : 0, qMax(pick.align.likeness, 1e-6), v.audioDetail);
@@ -4354,13 +4293,6 @@ void ImportManager::runJob(qint64 trackId, const ImportSettings &cfg)
             *videoIdOut = v.id;
             *summary = QStringLiteral("%1 · kept, now for review").arg(pick.c.title);
             return Got::Ok;
-        }
-        if (!judgeReview) {
-            needsReview = needsReview && libraryIsBetter(track, ytQuality);
-            if (needsReview) {
-                al = placedWhole(pick.align);
-                needsReview = al.byOffset;
-            }
         }
         if (needsReview) {
             // It goes back to the queue, with this track as its candidate.
@@ -4466,19 +4398,19 @@ void ImportManager::runJob(qint64 trackId, const ImportSettings &cfg)
     plan.track = track;
     plan.ytId = chosen.id;
     plan.align = alignment;
-    if (judgeReview) {
-        // The judge's card: the track's audio beside YouTube's where it can
-        // be laid in (F3), YouTube's alone where not (L1).
-        plan.replaceAudio = cfg.replaceAudio && audioReplaceable(alignment) && libraryIsBetter(track, youtubeQuality(ytInfo));
+    // (With the account's audio a lossy track may have become the lesser one.)
+    const bool better = cfg.replaceAudio && libraryIsBetter(track, youtubeQuality(ytInfo));
+    if (needsReview && !judgeReview && better) {
+        // A card plays the track laid whole at the offset where the loudness
+        // agrees (F3); YouTube's alone where that cannot be done.
+        plan.align = placedWhole(alignment);
+        plan.replaceAudio = plan.align.byOffset;
     } else {
-        // (With the account's audio a lossy track may have become the lesser one.)
-        needsReview = needsReview && libraryIsBetter(track, youtubeQuality(ytInfo));
-        if (needsReview) {
-            plan.align = placedWhole(alignment);
-            needsReview = plan.align.byOffset;
-        }
-        plan.replaceAudio = needsReview
-            || (cfg.replaceAudio && audioReplaceable(alignment) && libraryIsBetter(track, youtubeQuality(ytInfo)));
+        // Taken outright: the track's audio where it is the better one (it
+        // is the recording, D1.13). The judge's card: the track's audio
+        // beside YouTube's where it can be laid in, YouTube's alone where
+        // not (L1).
+        plan.replaceAudio = better && audioReplaceable(alignment);
     }
 
     report(plan.replaceAudio ? QStringLiteral("Muxing library audio") : QStringLiteral("Muxing"), -1, chosen.title);

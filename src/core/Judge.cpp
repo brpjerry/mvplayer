@@ -565,8 +565,6 @@ QString Judge::audioText(const AudioAlign::Result &r)
     const double gap = r.interruptedSec();
     if (gap > 0)
         parts << QStringLiteral("%1 s of other audio inside the song").arg(qRound(gap));
-    if (r.byOffset)
-        parts << QStringLiteral("placed by offset (same performance in another mix)");
     return parts.join(QStringLiteral("; "));
 }
 
