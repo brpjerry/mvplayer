@@ -14,6 +14,9 @@
 #include "core/AudioPrint.h"
 #include "core/ImportManager.h"
 #include "core/Judge.h"
+#include "core/ChatGptAuth.h"
+#include <QProcess>
+#include <QTimer>
 #include "core/Muxer.h"
 #include "core/Subtitles.h"
 #include "core/TagReader.h"
@@ -61,7 +64,13 @@ int main(int argc, char **argv)
         {QStringLiteral("keep-youtube-audio"), QStringLiteral("Never replace the video's audio with the library track.")},
         {QStringLiteral("allow-still-images"), QStringLiteral("Accept videos whose picture never changes.")},
         {QStringLiteral("judge"), QStringLiteral("The judge (docs/import-rules-judge.html): off, advice, or judge (it runs the lookup)."), QStringLiteral("mode"), QStringLiteral("off")},
-        {QStringLiteral("judge-model"), QStringLiteral("Which model the judge is: haiku, sonnet or opus."), QStringLiteral("model"), QStringLiteral("sonnet")},
+        {QStringLiteral("judge-model"), QStringLiteral("Claude: haiku, sonnet or opus. ChatGPT: a model slug from --chatgpt-models."), QStringLiteral("model"), QStringLiteral("sonnet")},
+        {QStringLiteral("judge-provider"), QStringLiteral("Judge provider: claude or chatgpt."), QStringLiteral("provider"), QStringLiteral("claude")},
+        {QStringLiteral("chatgpt-auth-file"), QStringLiteral("ChatGPT account store; the app's by default."), QStringLiteral("file")},
+        {QStringLiteral("chatgpt-account"), QStringLiteral("Saved ChatGPT client ID; 'new' with --chatgpt-login adds an account."), QStringLiteral("id")},
+        {QStringLiteral("chatgpt-login"), QStringLiteral("Sign in with ChatGPT in the browser, then exit without opening a library.")},
+        {QStringLiteral("chatgpt-logout"), QStringLiteral("Sign out of the selected ChatGPT account, then exit without opening a library.")},
+        {QStringLiteral("chatgpt-models"), QStringLiteral("Refresh and list the selected ChatGPT account's models, then exit without opening a library.")},
         {QStringLiteral("claude-key-file"), QStringLiteral("The file holding the Claude API key; the app's by default."), QStringLiteral("file")},
         {QStringLiteral("capture"), QStringLiteral("Keep everything under this folder, for good: every yt-dlp exchange, every file a lookup brings, every question to the judge and its answer."), QStringLiteral("dir")},
         {QStringLiteral("replay"), QStringLiteral("Replay from a capture: searches, pages, downloads and the judge's answers come from this folder wherever it has them; the rest is asked as usual."), QStringLiteral("dir")},
@@ -87,6 +96,54 @@ int main(int argc, char **argv)
     });
     parser.addPositionalArgument(QStringLiteral("command"), QStringLiteral("Optional: align <track> <video> | mux <track> <video> <out.mkv> | check-video <video> [keyframes] | same-recording <file> <file> | same-version <track title> <album> <video title> [own] | check-cookies [video id] | convert-subs <file.srv3> <out without extension> | talk-check <file>... | rank-check <track title> <artist> <video title> <channel> [verified] | artist-channels <artist>"));
     parser.process(app);
+
+    const QString authFile = parser.isSet(QStringLiteral("chatgpt-auth-file"))
+        ? QFileInfo(parser.value(QStringLiteral("chatgpt-auth-file"))).absoluteFilePath() : ChatGptAuth::defaultFile();
+    const auto authStore = ChatGptAuth::readStore(authFile);
+    const QString account = parser.isSet(QStringLiteral("chatgpt-account")) ? parser.value(QStringLiteral("chatgpt-account"))
+        : authStore.value(QStringLiteral("selected")).toString();
+    const bool login = parser.isSet(QStringLiteral("chatgpt-login"));
+    const bool logout = parser.isSet(QStringLiteral("chatgpt-logout"));
+    const bool models = parser.isSet(QStringLiteral("chatgpt-models"));
+    if (int(login) + int(logout) + int(models) > 1) {
+        out << "error: choose one ChatGPT account action" << Qt::endl; return 1;
+    }
+    if (login || logout || models) {
+        ChatGptAuth auth(authFile);
+        if (!login && (account.isEmpty() || ChatGptAuth::accountRecord(authFile, account).isEmpty())) {
+            out << "error: sign in first with --chatgpt-login" << Qt::endl; return 1;
+        }
+        if (!login) {
+            auth.selectAccount(account);
+            if (auth.account() != account) { out << "error: " << auth.status() << Qt::endl; return 1; }
+        }
+        if (models && !auth.signedIn()) { out << "error: sign in first with --chatgpt-login" << Qt::endl; return 1; }
+        QObject::connect(&auth, &ChatGptAuth::openBrowser, &app, [&](const QUrl &url) {
+            // This URL has no access, refresh or ID token; useful if launching
+            // the system browser fails on a headless machine.
+            out << "Open this URL to sign in:\n" << url.toString(QUrl::FullyEncoded) << Qt::endl;
+#ifdef Q_OS_WIN
+            QProcess::startDetached(QStringLiteral("rundll32"), {QStringLiteral("url.dll,FileProtocolHandler"), url.toString(QUrl::FullyEncoded)});
+#elif defined(Q_OS_MACOS)
+            QProcess::startDetached(QStringLiteral("open"), {url.toString(QUrl::FullyEncoded)});
+#else
+            QProcess::startDetached(QStringLiteral("xdg-open"), {url.toString(QUrl::FullyEncoded)});
+#endif
+        });
+        QObject::connect(&auth, &ChatGptAuth::finished, &app, [&](bool ok) {
+            out << auth.status() << Qt::endl;
+            if (ok && models) for (const auto &m : auth.models())
+                out << m.toMap().value(QStringLiteral("name")).toString() << "  " << m.toMap().value(QStringLiteral("label")).toString() << Qt::endl;
+            if (ok && login) out << "Account: " << auth.account() << Qt::endl;
+            app.exit(ok ? 0 : 1);
+        });
+        QTimer::singleShot(0, &auth, [&] {
+            if (login) auth.signIn(account == QLatin1String("new") ? QString() : account);
+            else if (logout) auth.signOut();
+            else auth.refreshModels();
+        });
+        return app.exec();
+    }
 
     const QStringList pos = parser.positionalArguments();
     if (pos.value(0) == QLatin1String("align")) {
@@ -254,8 +311,16 @@ int main(int argc, char **argv)
         out << "error: --judge takes off, advice or judge" << Qt::endl;
         return 1;
     }
+    cfg.judgeProvider = parser.value(QStringLiteral("judge-provider"));
+    if (cfg.judgeProvider != QLatin1String("claude") && cfg.judgeProvider != QLatin1String("chatgpt")) {
+        out << "error: --judge-provider takes claude or chatgpt" << Qt::endl; return 1;
+    }
+    cfg.chatGptAuthFile = authFile;
+    cfg.chatGptAccount = account;
     cfg.judgeModel = parser.value(QStringLiteral("judge-model"));
-    if (!Judge::models().contains(cfg.judgeModel)) {
+    if (cfg.judgeProvider == QLatin1String("chatgpt") && !parser.isSet(QStringLiteral("judge-model")))
+        cfg.judgeModel = ChatGptAuth::accountRecord(authFile, account).value(QStringLiteral("model")).toString();
+    if (cfg.judgeProvider == QLatin1String("claude") && !Judge::models().contains(cfg.judgeModel)) {
         out << "error: --judge-model takes haiku, sonnet or opus" << Qt::endl;
         return 1;
     }
@@ -266,9 +331,13 @@ int main(int argc, char **argv)
     cfg.judgeKeyFile = parser.isSet(QStringLiteral("claude-key-file"))
         ? QFileInfo(parser.value(QStringLiteral("claude-key-file"))).absoluteFilePath()
         : QDir(QStandardPaths::writableLocation(QStandardPaths::GenericConfigLocation)).filePath(QStringLiteral("mvplayer/claude-api-key"));
-    if (cfg.judgeMode == QLatin1String("judge") && Judge::readKey(cfg.judgeKeyFile).isEmpty()) {
+    if (cfg.judgeProvider == QLatin1String("claude") && cfg.judgeMode == QLatin1String("judge") && Judge::readKey(cfg.judgeKeyFile).isEmpty()) {
         out << "error: --judge judge needs a Claude API key in " << cfg.judgeKeyFile << Qt::endl;
         return 1;
+    }
+    if (cfg.judgeProvider == QLatin1String("chatgpt") && cfg.judgeMode != QLatin1String("off")
+        && (cfg.judgeModel.isEmpty() || !ChatGptAuth::hasSession(authFile, account))) {
+        out << "error: sign in with --chatgpt-login, then choose --judge-model from --chatgpt-models" << Qt::endl; return 1;
     }
     cfg.minSubscribers = qMax(0, parser.value(QStringLiteral("min-subscribers")).toInt());
     cfg.ytdlpArgs = parser.values(QStringLiteral("ytdlp-arg"));

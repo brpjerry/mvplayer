@@ -227,6 +227,10 @@ Rectangle {
             Item {
                 id: advice
                 property var answer: ({ asked: false })
+                // Account and model settings must not start library work.
+                // Showing a card, changing candidates or enabling advice does.
+                property string activeJudgeMode: App.judgeMode
+                onActiveJudgeModeChanged: refresh()
                 readonly property bool unsure: answer.asked && !answer.error && answer.probability > 0.4 && answer.probability < 0.6
                 readonly property int percent: answer.asked ? Math.round((answer.keep ? answer.probability : 1 - answer.probability) * 100) : 0
                 function refresh() {
@@ -241,7 +245,6 @@ Rectangle {
                 Connections {
                     target: App
                     function onAdviceChanged(videoId) { if (videoId === root.videoId) advice.refresh() }
-                    function onSettingsChanged() { advice.refresh() }
                 }
                 Connections {
                     target: root

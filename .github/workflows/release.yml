@@ -22,7 +22,7 @@ jobs:
         run: |
           pacman -Sy --noconfirm archlinux-keyring
           pacman -Syu --noconfirm git cmake ninja qt6-base qt6-declarative qt6-shadertools \
-            mpv taglib chromaprint ffmpeg yt-dlp github-cli
+            openssl mpv taglib chromaprint ffmpeg yt-dlp github-cli
       - uses: actions/checkout@v7
       - name: Build the pacman package
         # A tag sets the version; a manual run builds the PKGBUILD's own.
@@ -72,7 +72,7 @@ jobs:
           install: git
           pacboy: >-
             gcc:p cmake:p ninja:p pkgconf:p qt6-base:p qt6-declarative:p qt6-shadertools:p
-            mpv:p taglib:p chromaprint:p ffmpeg:p ntldd:p python:p
+            openssl:p mpv:p taglib:p chromaprint:p ffmpeg:p ntldd:p python:p
       - uses: actions/checkout@v7
       - name: Install Inno Setup
         shell: pwsh

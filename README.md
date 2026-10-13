@@ -42,7 +42,7 @@ Or build the package yourself from `packaging/PKGBUILD` with `makepkg -si`.
 ## Build from source
 
 Dependencies (Arch package names): `qt6-base qt6-declarative qt6-shadertools
-mpv taglib chromaprint cmake ninja`, plus `yt-dlp` and `ffmpeg` at run time.
+openssl mpv taglib chromaprint cmake ninja`, plus `yt-dlp` and `ffmpeg` at run time.
 
 ```sh
 cmake -S . -B build -G Ninja
@@ -59,7 +59,7 @@ The Windows build uses [MSYS2](https://www.msys2.org)'s UCRT64 environment,
 which packages the same libraries as Arch. In a UCRT64 shell:
 
 ```sh
-pacman -S --needed mingw-w64-ucrt-x86_64-{gcc,cmake,ninja,pkgconf,qt6-base,qt6-declarative,qt6-shadertools,mpv,taglib,chromaprint,ffmpeg,ntldd,python}
+pacman -S --needed mingw-w64-ucrt-x86_64-{gcc,cmake,ninja,pkgconf,openssl,qt6-base,qt6-declarative,qt6-shadertools,mpv,taglib,chromaprint,ffmpeg,ntldd,python}
 cmake -S . -B build -G Ninja
 cmake --build build
 ./build/mvplayer
@@ -530,8 +530,11 @@ command.
 
 ## The judge
 
-Claude can take part in importing, through the API with a key of your own
-(Settings → Judge; the key is stored beside the settings, for this user only).
+The judge can use a Claude API key or your ChatGPT account. In Settings →
+Judge, select **ChatGPT account**, click **Continue with ChatGPT**, finish
+signing in and granting plan access in your browser, then choose an available
+model and enable Advice or Judge. Sign-in alone does not start library work.
+Claude remains the default provider for existing settings.
 Its rules are a page of their own, `docs/import-rules-judge.html`, with the
 words it is given and how it measured against hand verdicts. Two modes:
 
@@ -558,10 +561,45 @@ words it is given and how it measured against hand verdicts. Two modes:
   verdicts, after saying what it will do. How many questions run at once is
   a setting on the Judge tab (one unless you raise it).
 
-The model is yours to pick: Haiku 5.5, Sonnet 5.5 (the default) or Opus 5.5.
-Every answer is logged as a `judge` event in the import log, with what it cost.
-The headless importer takes `--judge off|advice|judge`, `--judge-model` and
-`--claude-key-file`.
+Claude offers Haiku 5.5, Sonnet 5.5 (the default) or Opus 5.5. ChatGPT's
+model choices come from your account. The app remembers the Claude model and
+each ChatGPT account's selected model separately. Existing advice remains
+until you use “Ask again”. The accuracy measurements here are for Claude;
+ChatGPT models have not been benchmarked against those verdicts.
+
+ChatGPT requests use your plan allowance. **ChatGPT usage** opens your account's
+usage settings. Judge events record the provider and token counts; Claude also
+records estimated API cost, while ChatGPT's `cost` is `null`. Missing access,
+expired sessions that cannot be renewed, or unavailable models report an error;
+they do not switch providers automatically.
+
+ChatGPT uses OpenAI's [public-client sign-in flow](https://developers.openai.com/siwc/token-sharing-open-source/sign-in)
+and [Responses API](https://developers.openai.com/siwc/token-sharing-open-source/models-and-inference).
+The app stores its own registrations and renewable credentials beside its
+settings in `chatgpt.json`, with owner-only file permissions. It does not use
+another app's session. Tokens are renewed automatically and excluded from
+captures and logs. **Sign out** clears local tokens and requests remote
+revocation; if that fails, the app says to disconnect MV Player in ChatGPT
+Settings. Saved account registrations remain available for signing in again.
+
+The headless importer uses the same account store. These account commands exit
+without opening a library:
+
+```sh
+mvplayer-import --chatgpt-login
+mvplayer-import --chatgpt-models
+mvplayer-import --chatgpt-logout
+```
+
+Use `--chatgpt-account new --chatgpt-login` to add another account, or
+`--chatgpt-account <client-id>` to select a saved registration (the login command
+prints its ID). `--chatgpt-auth-file <file>` selects a separate account store.
+To import with ChatGPT, add `--judge-provider chatgpt --judge judge
+--judge-model <model-slug>` to the normal library arguments. The model slug
+comes from `--chatgpt-models`; without an explicit slug the saved GUI selection
+is used. Claude retains `--judge-provider claude` (the default),
+`--judge-model haiku|sonnet|opus` and `--claude-key-file`. Both providers support
+`--judge off|advice|judge`.
 
 ## Keeping everything for a replay
 
@@ -620,9 +658,8 @@ the words is tried against what the judge once saw.
 - Settings has a tab for each of: the library folders (with re-import and
   the untracked videos), appearance, playback (subtitles), import behaviour
   (with YouTube Premium), the channels you allowed and denied, and the
-  judge. Settings → Judge takes a Claude API key for judging videos under
-  review; it is kept beside the config file, readable by this user only,
-  and checked against the API when added. The judging itself is not here yet.
+  judge. Settings → Judge offers Claude API keys and ChatGPT account sign-in
+  for advice on review cards or judging lookups, as described above.
 - On Linux the playing video is offered to the desktop's media controls
   (MPRIS): media keys, `playerctl`, panel and lock-screen widgets show it and
   can play, pause, skip, seek and change the volume, shuffle and repeat. The
@@ -662,6 +699,11 @@ Environment: `MVPLAYER_HWDEC` (mpv `hwdec` value, default `auto-safe`),
 `MVPLAYER_MPV_OPTS` (`name=value,name=value` extra mpv options),
 `MVPLAYER_YTDLP` (the yt-dlp program to run instead of the default one),
 `MVPLAYER_CLAUDE_API` (another server in place of the Claude API, for tests).
+`MVPLAYER_CHATGPT_AUTH` and `MVPLAYER_CHATGPT_API` select test servers for
+ChatGPT authentication and inference; only HTTP loopback addresses are accepted
+as overrides. Tests use temporary account stores and a local server, with no
+live credentials or library. Run `ctest --test-dir build --output-on-failure`
+for those tests, or `ci/smoke.sh build` for the full importer checks as well.
 
 ## Porting notes
 

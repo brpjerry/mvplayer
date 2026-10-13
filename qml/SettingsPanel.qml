@@ -1314,10 +1314,88 @@ Popup {
                     width: parent.width - 2 * body.padding
                     visible: root.tab === "judge"
 
+                    Column {
+                        width: parent.width
+                        spacing: 10
+                        topPadding: 16
+                        Text { text: "Judge provider"; color: Theme.text; font.pixelSize: 14 }
+                        Row {
+                            spacing: 10
+                            FlatButton { text: "Claude API key"; primary: App.judgeProvider === "claude"; onClicked: App.judgeProvider = "claude" }
+                            FlatButton { text: "ChatGPT account"; primary: App.judgeProvider === "chatgpt"; onClicked: App.judgeProvider = "chatgpt" }
+                        }
+                    }
+                    Column {
+                        width: parent.width
+                        visible: App.judgeProvider === "chatgpt"
+                        spacing: 10
+                        topPadding: 16
+                        Text {
+                            width: parent.width
+                            text: App.chatGpt.status || (App.chatGpt.signedIn
+                                ? "Signed in. Judge requests use your ChatGPT plan."
+                                : "Sign in with your ChatGPT account and allow MV Player to use your plan for judge answers.")
+                            color: Theme.textDim
+                            font.pixelSize: 12
+                            wrapMode: Text.WordWrap
+                        }
+                        Column {
+                            width: parent.width
+                            spacing: 6
+                            Repeater {
+                                model: App.chatGpt.accounts
+                                FlatButton {
+                                    required property var modelData
+                                    text: modelData.label + (modelData.signedIn ? "" : " · signed out")
+                                    primary: App.chatGpt.account === modelData.id
+                                    enabled: !App.chatGpt.busy
+                                    onClicked: { App.chatGpt.selectAccount(modelData.id); App.chatGpt.refreshModels() }
+                                }
+                            }
+                        }
+                        Flow {
+                            width: parent.width
+                            spacing: 10
+                            FlatButton {
+                                text: "Continue with ChatGPT"
+                                enabled: !App.chatGpt.busy
+                                onClicked: App.chatGpt.signIn(App.chatGpt.account)
+                            }
+                            FlatButton {
+                                text: "Add another account"
+                                visible: App.chatGpt.accounts.length > 0
+                                enabled: !App.chatGpt.busy
+                                onClicked: App.chatGpt.signIn("")
+                            }
+                            FlatButton {
+                                text: "Cancel sign-in"
+                                visible: App.chatGpt.signingIn
+                                onClicked: App.chatGpt.cancelSignIn()
+                            }
+                            FlatButton {
+                                text: "Sign out"
+                                visible: App.chatGpt.signedIn
+                                enabled: !App.chatGpt.busy
+                                onClicked: App.chatGpt.signOut()
+                            }
+                            FlatButton {
+                                text: "Refresh models"
+                                visible: App.chatGpt.signedIn
+                                enabled: !App.chatGpt.busy
+                                onClicked: App.chatGpt.refreshModels()
+                            }
+                            FlatButton {
+                                text: "ChatGPT usage"
+                                onClicked: Qt.openUrlExternally("https://chatgpt.com/settings/usage")
+                            }
+                        }
+                    }
+
                     // Claude, through the API: the key, and whether it works.
                     Item {
                         width: parent.width
-                        height: keyText.implicitHeight + 34
+                        visible: App.judgeProvider === "claude"
+                        height: visible ? keyText.implicitHeight + 34 : 0
                         Column {
                             id: keyText
                             anchors.left: parent.left
@@ -1366,7 +1444,8 @@ Popup {
                     // A new key, or another in place of the one stored.
                     Item {
                         width: parent.width
-                        height: 46
+                        visible: App.judgeProvider === "claude"
+                        height: visible ? 46 : 0
                         Row {
                             anchors.bottom: parent.bottom
                             anchors.bottomMargin: 6
@@ -1432,14 +1511,14 @@ Popup {
                                 FlatButton {
                                     text: modelData.label
                                     primary: App.judgeMode === modelData.key
-                                    enabled: App.judgeKeySet || modelData.key === "off"
+                                    enabled: App.judgeReady || modelData.key === "off"
                                     onClicked: App.judgeMode = modelData.key
                                 }
                             }
                         }
                         Text {
-                            visible: !App.judgeKeySet
-                            text: "Add a key first."
+                            visible: !App.judgeReady
+                            text: App.judgeProvider === "chatgpt" ? "Sign in and choose an available model first." : "Add a key first."
                             color: Theme.textFaint
                             font.pixelSize: 12
                         }
@@ -1457,7 +1536,8 @@ Popup {
                         }
                         Text {
                             width: parent.width
-                            text: "Sonnet 5.5 agreed with your own verdicts on 87% of the review queue it was measured on, Opus 5.5 on 89%, Haiku 5.5 on 73%; what each costs is the price of a verdict with four uploads and their frames."
+                            text: App.judgeProvider === "chatgpt" ? "Models available to the selected ChatGPT account. Usage counts toward your ChatGPT plan; these models have not been measured against your verdicts here."
+                                : "Sonnet 5.5 agreed with your own verdicts on 87% of the review queue it was measured on, Opus 5.5 on 89%, Haiku 5.5 on 73%; what each costs is the price of a verdict with four uploads and their frames."
                             color: Theme.textDim
                             font.pixelSize: 12
                             wrapMode: Text.WordWrap
@@ -1468,7 +1548,7 @@ Popup {
                             Repeater {
                                 model: App.judgeModels
                                 FlatButton {
-                                    text: modelData.label + " · " + modelData.cost
+                                    text: modelData.label + (modelData.cost ? " · " + modelData.cost : "")
                                     primary: App.judgeModel === modelData.name
                                     onClicked: App.judgeModel = modelData.name
                                 }
