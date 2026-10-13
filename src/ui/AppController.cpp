@@ -103,6 +103,10 @@ AppController::AppController(const AppOptions &options, QObject *parent)
 #endif
     else
         m_settings = std::make_unique<QSettings>(options.configFile, QSettings::IniFormat);
+    // The Claude API key lives beside the settings, like the cookies.
+    m_judge = std::make_unique<Judge>(QFileInfo(m_settings->fileName()).absoluteDir().filePath(QStringLiteral("claude-api-key")), this);
+    connect(m_judge.get(), &Judge::keyChanged, this, &AppController::judgeChanged);
+    connect(m_judge.get(), &Judge::checked, this, &AppController::judgeChanged);
 
     const QString defaultMvDir =
         QDir(QStandardPaths::writableLocation(QStandardPaths::MoviesLocation)).filePath(QStringLiteral("MVs"));
@@ -469,6 +473,24 @@ void AppController::setAllowUnofficial(bool v)
     if (m_manager)
         m_manager->setSettings(m_cfg);
     emit settingsChanged();
+}
+
+QString AppController::setJudgeKey(const QString &key)
+{
+    const QString error = m_judge->setKey(key);
+    if (error.isEmpty())
+        m_judge->check();
+    return error;
+}
+
+void AppController::removeJudgeKey()
+{
+    m_judge->removeKey();
+}
+
+void AppController::checkJudgeKey()
+{
+    m_judge->check();
 }
 
 QString AppController::cookiesPath() const

@@ -1,6 +1,7 @@
 #pragma once
 
 #include "core/ImportManager.h"
+#include "core/Judge.h"
 #include "ui/SystemTheme.h"
 #include "ui/VideoModel.h"
 
@@ -90,6 +91,14 @@ class AppController : public QObject
     // Whether the account is used where YouTube refuses a guest with its
     // bot check ("Sign in to confirm you're not a bot"): for the user to say.
     Q_PROPERTY(bool accountOnBotCheck READ accountOnBotCheck WRITE setAccountOnBotCheck NOTIFY settingsChanged)
+    // Claude, for judging the review queue: whether an API key is stored,
+    // how it reads with its middle left out, and what the last check of it
+    // found (judgeState: ok | bad | error, empty before a check).
+    Q_PROPERTY(bool judgeKeySet READ judgeKeySet NOTIFY judgeChanged)
+    Q_PROPERTY(QString judgeKeyHint READ judgeKeyHint NOTIFY judgeChanged)
+    Q_PROPERTY(bool judgeChecking READ judgeChecking NOTIFY judgeChanged)
+    Q_PROPERTY(QString judgeState READ judgeState NOTIFY judgeChanged)
+    Q_PROPERTY(QString judgeStatus READ judgeStatus NOTIFY judgeChanged)
 
     // Replacing a video by hand: whether a search, check or replacement
     // runs, what it is doing, and for which video.
@@ -217,6 +226,15 @@ public:
     QString cookiesState() const { return m_cookiesState; }
     QString cookiesStatus() const { return m_cookiesStatus; }
     Q_INVOKABLE void checkCookies();
+    bool judgeKeySet() const { return m_judge->hasKey(); }
+    QString judgeKeyHint() const { return m_judge->keyHint(); }
+    bool judgeChecking() const { return m_judge->checking(); }
+    QString judgeState() const { return m_judge->state(); }
+    QString judgeStatus() const { return m_judge->status(); }
+    // Stores the key (empty: the reason it was not), and checks it at once.
+    Q_INVOKABLE QString setJudgeKey(const QString &key);
+    Q_INVOKABLE void removeJudgeKey();
+    Q_INVOKABLE void checkJudgeKey();
     bool accountOnBotCheck() const { return m_cfg.accountOnBotCheck; }
     void setAccountOnBotCheck(bool v);
     bool checkingQuality() const;
@@ -289,6 +307,7 @@ signals:
     // What the videos under review have as candidates, or show of them, changed.
     void candidatesChanged();
     void undoChanged();
+    void judgeChanged();
     void facetsChanged();
     void settingsChanged();
     void activityChanged();
@@ -324,6 +343,7 @@ private:
     bool m_checkingCookies = false;
     int m_cookiesCheck = 0; // counts checks, so that a late answer about replaced cookies is dropped
     QString m_cookiesState, m_cookiesStatus;
+    std::unique_ptr<Judge> m_judge;
 
     std::unique_ptr<Database> m_db;
     std::unique_ptr<ImportManager> m_manager;

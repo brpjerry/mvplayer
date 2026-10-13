@@ -3,13 +3,14 @@ import QtQuick.Controls.Basic
 import QtQuick.Dialogs
 import MvPlayer.Core
 
-// Library folders and import behaviour.
+// Library folders, looks, playback, import behaviour, the channels you
+// allowed and denied, and the judge: one tab each.
 Popup {
     id: root
 
     width: 560
     // As tall as its content, as far as the window allows: then it scrolls.
-    height: Math.min(header.y + header.height + body.implicitHeight + 2, (Overlay.overlay ? Overlay.overlay.height : 800) - 32)
+    height: Math.min(tabBar.y + tabBar.height + body.implicitHeight + 2, (Overlay.overlay ? Overlay.overlay.height : 800) - 32)
     anchors.centerIn: Overlay.overlay
     modal: true
     padding: 1
@@ -38,6 +39,27 @@ Popup {
         color: Theme.raised
         border.width: 1
         border.color: Theme.line
+    }
+
+    // The tabs, by key; the one on show stays across openings.
+    readonly property var tabs: [
+        { key: "library", label: "Library" },
+        { key: "appearance", label: "Appearance" },
+        { key: "playback", label: "Playback" },
+        { key: "import", label: "Import" },
+        { key: "channels", label: "Channels" },
+        { key: "judge", label: "Judge" }
+    ]
+    property string tab: "library"
+    readonly property int tabIndex: Math.max(0, tabs.findIndex((t) => t.key === tab))
+    function showTab(key) {
+        if (!tabs.some((t) => t.key === key))
+            return false
+        if (key !== tab) {
+            tab = key
+            flick.contentY = 0
+        }
+        return true
     }
 
     readonly property var accentPresets: [
@@ -77,6 +99,7 @@ Popup {
         onAccepted: root.cookiesError = App.importCookies(App.urlToPath(selectedFile))
     }
     property string cookiesError: ""
+    property string keyError: ""
     // For automation: how far down the settings are shown.
     function scrollTo(y) { flick.contentY = Math.max(0, Math.min(y, flick.contentHeight - flick.height)) }
 
@@ -254,6 +277,69 @@ Popup {
         }
     }
 
+    // A heading with a line of explanation, and whatever sits on its right.
+    component Lead: Item {
+        id: lead
+        property string label
+        property string hint
+        property color hintColor: Theme.textDim
+        property Item side: null
+        width: parent.width
+        height: leadText.implicitHeight + 34
+        Column {
+            id: leadText
+            anchors.left: parent.left
+            anchors.right: parent.right
+            anchors.rightMargin: lead.side ? lead.side.width + 20 : 0
+            anchors.bottom: parent.bottom
+            anchors.bottomMargin: 6
+            spacing: 3
+            Text {
+                text: lead.label
+                color: Theme.text
+                font.pixelSize: 14
+            }
+            Text {
+                width: parent.width
+                text: lead.hint
+                color: lead.hintColor
+                font.pixelSize: 12
+                wrapMode: Text.WordWrap
+            }
+        }
+    }
+
+    component Divider: Column {
+        width: parent.width
+        Item { width: 1; height: 8 }
+        Rectangle { width: parent.width; height: 1; color: Theme.line }
+        Item { width: 1; height: 8 }
+    }
+
+    component Field: Rectangle {
+        property alias input: field
+        property alias text: field.text
+        width: 84
+        height: 34
+        radius: Theme.radiusSmall
+        color: Theme.hover
+        border.width: 1
+        border.color: field.activeFocus ? Theme.accent : "transparent"
+        TextInput {
+            id: field
+            anchors.fill: parent
+            anchors.leftMargin: 10
+            anchors.rightMargin: 10
+            verticalAlignment: TextInput.AlignVCenter
+            clip: true
+            color: Theme.text
+            selectionColor: Theme.accent
+            selectedTextColor: Theme.accentInk
+            font.pixelSize: 13
+            selectByMouse: true
+        }
+    }
+
     contentItem: Item {
         // Stays put while the settings scroll under it.
         Item {
@@ -279,10 +365,76 @@ Popup {
             }
         }
 
+        // The tabs, with a mark that slides to the one on show.
+        Item {
+            id: tabBar
+            x: 26
+            y: header.y + header.height + 6
+            width: parent.width - 52
+            height: 40
+            Row {
+                id: tabRow
+                spacing: 4
+                Repeater {
+                    model: root.tabs
+                    Item {
+                        id: tabItem
+                        required property var modelData
+                        required property int index
+                        readonly property bool current: index === root.tabIndex
+                        width: tabLabel.implicitWidth + 24
+                        height: tabBar.height - 2
+                        Rectangle {
+                            anchors.fill: parent
+                            anchors.bottomMargin: 4
+                            radius: Theme.radiusSmall
+                            color: Theme.hover
+                            opacity: tabMouse.containsMouse && !tabItem.current ? 1 : 0
+                            Behavior on opacity { NumberAnimation { duration: Theme.fast } }
+                        }
+                        Text {
+                            id: tabLabel
+                            anchors.centerIn: parent
+                            anchors.verticalCenterOffset: -2
+                            text: tabItem.modelData.label
+                            color: tabItem.current ? Theme.text : Theme.textDim
+                            font.pixelSize: 13
+                            font.weight: Font.DemiBold
+                            Behavior on color { ColorAnimation { duration: Theme.normal } }
+                        }
+                        MouseArea {
+                            id: tabMouse
+                            anchors.fill: parent
+                            hoverEnabled: true
+                            cursorShape: Qt.PointingHandCursor
+                            onClicked: root.showTab(tabItem.modelData.key)
+                        }
+                    }
+                }
+            }
+            Rectangle {
+                readonly property Item on: tabRow.children[root.tabIndex] || null
+                x: on ? on.x + 12 : 0
+                width: on ? on.width - 24 : 0
+                y: parent.height - 2
+                height: 2
+                radius: 1
+                color: Theme.accent
+                Behavior on x { NumberAnimation { duration: Theme.slow; easing.type: Easing.BezierSpline; easing.bezierCurve: Theme.emphasized } }
+                Behavior on width { NumberAnimation { duration: Theme.slow; easing.type: Easing.BezierSpline; easing.bezierCurve: Theme.emphasized } }
+            }
+            Rectangle {
+                anchors.bottom: parent.bottom
+                width: parent.width
+                height: 1
+                color: Theme.line
+            }
+        }
+
         Flickable {
             id: flick
             anchors.fill: parent
-            anchors.topMargin: header.y + header.height
+            anchors.topMargin: tabBar.y + tabBar.height
             clip: true
             contentHeight: body.implicitHeight
             boundsBehavior: Flickable.StopAtBounds
@@ -312,12 +464,13 @@ Popup {
                 id: body
                 width: flick.width
                 padding: 26
-                topPadding: 0
+                topPadding: 12
                 bottomPadding: 22
-                spacing: 2
 
+                // ---- Library ------------------------------------------------
                 Column {
                     width: parent.width - 2 * body.padding
+                    visible: root.tab === "library"
 
                     // Music library: any number of folders
                     Item {
@@ -409,11 +562,186 @@ Popup {
                         onChange: mvDialog.open()
                     }
 
-                    Item { width: 1; height: 8 }
-                    Rectangle { width: parent.width; height: 1; color: Theme.line }
-                    Item { width: 1; height: 8 }
+                    Divider {}
 
-                    // Appearance: follow the system, or force dark / light
+                    Row {
+                        spacing: 10
+                        FlatButton {
+                            text: "Rescan library"
+                            icon: Icons.refresh
+                            enabled: App.configured
+                            onClicked: App.rescan()
+                        }
+                        FlatButton {
+                            text: "Retry tracks without a video"
+                            enabled: App.configured && !App.busy
+                            onClicked: App.retryUnmatched()
+                        }
+                    }
+
+                    // Tracks looked up again by today's rules, by folder or by file.
+                    Item {
+                        id: reimport
+                        property string note: ""
+                        function queued(n, path) {
+                            note = n > 0 ? n + (n === 1 ? " track" : " tracks") + " queued from " + App.displayPath(path)
+                                         : "No music file of your library is at " + App.displayPath(path)
+                        }
+                        width: parent.width
+                        height: reimportText.implicitHeight + 34
+                        Connections {
+                            target: root
+                            function onClosed() { reimport.note = "" }
+                        }
+
+                        Column {
+                            id: reimportText
+                            anchors.left: parent.left
+                            anchors.right: reimportButtons.left
+                            anchors.rightMargin: 20
+                            anchors.bottom: parent.bottom
+                            anchors.bottomMargin: 6
+                            spacing: 3
+                            Text {
+                                text: "Re-import"
+                                color: Theme.text
+                                font.pixelSize: 14
+                            }
+                            Text {
+                                width: parent.width
+                                text: reimport.note.length > 0 ? reimport.note
+                                    : "Looks the tracks in a folder, or one file, up again by today's rules. A video that still fits is kept without a download; one that no longer does goes to review, or is replaced."
+                                color: reimport.note.length > 0 ? Theme.text : Theme.textDim
+                                font.pixelSize: 12
+                                wrapMode: Text.WordWrap
+                            }
+                        }
+                        Row {
+                            id: reimportButtons
+                            anchors.right: parent.right
+                            anchors.bottom: parent.bottom
+                            anchors.bottomMargin: 10
+                            spacing: 10
+                            FlatButton {
+                                text: "Folder…"
+                                icon: Icons.folder
+                                enabled: App.configured
+                                onClicked: reimportFolderDialog.open()
+                            }
+                            FlatButton {
+                                text: "File…"
+                                enabled: App.configured
+                                onClicked: reimportFileDialog.open()
+                            }
+                        }
+                    }
+
+                    // Videos whose tracks are in none of the music folders any more.
+                    Item {
+                        id: untracked
+                        property bool confirming: false
+                        visible: App.untrackedCount > 0
+                        width: parent.width
+                        height: untrackedText.implicitHeight + 34
+                        Connections {
+                            target: root
+                            function onClosed() { untracked.confirming = false }
+                        }
+
+                        Column {
+                            id: untrackedText
+                            anchors.left: parent.left
+                            anchors.right: untrackedButtons.left
+                            anchors.rightMargin: 20
+                            anchors.bottom: parent.bottom
+                            anchors.bottomMargin: 6
+                            spacing: 3
+                            Text {
+                                text: App.untrackedCount + (App.untrackedCount === 1 ? " untracked video" : " untracked videos")
+                                color: Theme.text
+                                font.pixelSize: 14
+                            }
+                            Text {
+                                width: parent.width
+                                text: untracked.confirming
+                                    ? "This deletes the files of " + App.untrackedCount + (App.untrackedCount === 1 ? " video" : " videos") + " for good."
+                                    : "Their tracks are in none of your music folders any more. They stay in the library until deleted, and are taken up again if the tracks come back."
+                                color: untracked.confirming ? "#ff5d5d" : Theme.textDim
+                                font.pixelSize: 12
+                                wrapMode: Text.WordWrap
+                            }
+                        }
+                        Row {
+                            id: untrackedButtons
+                            anchors.right: parent.right
+                            anchors.bottom: parent.bottom
+                            anchors.bottomMargin: 10
+                            spacing: 10
+                            FlatButton {
+                                visible: untracked.confirming
+                                text: "Keep"
+                                onClicked: untracked.confirming = false
+                            }
+                            FlatButton {
+                                text: untracked.confirming ? "Delete " + App.untrackedCount : "Delete untracked videos"
+                                // Not while folders are read or tracks looked up: the count is still moving.
+                                enabled: !App.busy
+                                onClicked: {
+                                    if (!untracked.confirming) { untracked.confirming = true; return }
+                                    untracked.confirming = false
+                                    App.deleteUntracked()
+                                }
+                            }
+                        }
+                    }
+
+                    // Windows only: elsewhere yt-dlp is updated with the system.
+                    Item {
+                        visible: YtDlpUpdater.supported
+                        width: parent.width
+                        height: 70
+
+                        Column {
+                            anchors.left: parent.left
+                            anchors.right: ytdlpButton.left
+                            anchors.rightMargin: 20
+                            anchors.bottom: parent.bottom
+                            anchors.bottomMargin: 6
+                            spacing: 3
+                            Text {
+                                text: YtDlpUpdater.version.length > 0 ? "yt-dlp " + YtDlpUpdater.version : "yt-dlp is not installed"
+                                color: Theme.text
+                                font.pixelSize: 14
+                            }
+                            Text {
+                                width: parent.width
+                                text: YtDlpUpdater.status.length > 0 ? YtDlpUpdater.status
+                                      : "Finds and downloads the videos. Update it when imports start failing."
+                                color: Theme.textDim
+                                font.pixelSize: 12
+                                wrapMode: Text.WordWrap
+                            }
+                        }
+                        FlatButton {
+                            id: ytdlpButton
+                            anchors.right: parent.right
+                            anchors.bottom: parent.bottom
+                            anchors.bottomMargin: 10
+                            text: YtDlpUpdater.version.length > 0 ? "Update yt-dlp" : "Download yt-dlp"
+                            primary: YtDlpUpdater.version.length === 0 && !YtDlpUpdater.busy
+                            // The running copy cannot be replaced.
+                            enabled: !YtDlpUpdater.busy && !App.busy
+                            onClicked: YtDlpUpdater.update()
+                        }
+                    }
+                }
+
+                // ---- Appearance ---------------------------------------------
+                Column {
+                    width: parent.width - 2 * body.padding
+                    visible: root.tab === "appearance"
+
+                    // Follow the system, or force dark / light
                     Item {
                         width: parent.width
                         height: 52
@@ -622,10 +950,13 @@ Popup {
                             }
                         }
                     }
-
-                    Item { width: 1; height: 6 }
-                    Rectangle { width: parent.width; height: 1; color: Theme.line }
                     Item { width: 1; height: 8 }
+                }
+
+                // ---- Playback -----------------------------------------------
+                Column {
+                    width: parent.width - 2 * body.padding
+                    visible: root.tab === "playback"
 
                     SwitchRow {
                         label: "Enlarge a video when it starts"
@@ -633,6 +964,83 @@ Popup {
                         checked: App.autoExpand
                         onToggled: (c) => App.autoExpand = c
                     }
+
+                    Divider {}
+
+                    // Subtitles: fetched with each video in these languages.
+                    Item {
+                        width: parent.width
+                        height: subtitleText.implicitHeight + 34
+
+                        Column {
+                            id: subtitleText
+                            anchors.left: parent.left
+                            anchors.right: subtitleControls.left
+                            anchors.rightMargin: 20
+                            anchors.bottom: parent.bottom
+                            anchors.bottomMargin: 6
+                            spacing: 3
+                            Text {
+                                text: "Subtitles"
+                                color: Theme.text
+                                font.pixelSize: 14
+                            }
+                            Text {
+                                width: parent.width
+                                text: App.fetchingSubtitles ? App.statusText
+                                    : "Languages to fetch with each video where its uploader provides them, like “en” or “en, ja”. Empty for none."
+                                color: Theme.textDim
+                                font.pixelSize: 12
+                                wrapMode: Text.WordWrap
+                            }
+                        }
+                        Row {
+                            id: subtitleControls
+                            anchors.right: parent.right
+                            anchors.bottom: parent.bottom
+                            anchors.bottomMargin: 10
+                            spacing: 10
+                            Field {
+                                id: langField
+                                text: App.subtitleLangs
+                                input.onEditingFinished: {
+                                    App.subtitleLangs = text
+                                    text = Qt.binding(() => App.subtitleLangs)
+                                }
+                            }
+                            FlatButton {
+                                text: App.fetchingSubtitles ? "Fetching…" : "Fetch for my videos"
+                                enabled: App.configured && !App.busy && App.subtitleLangs.length > 0
+                                onClicked: { langField.input.focus = false; App.fetchSubtitles() }
+                            }
+                        }
+                    }
+
+                    SliderRow {
+                        label: "Subtitle outline"
+                        hint: "Thickness of the dark edge around plain subtitles. Subtitles with their own styling keep it."
+                        from: 0
+                        to: 5
+                        value: App.subtitleOutline
+                        valueText: App.subtitleOutline === 0 ? "Off" : App.subtitleOutline.toFixed(1)
+                        onMoved: (v) => App.subtitleOutline = v
+                    }
+                    SliderRow {
+                        label: "Subtitle drop shadow"
+                        hint: "How far the shadow falls behind plain subtitles."
+                        from: 0
+                        to: 5
+                        value: App.subtitleShadow
+                        valueText: App.subtitleShadow === 0 ? "Off" : App.subtitleShadow.toFixed(1)
+                        onMoved: (v) => App.subtitleShadow = v
+                    }
+                }
+
+                // ---- Import -------------------------------------------------
+                Column {
+                    width: parent.width - 2 * body.padding
+                    visible: root.tab === "import"
+
                     SwitchRow {
                         label: "Use my library's audio"
                         hint: "When your track is higher quality than YouTube's, it is synced to the video and used as the main audio. A video it cannot be synced to is not imported."
@@ -679,38 +1087,19 @@ Popup {
                             anchors.right: parent.right
                             anchors.verticalCenter: parent.verticalCenter
                             spacing: 12
-                            Rectangle {
+                            Field {
                                 anchors.verticalCenter: parent.verticalCenter
-                                width: 84
-                                height: 34
-                                radius: Theme.radiusSmall
-                                color: Theme.hover
                                 opacity: App.ignoreSmallChannels ? 1 : 0.45
-                                border.width: 1
-                                border.color: subscribersField.activeFocus ? Theme.accent : "transparent"
-                                TextInput {
-                                    id: subscribersField
-                                    anchors.fill: parent
-                                    anchors.leftMargin: 10
-                                    anchors.rightMargin: 10
-                                    verticalAlignment: TextInput.AlignVCenter
-                                    horizontalAlignment: TextInput.AlignRight
-                                    clip: true
-                                    enabled: App.ignoreSmallChannels
-                                    color: Theme.text
-                                    selectionColor: Theme.accent
-                                    selectedTextColor: Theme.accentInk
-                                    font.pixelSize: 13
-                                    font.features: { "tnum": 1 }
-                                    selectByMouse: true
-                                    inputMethodHints: Qt.ImhDigitsOnly
-                                    validator: IntValidator { bottom: 1; top: 1000000000 }
-                                    text: App.minSubscribers
-                                    onEditingFinished: {
-                                        App.minSubscribers = parseInt(text) || App.minSubscribers
-                                        text = Qt.binding(() => App.minSubscribers)
-                                        focus = false
-                                    }
+                                input.horizontalAlignment: TextInput.AlignRight
+                                input.enabled: App.ignoreSmallChannels
+                                input.font.features: { "tnum": 1 }
+                                input.inputMethodHints: Qt.ImhDigitsOnly
+                                input.validator: IntValidator { bottom: 1; top: 1000000000 }
+                                text: App.minSubscribers
+                                input.onEditingFinished: {
+                                    App.minSubscribers = parseInt(text) || App.minSubscribers
+                                    text = Qt.binding(() => App.minSubscribers)
+                                    input.focus = false
                                 }
                             }
                             FlatSwitch {
@@ -720,294 +1109,10 @@ Popup {
                             }
                         }
                     }
-                    // The channels the user allowed and denied, each with a way back.
-                    Item {
-                        width: parent.width
-                        height: channels.implicitHeight + 14
-                        visible: App.listedChannels.length > 0
-                        Column {
-                            id: channels
-                            anchors.left: parent.left
-                            anchors.right: parent.right
-                            anchors.verticalCenter: parent.verticalCenter
-                            spacing: 3
-                            Text {
-                                text: "Channels you allowed and denied"
-                                color: Theme.text
-                                font.pixelSize: 14
-                            }
-                            Text {
-                                width: parent.width
-                                text: "An allowed channel is an artist's channel for every track and is never ignored as a small one. A denied channel's uploads are never taken. Taken off here, a channel is judged like any other again; nothing in your library changes with that."
-                                color: Theme.textFaint
-                                font.pixelSize: 12
-                                wrapMode: Text.WordWrap
-                            }
-                            Item { width: 1; height: 4 }
-                            Repeater {
-                                model: App.listedChannels
-                                Rectangle {
-                                    id: listed
-                                    required property var modelData
-                                    width: channels.width
-                                    height: 34
-                                    radius: Theme.radiusSmall
-                                    color: Theme.hover
-                                    Icon {
-                                        id: listedIcon
-                                        x: 10
-                                        anchors.verticalCenter: parent.verticalCenter
-                                        path: listed.modelData.list === "allow" ? Icons.check : Icons.close
-                                        size: 15
-                                        color: listed.modelData.list === "allow" ? "#3fbf7f" : "#ff5d5d"
-                                    }
-                                    Text {
-                                        anchors.left: listedIcon.right
-                                        anchors.leftMargin: 8
-                                        anchors.right: unlist.left
-                                        anchors.rightMargin: 8
-                                        anchors.verticalCenter: parent.verticalCenter
-                                        text: (listed.modelData.name || listed.modelData.id)
-                                              + (listed.modelData.handle ? "  ·  " + listed.modelData.handle : "")
-                                              + (listed.modelData.list === "allow" ? "  ·  allowed" : "  ·  denied")
-                                        color: Theme.text
-                                        font.pixelSize: 13
-                                        elide: Text.ElideRight
-                                    }
-                                    IconButton {
-                                        id: unlist
-                                        anchors.right: parent.right
-                                        anchors.rightMargin: 4
-                                        anchors.verticalCenter: parent.verticalCenter
-                                        icon: Icons.close
-                                        iconSize: 14
-                                        onClicked: App.unlistChannel(listed.modelData.id)
-                                    }
-                                }
-                            }
-                        }
-                    }
 
-                    Item { width: 1; height: 12 }
+                    Divider {}
 
-                    Row {
-                        spacing: 10
-                        FlatButton {
-                            text: "Rescan library"
-                            icon: Icons.refresh
-                            enabled: App.configured
-                            onClicked: App.rescan()
-                        }
-                        FlatButton {
-                            text: "Retry tracks without a video"
-                            enabled: App.configured && !App.busy
-                            onClicked: App.retryUnmatched()
-                        }
-                    }
-
-                    // Tracks looked up again by today's rules, by folder or by file.
-                    Item {
-                        id: reimport
-                        property string note: ""
-                        function queued(n, path) {
-                            note = n > 0 ? n + (n === 1 ? " track" : " tracks") + " queued from " + App.displayPath(path)
-                                         : "No music file of your library is at " + App.displayPath(path)
-                        }
-                        width: parent.width
-                        height: reimportText.implicitHeight + 34
-                        Connections {
-                            target: root
-                            function onClosed() { reimport.note = "" }
-                        }
-
-                        Column {
-                            id: reimportText
-                            anchors.left: parent.left
-                            anchors.right: reimportButtons.left
-                            anchors.rightMargin: 20
-                            anchors.bottom: parent.bottom
-                            anchors.bottomMargin: 6
-                            spacing: 3
-                            Text {
-                                text: "Re-import"
-                                color: Theme.text
-                                font.pixelSize: 14
-                            }
-                            Text {
-                                width: parent.width
-                                text: reimport.note.length > 0 ? reimport.note
-                                    : "Looks the tracks in a folder, or one file, up again by today's rules. A video that still fits is kept without a download; one that no longer does goes to review, or is replaced."
-                                color: reimport.note.length > 0 ? Theme.text : Theme.textDim
-                                font.pixelSize: 12
-                                wrapMode: Text.WordWrap
-                            }
-                        }
-                        Row {
-                            id: reimportButtons
-                            anchors.right: parent.right
-                            anchors.bottom: parent.bottom
-                            anchors.bottomMargin: 10
-                            spacing: 10
-                            FlatButton {
-                                text: "Folder…"
-                                icon: Icons.folder
-                                enabled: App.configured
-                                onClicked: reimportFolderDialog.open()
-                            }
-                            FlatButton {
-                                text: "File…"
-                                enabled: App.configured
-                                onClicked: reimportFileDialog.open()
-                            }
-                        }
-                    }
-
-                    // Videos whose tracks are in none of the music folders any more.
-                    Item {
-                        id: untracked
-                        property bool confirming: false
-                        visible: App.untrackedCount > 0
-                        width: parent.width
-                        height: untrackedText.implicitHeight + 34
-                        Connections {
-                            target: root
-                            function onClosed() { untracked.confirming = false }
-                        }
-
-                        Column {
-                            id: untrackedText
-                            anchors.left: parent.left
-                            anchors.right: untrackedButtons.left
-                            anchors.rightMargin: 20
-                            anchors.bottom: parent.bottom
-                            anchors.bottomMargin: 6
-                            spacing: 3
-                            Text {
-                                text: App.untrackedCount + (App.untrackedCount === 1 ? " untracked video" : " untracked videos")
-                                color: Theme.text
-                                font.pixelSize: 14
-                            }
-                            Text {
-                                width: parent.width
-                                text: untracked.confirming
-                                    ? "This deletes the files of " + App.untrackedCount + (App.untrackedCount === 1 ? " video" : " videos") + " for good."
-                                    : "Their tracks are in none of your music folders any more. They stay in the library until deleted, and are taken up again if the tracks come back."
-                                color: untracked.confirming ? "#ff5d5d" : Theme.textDim
-                                font.pixelSize: 12
-                                wrapMode: Text.WordWrap
-                            }
-                        }
-                        Row {
-                            id: untrackedButtons
-                            anchors.right: parent.right
-                            anchors.bottom: parent.bottom
-                            anchors.bottomMargin: 10
-                            spacing: 10
-                            FlatButton {
-                                visible: untracked.confirming
-                                text: "Keep"
-                                onClicked: untracked.confirming = false
-                            }
-                            FlatButton {
-                                text: untracked.confirming ? "Delete " + App.untrackedCount : "Delete untracked videos"
-                                // Not while folders are read or tracks looked up: the count is still moving.
-                                enabled: !App.busy
-                                onClicked: {
-                                    if (!untracked.confirming) { untracked.confirming = true; return }
-                                    untracked.confirming = false
-                                    App.deleteUntracked()
-                                }
-                            }
-                        }
-                    }
-
-                    // Subtitles: fetched with each video in these languages.
-                Item {
-                    width: parent.width
-                    height: subtitleText.implicitHeight + 34
-
-                    Column {
-                        id: subtitleText
-                        anchors.left: parent.left
-                        anchors.right: subtitleControls.left
-                        anchors.rightMargin: 20
-                        anchors.bottom: parent.bottom
-                        anchors.bottomMargin: 6
-                        spacing: 3
-                        Text {
-                            text: "Subtitles"
-                            color: Theme.text
-                            font.pixelSize: 14
-                        }
-                        Text {
-                            width: parent.width
-                            text: App.fetchingSubtitles ? App.statusText
-                                : "Languages to fetch with each video where its uploader provides them, like “en” or “en, ja”. Empty for none."
-                            color: Theme.textDim
-                            font.pixelSize: 12
-                            wrapMode: Text.WordWrap
-                        }
-                    }
-                    Row {
-                        id: subtitleControls
-                        anchors.right: parent.right
-                        anchors.bottom: parent.bottom
-                        anchors.bottomMargin: 10
-                        spacing: 10
-                        Rectangle {
-                            width: 84
-                            height: 34
-                            radius: Theme.radiusSmall
-                            color: Theme.hover
-                            border.width: 1
-                            border.color: langField.activeFocus ? Theme.accent : "transparent"
-                            TextInput {
-                                id: langField
-                                anchors.fill: parent
-                                anchors.leftMargin: 10
-                                anchors.rightMargin: 10
-                                verticalAlignment: TextInput.AlignVCenter
-                                clip: true
-                                color: Theme.text
-                                selectionColor: Theme.accent
-                                selectedTextColor: Theme.accentInk
-                                font.pixelSize: 13
-                                selectByMouse: true
-                                text: App.subtitleLangs
-                                onEditingFinished: {
-                                    App.subtitleLangs = text
-                                    text = Qt.binding(() => App.subtitleLangs)
-                                }
-                            }
-                        }
-                        FlatButton {
-                            text: App.fetchingSubtitles ? "Fetching…" : "Fetch for my videos"
-                            enabled: App.configured && !App.busy && App.subtitleLangs.length > 0
-                            onClicked: { langField.focus = false; App.fetchSubtitles() }
-                        }
-                    }
-                }
-
-                    SliderRow {
-                        label: "Subtitle outline"
-                        hint: "Thickness of the dark edge around plain subtitles. Subtitles with their own styling keep it."
-                        from: 0
-                        to: 5
-                        value: App.subtitleOutline
-                        valueText: App.subtitleOutline === 0 ? "Off" : App.subtitleOutline.toFixed(1)
-                        onMoved: (v) => App.subtitleOutline = v
-                    }
-                    SliderRow {
-                        label: "Subtitle drop shadow"
-                        hint: "How far the shadow falls behind plain subtitles."
-                        from: 0
-                        to: 5
-                        value: App.subtitleShadow
-                        valueText: App.subtitleShadow === 0 ? "Off" : App.subtitleShadow.toFixed(1)
-                        onMoved: (v) => App.subtitleShadow = v
-                    }
-
-                // YouTube Premium: the account's cookies bring audio at a higher bitrate.
+                    // YouTube Premium: the account's cookies bring audio at a higher bitrate.
                     Item {
                         width: parent.width
                         height: premiumText.implicitHeight + 34
@@ -1082,46 +1187,174 @@ Popup {
                         checked: App.accountOnBotCheck
                         onToggled: (c) => App.accountOnBotCheck = c
                     }
+                }
 
-                    // Windows only: elsewhere yt-dlp is updated with the system.
-                    Item {
-                        visible: YtDlpUpdater.supported
+                // ---- Channels -----------------------------------------------
+                Column {
+                    width: parent.width - 2 * body.padding
+                    visible: root.tab === "channels"
+                    spacing: 3
+
+                    Item { width: 1; height: 8 }
+                    Text {
+                        text: "Channels you allowed and denied"
+                        color: Theme.text
+                        font.pixelSize: 14
+                    }
+                    Text {
                         width: parent.width
-                        height: 70
+                        text: "An allowed channel is an artist's channel for every track and is never ignored as a small one. A denied channel's uploads are never taken. Taken off here, a channel is judged like any other again; nothing in your library changes with that."
+                        color: Theme.textFaint
+                        font.pixelSize: 12
+                        wrapMode: Text.WordWrap
+                    }
+                    Item { width: 1; height: 8 }
+                    Text {
+                        visible: App.listedChannels.length === 0
+                        width: parent.width
+                        text: "None yet. On a video under review, rest the pointer on ✓ or ✗ for a second: a second button comes up for its channel as a whole."
+                        color: Theme.textDim
+                        font.pixelSize: 12
+                        wrapMode: Text.WordWrap
+                    }
+                    Repeater {
+                        model: App.listedChannels
+                        Rectangle {
+                            id: listed
+                            required property var modelData
+                            width: parent.width
+                            height: 34
+                            radius: Theme.radiusSmall
+                            color: Theme.hover
+                            Icon {
+                                id: listedIcon
+                                x: 10
+                                anchors.verticalCenter: parent.verticalCenter
+                                path: listed.modelData.list === "allow" ? Icons.check : Icons.close
+                                size: 15
+                                color: listed.modelData.list === "allow" ? "#3fbf7f" : "#ff5d5d"
+                            }
+                            Text {
+                                anchors.left: listedIcon.right
+                                anchors.leftMargin: 8
+                                anchors.right: unlist.left
+                                anchors.rightMargin: 8
+                                anchors.verticalCenter: parent.verticalCenter
+                                text: (listed.modelData.name || listed.modelData.id)
+                                      + (listed.modelData.handle ? "  ·  " + listed.modelData.handle : "")
+                                      + (listed.modelData.list === "allow" ? "  ·  allowed" : "  ·  denied")
+                                color: Theme.text
+                                font.pixelSize: 13
+                                elide: Text.ElideRight
+                            }
+                            IconButton {
+                                id: unlist
+                                anchors.right: parent.right
+                                anchors.rightMargin: 4
+                                anchors.verticalCenter: parent.verticalCenter
+                                icon: Icons.close
+                                iconSize: 14
+                                tooltip: "Take it off the list"
+                                onClicked: App.unlistChannel(listed.modelData.id)
+                            }
+                        }
+                    }
+                    Item { width: 1; height: 8 }
+                }
 
+                // ---- Judge --------------------------------------------------
+                Column {
+                    width: parent.width - 2 * body.padding
+                    visible: root.tab === "judge"
+
+                    // Claude, through the API: the key, and whether it works.
+                    Item {
+                        width: parent.width
+                        height: keyText.implicitHeight + 34
                         Column {
+                            id: keyText
                             anchors.left: parent.left
-                            anchors.right: ytdlpButton.left
+                            anchors.right: keyButtons.left
                             anchors.rightMargin: 20
                             anchors.bottom: parent.bottom
                             anchors.bottomMargin: 6
                             spacing: 3
                             Text {
-                                text: YtDlpUpdater.version.length > 0 ? "yt-dlp " + YtDlpUpdater.version : "yt-dlp is not installed"
+                                text: "Claude API key"
                                 color: Theme.text
                                 font.pixelSize: 14
                             }
                             Text {
                                 width: parent.width
-                                text: YtDlpUpdater.status.length > 0 ? YtDlpUpdater.status
-                                      : "Finds and downloads the videos. Update it when imports start failing."
-                                color: Theme.textDim
+                                text: root.keyError.length > 0 ? root.keyError
+                                    : App.judgeChecking ? "Asking the API about the key…"
+                                    : App.judgeStatus.length > 0 ? App.judgeStatus
+                                    : App.judgeKeySet ? "Key " + App.judgeKeyHint + " is stored, for this user only."
+                                    : "Videos under review can be judged by Claude. Paste a key from console.anthropic.com; it is stored for this user only and used for nothing else."
+                                color: root.keyError.length > 0 || (!App.judgeChecking && (App.judgeState === "bad" || App.judgeState === "error")) ? "#ff5d5d"
+                                    : !App.judgeChecking && App.judgeState === "ok" ? Theme.accentHi : Theme.textDim
                                 font.pixelSize: 12
                                 wrapMode: Text.WordWrap
                             }
                         }
-                        FlatButton {
-                            id: ytdlpButton
+                        Row {
+                            id: keyButtons
                             anchors.right: parent.right
                             anchors.bottom: parent.bottom
                             anchors.bottomMargin: 10
-                            text: YtDlpUpdater.version.length > 0 ? "Update yt-dlp" : "Download yt-dlp"
-                            primary: YtDlpUpdater.version.length === 0 && !YtDlpUpdater.busy
-                            // The running copy cannot be replaced.
-                            enabled: !YtDlpUpdater.busy && !App.busy
-                            onClicked: YtDlpUpdater.update()
+                            spacing: 10
+                            FlatButton {
+                                visible: App.judgeKeySet
+                                text: "Remove"
+                                onClicked: { root.keyError = ""; App.removeJudgeKey() }
+                            }
+                            FlatButton {
+                                visible: App.judgeKeySet
+                                text: App.judgeChecking ? "Checking…" : "Check key"
+                                enabled: !App.judgeChecking
+                                onClicked: { root.keyError = ""; App.checkJudgeKey() }
+                            }
                         }
                     }
+                    // A new key, or another in place of the one stored.
+                    Item {
+                        width: parent.width
+                        height: 46
+                        Row {
+                            anchors.bottom: parent.bottom
+                            anchors.bottomMargin: 6
+                            spacing: 10
+                            Field {
+                                id: keyField
+                                width: 330
+                                input.echoMode: TextInput.Password
+                                input.passwordMaskDelay: 0
+                                input.onAccepted: keyField.store()
+                                function store() {
+                                    root.keyError = App.setJudgeKey(text)
+                                    if (root.keyError.length === 0) {
+                                        text = ""
+                                        input.focus = false
+                                    }
+                                }
+                                Text {
+                                    x: 10
+                                    anchors.verticalCenter: parent.verticalCenter
+                                    visible: keyField.text.length === 0
+                                    text: App.judgeKeySet ? "Paste another key" : "sk-ant-…"
+                                    color: Theme.textFaint
+                                    font.pixelSize: 13
+                                }
+                            }
+                            FlatButton {
+                                text: App.judgeKeySet ? "Replace" : "Add key"
+                                primary: !App.judgeKeySet
+                                enabled: keyField.text.length > 0
+                                onClicked: keyField.store()
+                            }
+                        }
+                    }
+                    Item { width: 1; height: 8 }
                 }
             }
         }

@@ -521,6 +521,10 @@ ApplicationWindow {
         }
         case "settings": arg === "off" ? settings.close() : settings.open(); return "ok"
         case "settings-scroll": settings.scrollTo(parseInt(arg)); return "ok" // to this many pixels down
+        case "settings-tab": return settings.showTab(arg) ? "ok" : "no such tab" // library | appearance | playback | import | channels | judge
+        // The Claude API key for judging: judge-key <key>, judge-key (removes it), judge-check
+        case "judge-key": return (arg === "" ? (App.removeJudgeKey(), "") : App.setJudgeKey(arg)) || "ok"
+        case "judge-check": App.checkJudgeKey(); return "ok"
         case "retry": App.retryUnmatched(); return "ok"
         case "rescan": App.rescan(); return "ok"
         case "cookies": return (arg === "" ? (App.removeCookies(), "") : App.importCookies(arg)) || "ok"
@@ -641,6 +645,8 @@ ApplicationWindow {
                 panelCandidates: reviewPanel.candidates.length, panelCandidate: reviewPanel.shown, panelTitle: reviewPanel.title,
                 panelFile: reviewPanel.file ? reviewPanel.file.path : null, panelYt: reviewPanel.ytTitle,
                 undo: App.undoAvailable, undoLabel: App.undoLabel,
+                settingsOpen: settings.opened, settingsTab: settings.tab,
+                judgeKey: App.judgeKeySet, judgeKeyHint: App.judgeKeyHint, judgeChecking: App.judgeChecking, judgeState: App.judgeState, judgeStatus: App.judgeStatus,
                 replacing: App.replacing, replaceStage: App.replaceStage, replaceDialog: replaceDialog.opened, replaceOptions: replaceDialog.options.length, replaceMode: replaceDialog.mode,
                 accent: "" + Theme.accent, accentMode: App.accent, theme: App.themeMode, dark: Theme.dark,
                 systemDark: App.systemDark, bg: "" + Theme.bg, musicDirs: App.musicDirs, frameColor: "" + mpv.frameColor,
