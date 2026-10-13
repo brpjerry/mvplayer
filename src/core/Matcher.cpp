@@ -316,9 +316,10 @@ bool Matcher::sameVersion(const TrackInfo &track, const QString &videoTitle, boo
 bool Matcher::isOwnChannel(const TrackInfo &track, const QString &channel)
 {
     // "NayutalieN Official / Nayutan Seijin", "ヨルシカ / n-buna Official": a
-    // channel named twice over, in two scripts or after its two owners. Any
-    // one of the names will do.
-    static const QRegularExpression separators(QStringLiteral("\\s*[/／|｜]\\s*"));
+    // channel named twice over, in two scripts or after its two owners; and
+    // "YOASOBI and Echoes", how YouTube names an upload listed under several
+    // channels. Any one of the names will do.
+    static const QRegularExpression separators(QStringLiteral("\\s*[/／|｜]\\s*|\\s+and\\s+"), QRegularExpression::CaseInsensitiveOption);
     const QStringList pieces = channel.split(separators, Qt::SkipEmptyParts);
     if (pieces.size() > 1) {
         for (const QString &part : pieces) {
@@ -341,15 +342,31 @@ bool Matcher::isOwnChannel(const TrackInfo &track, const QString &channel)
             }
         }
     }
-    if (!named)
-        return false;
     // Nothing beside the name but what any artist's channel is called.
     static const QRegularExpression generic(QStringLiteral(
         " (?:official|channel|music|youtube|vevo|tv|records|公式|チャンネル|オフィシャル|[a-z]|\\d+)(?= )"));
-    rest = rest.simplified().prepend(QLatin1Char(' ')).append(QLatin1Char(' '));
-    while (rest.contains(generic))
-        rest.replace(generic, QString());
-    return rest.trimmed().isEmpty();
+    const auto bare = [](QString s) {
+        s = s.simplified().prepend(QLatin1Char(' ')).append(QLatin1Char(' '));
+        while (s.contains(generic))
+            s.replace(generic, QString());
+        return s.trimmed();
+    };
+    if (named)
+        return bare(rest).isEmpty();
+    // Spaces aside: "DJGenki" is "DJ Genki".
+    QString compact = bare(tokens(channel)).remove(QLatin1Char(' '));
+    for (const QString &n : Matcher::artistNames(track)) {
+        QStringList forms = n.split(parts, Qt::SkipEmptyParts);
+        forms.prepend(n);
+        for (const QString &form : std::as_const(forms)) {
+            const QString nt = tokens(form).trimmed().remove(QLatin1Char(' '));
+            if (nt.size() >= 2 && compact.contains(nt)) {
+                named = true;
+                compact.remove(nt);
+            }
+        }
+    }
+    return named && compact.isEmpty();
 }
 
 bool Matcher::namesTitle(const TrackInfo &track, const QString &videoTitle)
@@ -365,6 +382,7 @@ bool Matcher::namesTitle(const TrackInfo &track, const QString &videoTitle)
     const QString title = tokens(track.title);
     return title.trimmed().size() >= 2 && tokens(named).contains(title);
 }
+
 
 bool Matcher::namesArtist(const TrackInfo &track, const QString &videoTitle, const QString &channel)
 {

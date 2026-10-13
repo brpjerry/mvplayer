@@ -184,7 +184,7 @@ pre.words { white-space: pre-wrap; font: 13px/1.6 var(--sans); color: var(--text
   <h1>MV Player import rules: the judge</h1>
   <p>How a track comes to have a music video when a model is asked instead of the rules of thumb. Two things the judge can do, chosen in Settings → Judge. In <b>judge mode</b> it runs the lookup: it writes the search, picks what is listened to and gives the verdict on every upload; what the main page drops on sight, whose channel an upload is on, version and fan words, small channels and the score no longer apply, and what stays are the audio check, the length check and your verdict on what the judge is not sure of. In <b>advice mode</b> nothing in the lookup changes: each card under review shows what the judge would do and how sure it is. Rules of the <a href="import-rules.html">main page</a> are cited by their ids (R0, G1); this page's own are Q1, S2 …</p>
   <p class="proposal" hidden>Proposed changes to the judge; awaiting approval.</p>
-  <div class="stamp">Transcribed 2026-10-12 · measured against your verdicts of 8–11 October 2026 · ids (Q2, W1) are stable, for pointing at</div>
+  <div class="stamp">Transcribed 2026-10-13 · measured against your verdicts of 8–11 October 2026 · ids (Q2, W1) are stable, for pointing at</div>
   <div class="legend" aria-label="Legend">
     <span><span class="q">A question</span> its answers hang below</span>
     <span><span class="out ok">has its video</span></span>
@@ -218,7 +218,7 @@ pre.words { white-space: pre-wrap; font: 13px/1.6 var(--sans); color: var(--text
   </header>
   <div class="modes">
     <div class="def" id="judge-mode"><h3><span class="id">Judge mode</span>The judge runs the lookup</h3>
-      <p>Q → S → L → V → W, then your verdict (X) on what it leaves. Of the main page, A1 and A6–A11 (when a track is looked up again), the search itself (B, I1), downloading and the audio check (D1.1–D1.3, R0–R3, R6, R9), bringing a video in (F), your verdict (G), re-import (H), pauses (I) and replacing by hand (J) stay as they are. Everything in C, the rest of D and all of E is replaced by this page. Turning judge mode on asks the judge once about every track the rules had skipped (Q5).</p></div>
+      <p>Q → S → L → V → W, then your verdict (X) on what it leaves. Of the main page, A1 and A6–A11 (when a track is looked up again), the search itself (B, I1), downloading and the audio check (D1.1–D1.3, R0, R1, R3, R6, R9), bringing a video in (F), your verdict (G), re-import (H), pauses (I) and replacing by hand (J) stay as they are. Everything in C, the rest of D and all of E is replaced by this page. Turning judge mode on asks the judge once about every track the rules had skipped (Q5).</p></div>
     <div class="def" id="advice-mode"><h3><span class="id">Advice mode</span>The judge only says what it would do</h3>
       <p>The lookup runs by the main page, unchanged. A card under review carries the judge's answer to the one question of V for the candidate showing: keep, not this one, or unsure, with how sure it is and why (X2). Nothing is decided by it.</p></div>
   </div>
@@ -288,7 +288,7 @@ pre.words { white-space: pre-wrap; font: 13px/1.6 var(--sans); color: var(--text
 <section id="L">
   <header>
     <h2><span class="tag">L</span> Listening: what stays</h2>
-    <p>Each pick, in the judge's order: its audio is downloaded and laid against the track as today (D1.1–D1.3, I3), and the audio check measures what it measures (R0–R3, R6, R9). The rules of thumb of D are gone; what is left are gates. A gate never takes a video outright and never throws one out that the judge would keep: it decides between outright and your verdict.</p>
+    <p>Each pick, in the judge's order: its audio is downloaded and laid against the track as today (D1.1–D1.3, I3), and the audio check measures what it measures (R0, R1, R3, R6, R9). The rules of thumb of D are gone; what is left are gates. A gate never takes a video outright and never throws one out that the judge would keep: it decides between outright and your verdict.</p>
     <div class="where">ImportManager::runJob · AudioAlign::align · YtDlp::pageInfo · Judge::frames</div>
   </header>
   <div class="scroll">
@@ -327,7 +327,7 @@ pre.words { white-space: pre-wrap; font: 13px/1.6 var(--sans); color: var(--text
       <ul>
         <li><b>The track:</b> title, artist, album artist, album, year, length, audio format (lossless, or codec and bitrate); and the other tracks the audio check matched to these uploads, named as such.</li>
         <li><b>Each upload:</b> title, channel (every name it is listed under; verified; subscribers, upload date and view count when known; "a channel you allowed"), length, resolution; the first 600 characters of its description, where the library has it (L3).</li>
-        <li><b>The audio check:</b> fingerprints, as a share of the video; same waveform, as a share of the track; other audio inside the song, in seconds; placed by offset (R2).</li>
+        <li><b>The audio check:</b> fingerprints, as a share of the video; same waveform, as a share of the track; other audio inside the song, in seconds.</li>
         <li><b>The picture:</b> the five frames and the picture check (L4.1).</li>
       </ul></div>
     <div class="def" id="V2"><h3><span class="id">V2</span>What it answers</h3>
@@ -362,7 +362,7 @@ pre.words { white-space: pre-wrap; font: 13px/1.6 var(--sans); color: var(--text
     <li><div class="row"><span class="q order">The judge's verdict for the track</span></div>
       <ul>
         <li id="W1"><div class="row"><a class="id" href="#W1">W1</a><span class="when">Accept, with confidence of at least <span class="num">0.85</span>, and the upload passes the gates (the song, L1; the whole song, L2; a picture seen, and moving, L4)</span><span class="out ok">it is the track's video: brought in (F)</span>
-          <span class="why">Which audio it plays is F3, unchanged: the track's where at least 72% is the same waveform or it is placed by offset and the track is the better audio (R6); else YouTube's. The track is no longer a candidate of any video under review; a video left with no candidate is deleted. A video another track had goes to this one where it is the closer fit (L5), and that track goes back to the queue. The verdict vouches for the upload as this track's video (R5), as yours would.</span></div></li>
+          <span class="why">Which audio it plays is F3, unchanged: the track's where at least 72% is the same waveform and the track is the better audio (R6); else YouTube's. The track is no longer a candidate of any video under review; a video left with no candidate is deleted. A video another track had goes to this one where it is the closer fit (L5), and that track goes back to the queue. The verdict vouches for the upload as this track's video (R5), as yours would.</span></div></li>
         <li id="W2"><div class="row"><a class="id" href="#W2">W2</a><span class="when">Accept below the gate, or the upload it chose fails a gate</span><span class="out review">a card under review, with this track as a candidate and the judge's advice on it (X2)</span>
           <span class="why">Every other upload the judge would keep for the track is a card too, with its advice; those it would not keep are dropped. An upload already under review gains this track as a candidate (D5.6); the track's own video, on a re-import, goes back to the queue (H4).</span></div></li>
         <li id="W3"><div class="row"><a class="id" href="#W3">W3</a><span class="when">Reject all, with confidence of at least <span class="num">0.85</span></span><span class="out none">no video: A6</span>

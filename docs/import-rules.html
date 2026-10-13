@@ -180,7 +180,7 @@ del { background: var(--bad-soft); color: var(--bad); text-decoration: line-thro
   <p>How a track in the music folders comes to have a music video, to wait for your verdict on one, or to have none. One decision tree per stage of a lookup. This page is the reference, and a rule changes here first. A change is proposed in a copy of this page, additions in green and removals in red; once it is approved the marks come off, it becomes this page, and the code in <code>src/core</code> follows. Where the two disagree, that is a bug in one of them.</p>
   <p class="proposal" hidden>Proposed changes to the rules: <ins>additions</ins> and <del>removals</del>. Not approved yet; the code has not changed.</p>
   <p class="lede">These are the rules in <b>rules mode</b>. With the judge on (Settings → Judge), <a href="import-rules-judge.html">its own page</a> says what runs the lookup in its place (judge mode) or what the advice on a card is (advice mode); what stays of this page is listed there.</p>
-  <div class="stamp">Transcribed from the code on 2026-10-11 · every rule names where it lives · ids (A2, D5.2) are stable, for pointing at</div>
+  <div class="stamp">Transcribed from the code on 2026-10-12 · every rule names where it lives · ids (A2, D5.2) are stable, for pointing at</div>
   <div class="legend" aria-label="Legend">
     <span><span class="q">A question</span> its answers hang below</span>
     <span><span class="out ok">has its video</span></span>
@@ -325,7 +325,7 @@ del { background: var(--bad-soft); color: var(--bad); text-decoration: line-thro
       </ul>
     </li>
     <li id="C9"><div class="row"><a class="id" href="#C9">C9</a><span class="q">The shortlist</span>
-      <span class="why">The usable results by score, the best <span class="num">4</span>. On a re-import the track's own video as well, whether it looks official or not (D2.1), and every video under review that the track is a candidate of, whether or not the search returns it (D3). Such a video is not dropped on sight: its length and its channel's size are what can rule it out for the track, and H2 has done that by then. Those of at least <span class="num">60%</span> of the track's length are listened to first: a cut of the song is its video only for want of a full one.</span></div>
+      <span class="why">The usable results by score, the best <span class="num">4</span>. On a re-import the track's own video as well, whether it looks official or not (D2.1), and every video under review that the track is a candidate of, whether or not the search returns it (D3). Such a video is not dropped on sight: its length and its channel's size are what can rule it out for the track, and H2 has done that by then. In score order. A cut of the song can only be a candidate (R1), and a full one that fits outright comes before any candidate (E1), so the order decides what is downloaded first and nothing else.</span></div>
       <ul><li><div class="row"><span class="when last"></span><span class="out go"><a href="#D">each is listened to, in that order: D</a></span></div></li></ul>
     </li>
   </ul>
@@ -349,7 +349,7 @@ del { background: var(--bad-soft); color: var(--bad); text-decoration: line-thro
 <section id="D">
   <header>
     <h2><span class="tag">D</span> Listening: is this upload the track's video?</h2>
-    <p>Each upload on the shortlist, best first. The first that fits outright ends it; the others are judged until then. What "the track's own recording" means is defined under <a href="#R">R</a>.</p>
+    <p>Each upload on the shortlist, best first. The first that fits outright ends it; the others are judged until then. What "the track's own recording" means is defined under <a href="#R">R</a>. Three answers an upload can get, asked in this order: <b>taken outright</b>, only as the track's own recording (R1) with a moving picture; <b>a candidate for your verdict</b>, when it is the song (R0) with a moving picture, from a channel that is neither small (D7) nor one you denied; <b>out</b> otherwise. The audio the track has (R6) decides none of this, only which audio the video plays (F3).</p>
     <div class="where">ImportManager::runJob · AudioAlign::align · Muxer::checkStill · YtDlp::pageInfo · YtDlp::channelOf</div>
   </header>
   <div class="scroll">
@@ -359,7 +359,7 @@ del { background: var(--bad-soft); color: var(--bad); text-decoration: line-thro
         <li id="D0"><div class="row"><a class="id" href="#D0">D0</a><span class="when">You turned it down for this track</span><span class="out no">not offered again</span></div></li>
         <li id="D6"><div class="row"><a class="id" href="#D6">D6</a><span class="when">Only on a re-import: it is the track's own video, or one under review it is a candidate of, and the library did not keep its channel's id or its subscriber count</span><span class="out go">the upload's page is read for them, once</span>
           <span class="why">Videos from before these were kept. One request, nothing downloaded, and what it says is kept from then on. The id is how a channel is known as the artist's by MusicBrainz or because you allowed it (R5), and how a channel you denied is told (D8): without it, a channel under a name the track's tags do not carry was not recognised, and the video was not the track's own recording by today's rules. YouTube refuses: pause, track postponed (I5). The upload is gone from YouTube: judged on what is known.</span></div></li>
-        <li id="D7"><div class="row"><a class="id" href="#D7">D7</a><span class="when">"Ignore small channels" is on, and its channel is known to have fewer subscribers than the limit, is not verified, is the only channel the upload is listed under, and is not a channel you allowed (<a href="#G7">G7</a>)</span><span class="out no">dropped: a small channel</span>
+        <li id="D7"><div class="row"><a class="id" href="#D7">D7</a><span class="when">"Ignore small channels" is on, and its channel is known to have fewer subscribers than the limit, and is neither verified nor one you allowed (<a href="#G7">G7</a>)</span><span class="out no">dropped: a small channel</span>
           <span class="why"><span class="num">5,000</span>, unless you set another limit; the switch and the limit are in Settings. Somebody's re-upload of a song comes from a small channel. The count is on the upload's page, not in the search results: a new upload's is read with its audio (D1.12), the library keeps it for every video it brings in, and D6 reads it for older ones. Not known, or hidden by the channel: not dropped. A verified channel is not dropped whatever its size: an artist's own channel can be a small one. Nor is an upload that YouTube lists under several channels ("A and B"): it is enough that one of them meets the limit, and for such an upload the page gives no count to go by (the first channel's "7.43 million" is read as 743, the others' are not given). Nor is an upload from a channel you allowed (G7): a label's channel, or an artist's own, can be small and not verified. Allowing a channel answers both questions at once: whose it is, and whether its size counts against it. On a re-import the track's own video goes (H4), and the track is no longer a candidate of such a video under review.</span></div></li>
         <li id="D8"><div class="row"><a class="id" href="#D8">D8</a><span class="when">It is in the library, and its channel turns out to be one you denied</span><span class="out no">dropped: a channel you denied</span>
           <span class="why">When a channel is denied, the videos the library has from it go at once (G8): the ones it knows by the channel's id. A video from before ids were kept is told when its page is read (D6), at a re-import. The track's own video goes (H4), and the track is no longer a candidate of such a video under review; one left with no candidate is deleted.</span></div></li>
@@ -386,24 +386,10 @@ del { background: var(--bad-soft); color: var(--bad); text-decoration: line-thro
           <span class="why">Known now: the upload's page came with its audio. Nothing more of it is fetched, and it is not listened to. What the page says of the channel, and the first 600 characters of the upload's description, are kept with the video for the judge (judge page, V1).</span></div></li>
         <li id="D1.4"><div class="row"><a class="id" href="#D1.4">D1.4</a><span class="when">It is not the song (<a href="#R0">R0</a>)</span><span class="out no">different</span>
           <span class="why">Not this song; or the track is only part of this video; or only part of the track is in it.</span></div></li>
-        <li id="D1.5"><div class="row"><a class="id" href="#D1.5">D1.5</a><span class="q">Is the track the better audio? (<a href="#R6">R6</a>)</span></div>
-          <ul>
-            <li><div class="row"><span class="when">No: YouTube's audio is as good, or "Use my library's audio" is off</span><span class="q">Is the song interrupted in it?</span></div>
-              <ul>
-                <li id="D1.6"><div class="row"><a class="id" href="#D1.6">D1.6</a><span class="when">More than <span class="num">15 s</span> of other audio inside the song</span><span class="out no">dropped: interrupts the song</span></div></li>
-                <li><div class="row"><span class="when">No</span><span class="out go">fits, with YouTube's audio: picture check, D1.9</span></div></li>
-              </ul>
-            </li>
-            <li><div class="row"><span class="when">Yes</span><span class="q">Is it the track's own recording? (<a href="#R1">R1</a>)</span></div>
-              <ul>
-                <li><div class="row"><span class="when">Yes</span><span class="out go">fits, with the track's audio: picture check, D1.9</span></div></li>
-                <li id="D1.7"><div class="row"><a class="id" href="#D1.7">D1.7</a><span class="when">No; the track is lossy, there is an account, and its Premium audio is as good as the track</span><span class="out go">not the better audio after all: as "No" above</span></div></li>
-                <li id="D1.8"><div class="row"><a class="id" href="#D1.8">D1.8</a><span class="when">No</span><span class="out go">a candidate for review: picture check, D1.9</span>
-                  <span class="why">The reason is kept: not the artist's channel; a cut of the song; the song is interrupted; track and video are marked as different versions; the upload names none of the artists; or too little of the waveform.</span></div></li>
-              </ul>
-            </li>
-          </ul>
-        </li>
+        <li id="D1.13"><div class="row"><a class="id" href="#D1.13">D1.13</a><span class="when">It is the track's own recording (<a href="#R1">R1</a>)</span><span class="out go">fits outright: picture check, D1.9</span>
+          <span class="why">On the artist's channel, whole, uninterrupted, the same version by its words, 72% the same waveform. Nothing else is ever taken outright, whatever the track's audio and whatever the upload looks like.</span></div></li>
+        <li id="D1.14"><div class="row"><a class="id" href="#D1.14">D1.14</a><span class="when">Otherwise: it is the song</span><span class="out go">a candidate for review: picture check, D1.9</span>
+          <span class="why">The reason is kept for the card: not the artist's channel; a cut of the song; the song is interrupted; track and video are marked as different versions; too little of the waveform. Where the track is the better audio (R6) it is laid in beside YouTube's for you to hear (F3); where it is not, the card plays YouTube's. Of such cards you accepted 123 and rejected 91 in one library, under every one of these reasons: none of them is a verdict the rules can give.</span></div></li>
         <li id="D1.9"><div class="row"><a class="id" href="#D1.9">D1.9</a><span class="q">Is the picture a still image?</span> <span class="why">Asked when "Skip still-image videos" is on, of YouTube's smallest stream; the answer is remembered per upload.</span></div>
           <ul>
             <li><div class="row"><span class="when">Fewer than <span class="num">10%</span> of the sampled frame pairs change</span><span class="out no">dropped: a still image</span>
@@ -419,7 +405,7 @@ del { background: var(--bad-soft); color: var(--bad); text-decoration: line-thro
   </div>
 
   <h3 id="D2">D2 · Re-import only: the video the track already has</h3>
-  <p class="lede">A track that has its video is never looked up again by itself, so this tree is not part of an ordinary lookup. When you ask for a re-import (<a href="#H">H</a>), the video the track has goes on the shortlist beside the search results, whether or not the search returns it, and is judged by today's rules. Judged like a candidate just found, on the upload's own audio and picture, which are in its file. Nothing is downloaded for it.</p>
+  <p class="lede">A track that has its video is never looked up again by itself, so this tree is not part of an ordinary lookup. When you ask for a re-import (<a href="#H">H</a>), the video the track has goes on the shortlist beside the search results, whether or not the search returns it, and is judged by today's rules. Judged like a candidate just found (D1.13, D1.14), on the upload's own audio and picture, which are in its file. Nothing is downloaded for it.</p>
   <div class="scroll">
   <ul class="tree">
     <li><div class="row"><span class="q order">The video the track has had until now</span></div>
@@ -428,15 +414,10 @@ del { background: var(--bad-soft); color: var(--bad); text-decoration: line-thro
           <span class="why">By its length, or by a version word in its title where the channel is not the artist's. Not by whether it looks official (C7): that picks which search results are worth listening to, and this one is in the library already. What it is, listening says.</span></div></li>
         <li id="D2.2"><div class="row"><a class="id" href="#D2.2">D2.2</a><span class="when">Its file cannot be read</span><span class="out later">undecided</span></div></li>
         <li id="D2.3"><div class="row"><a class="id" href="#D2.3">D2.3</a><span class="when">It is not the song (R0)</span><span class="out no">turned down</span></div></li>
-        <li id="D2.4"><div class="row"><a class="id" href="#D2.4">D2.4</a><span class="q">The track is the better audio and the video is not the track's own recording (R1)</span></div>
-          <ul>
-            <li><div class="row"><span class="when last"></span><span class="out review">a candidate for review: it goes back to the review queue, with this track as its candidate</span>
-              <span class="why">No other track can have it: in the library a video has one track (R8).</span></div></li>
-          </ul>
-        </li>
-        <li id="D2.5"><div class="row"><a class="id" href="#D2.5">D2.5</a><span class="when">The track is not the better audio, and the song is interrupted in it</span><span class="out no">turned down</span></div></li>
         <li id="D2.6"><div class="row"><a class="id" href="#D2.6">D2.6</a><span class="when">Its picture is a still image</span><span class="out no">turned down</span><span class="why">Read from the file by its keyframes, unless remembered.</span></div></li>
-        <li id="D2.7"><div class="row"><a class="id" href="#D2.7">D2.7</a><span class="when">Otherwise</span><span class="out ok">fits outright: kept, listening ends</span>
+        <li id="D2.8"><div class="row"><a class="id" href="#D2.8">D2.8</a><span class="when">It is the song, but not the track's own recording (R1): as D1.14 has it</span><span class="out review">a candidate for review: it goes back to the review queue, with this track as its candidate</span>
+          <span class="why">Whatever audio the track has. No other track can have it: in the library a video has one track (R8).</span></div></li>
+        <li id="D2.7"><div class="row"><a class="id" href="#D2.7">D2.7</a><span class="when">Otherwise: the track's own recording (R1), as D1.13 has it</span><span class="out ok">fits outright: kept, listening ends</span>
           <span class="why">The track's audio is put in if it belongs there (F3) and was not.</span></div></li>
       </ul>
     </li>
@@ -447,7 +428,7 @@ del { background: var(--bad-soft); color: var(--bad); text-decoration: line-thro
   <p class="lede">A track that waits for your verdict is not looked up again by itself either. On a re-import, every video it is a candidate of goes on the shortlist beside the search results, whether or not the search returns it, as the track's own video does (D2), and is judged once more. On the upload's own audio, which is in its file: nothing is downloaded for it. What today's search happens to return does not decide whether a video is judged by today's rules. The ones ruled out for the track by length, or as a small channel's by what the library kept, <a href="#H2">H2</a> has withdrawn by then.</p>
   <div class="scroll">
   <ul class="tree">
-    <li><div class="row"><span class="q">Has it become the track's own recording (R1), with the track the better audio (R6)?</span></div>
+    <li><div class="row"><span class="q">Has it become the track's own recording (R1)?</span></div>
       <ul>
         <li id="D3.1"><div class="row"><a class="id" href="#D3.1">D3.1</a><span class="when">Yes</span><span class="out ok">accepted, out of review: this track's video, listening ends</span>
           <span class="why">Its other candidate tracks are no longer candidates of it. They stay candidates of their other videos; one with none left has no video (A6).</span></div></li>
@@ -458,7 +439,7 @@ del { background: var(--bad-soft); color: var(--bad); text-decoration: line-thro
   </div>
 
   <h3 id="D4">D4 · A video another track has</h3>
-  <p class="lede">In the library a video has one track, so this track either takes it from the track that has it, or leaves it. Measured against the upload's own audio, YouTube's, which every file keeps.</p>
+  <p class="lede">In the library a video has one track, so this track either takes it from the track that has it, or leaves it. Measured against the upload's own audio, YouTube's, which every file keeps. A video that no track has any more (an orphan, R8) is this track's on the terms of a new upload: taken as D1.13 has it, a card with this track as its candidate as D1.14 has it.</p>
   <div class="scroll">
   <ul class="tree">
     <li><div class="row"><span class="q order">A video in the library, which another track has</span></div>
@@ -480,7 +461,7 @@ del { background: var(--bad-soft); color: var(--bad); text-decoration: line-thro
     <li><div class="row"><span class="q order">A video under review, with other candidate tracks</span></div>
       <ul>
         <li id="D5.1"><div class="row"><a class="id" href="#D5.1">D5.1</a><span class="when">It is not the song (R0)</span><span class="out no">different</span></div></li>
-        <li id="D5.2"><div class="row"><a class="id" href="#D5.2">D5.2</a><span class="when">It is this track's own recording (R1), and the track is the better audio (R6)</span><span class="out ok">taken out of review: this track's, listening ends</span>
+        <li id="D5.2"><div class="row"><a class="id" href="#D5.2">D5.2</a><span class="when">It is this track's own recording (R1)</span><span class="out ok">taken out of review: this track's, listening ends</span>
           <span class="why">Its candidate tracks are no longer candidates of it. They stay candidates of their other videos; one with none left has no video (A6).</span></div></li>
         <li id="D5.6"><div class="row"><a class="id" href="#D5.6">D5.6</a><span class="when">Otherwise: it is the song</span><span class="out review">this track becomes one more candidate of it: E3</span>
           <span class="why">Whose video it is, of its candidates, is for your verdict (G). Where this track is the better audio (R6), its audio is added to the video's file beside the other candidates' (F3).</span></div></li>
@@ -517,25 +498,16 @@ del { background: var(--bad-soft); color: var(--bad); text-decoration: line-thro
       <p style="margin-top:.4rem">A short edit of a song does not take the video of the full version, only one of about its own length.</p></div>
 
     <div class="def" id="R1"><h3><span class="id">R1</span>The track's own recording</h3>
-      <p>What lets an upload be taken outright with the track's audio. All of:</p>
+      <p>What lets an upload be taken outright. All of:</p>
       <ul>
         <li>the upload is on the artist's channel (R5);</li>
         <li>it is not a cut: at least <span class="num">90%</span> of the track's length;</li>
         <li>the song is not interrupted: at most <span class="num">15 s</span> of other audio inside it;</li>
-        <li>at least <span class="num">72%</span> the same waveform, and <span class="num">60%</span> of what the fingerprints matched; or it is placed by offset (R2);</li>
-        <li>and one of: placed by offset; the same version (R3) on a vouched channel or with an artist named in the title or channel; or <span class="num">97%</span> the same waveform.</li>
+        <li>at least <span class="num">72%</span> the same waveform;</li>
+        <li>the same version (R3).</li>
       </ul>
-      <p style="margin-top:.4rem">Measured: another master of a recording shows 77% and more; another singer over the same backing 67%; a remix 59%; live takes and covers 25–51%; a version made over the original 90%.</p></div>
+      <p style="margin-top:.4rem">Measured: another master of a recording shows 77% and more; another singer over the same backing 67%; a remix 59%; live takes and covers 25–51%; a version made over the original 90%. Of 3,685 uploads taken outright in one library, 3,606 showed 72% or more; the 77 placed by offset showed 23–67% (an official video in another mix of the performance), and 19 passed on 97% with a version word against them (a live performance, a dance practice, a guitar playthrough, a crossfade on the artist's channel). Both kinds now wait for your verdict. The 60% clause only ever bit where the fingerprints matched more than the shorter of the two, a song played twice over, which C4 and the length rules cover. Which audio the video then plays is R6 and F3, no part of this.</p></div>
 
-    <div class="def" id="R2"><h3><span class="id">R2</span>Placed by offset</h3>
-      <p>The same performance in another mix has the track's waveform only here and there. It is taken for the recording, and the track laid whole at one offset, when all of:</p>
-      <ul>
-        <li>the channel is the artist's by its name;</li>
-        <li>fingerprints cover <span class="num">80%</span>, the waveform <span class="num">20%</span>;</li>
-        <li>the loudness of the two rises and falls together (correlation <span class="num">0.5</span>);</li>
-        <li>the same version (R3);</li>
-        <li>a stretch of matching waveform sits at the offset the loudness gives.</li>
-      </ul></div>
 
     <div class="def" id="R3"><h3><span class="id">R3</span>The same version</h3>
       <p>By what the two are called. Not the same version when:</p>
@@ -548,7 +520,7 @@ del { background: var(--bad-soft); color: var(--bad); text-decoration: line-thro
 
     <div class="def" id="R5"><h3><span class="id">R5</span>The artist's channel</h3>
       <ul>
-        <li><b>By its name:</b> a name of the artist and nothing else but official, channel, music, YouTube, VEVO, TV, records, 公式, チャンネル. A channel named twice over ("A / B") counts by either name. "Producer feat. Singer": the producer's channel.</li>
+        <li><b>By its name:</b> a name of the artist and nothing else but official, channel, music, YouTube, VEVO, TV, records, 公式, チャンネル. A channel named twice over ("A / B", or "A and B", as YouTube names an upload listed under several channels) counts by either name; spaces and case do not ("DJGenki", "DJ Genki"). "Producer feat. Singer": the producer's channel. In one library 41 official uploads on "YOASOBI and Echoes" waited for a verdict as from a channel not known to be the artist's.</li>
         <li><b>By MusicBrainz:</b> its artist record links to the channel. Asked once per artist; only a sure match counts.</li>
         <li><b>Because you allowed it:</b> a channel you allowed (<a href="#G7">G7</a>) is an artist's channel for every track, whoever the artist. A label's channel has the videos of many.</li>
         <li><b>For one upload, by your verdict:</b> a video you accepted (<a href="#G1">G1</a>) counts as on the artist's channel, as the video of the track that has it. That says nothing of its channel's other uploads.</li>
@@ -558,7 +530,7 @@ del { background: var(--bad-soft); color: var(--bad); text-decoration: line-thro
 
     <div class="def" id="R6"><h3><span class="id">R6</span>The track is the better audio</h3>
       <p>The track's quality exceeds YouTube's by more than <span class="num">15%</span>, and &quot;Use my library's audio&quot; is on.</p>
-      <p>The video is then to play the track's audio in place of YouTube's, so the upload has to be that very recording (R1), or your verdict decides. Where the track is not the better audio the video keeps YouTube's, and being the same song is enough.</p>
+      <p>Decides only which audio the video plays (F3): the track's where it is the better one and demonstrably the recording, YouTube's otherwise. Whether an upload is taken outright or waits for your verdict does not depend on it (D1.13, D1.14): a lossy track is given a video on the same terms as a lossless one.</p>
       <ul>
         <li>A lossless track beats everything.</li>
         <li>Otherwise bitrate × 1.5 for Opus, × 1.2 for AAC and Vorbis.</li>
@@ -599,7 +571,7 @@ del { background: var(--bad-soft); color: var(--bad); text-decoration: line-thro
         <li id="E1"><div class="row"><a class="id" href="#E1">E1</a><span class="when">An upload fits outright</span><span class="out ok">it is the track's video: brought in (F)</span>
           <span class="why">The track is no longer a candidate of any video under review; a video left with no candidate is deleted. On a re-import the old video goes (H4), unless the upload that fits is the old video. Where the video was another track's (D4.6), that track goes back to the queue.</span></div></li>
         <li id="E3"><div class="row"><a class="id" href="#E3">E3</a><span class="when">There are candidates for review</span><span class="out review">each is a video under review, with this track as a candidate</span>
-          <span class="why">A new upload is brought in as a card of its own. One that is under review already gains this track as a candidate (D5.6). On a re-import the video the track has goes back to the queue the same way (D2.4). The track stays a candidate of the videos it was one of before.</span></div></li>
+          <span class="why">A new upload is brought in as a card of its own. One that is under review already gains this track as a candidate (D5.6). On a re-import the video the track has goes back to the queue the same way (D2.8). The track stays a candidate of the videos it was one of before.</span></div></li>
         <li id="E4"><div class="row"><a class="id" href="#E4">E4</a><span class="when">Nothing new, and the track is a candidate of videos already</span><span class="out review">it stays one</span></div></li>
         <li id="E6"><div class="row"><a class="id" href="#E6">E6</a><span class="when">An upload could not be examined, or none was</span><span class="out later">failed: A7</span></div></li>
         <li id="E7"><div class="row"><a class="id" href="#E7">E7</a><span class="when">Otherwise</span><span class="out none">no video: A6</span></div></li>
@@ -626,7 +598,7 @@ del { background: var(--bad-soft); color: var(--bad); text-decoration: line-thro
       <ul>
         <li><div class="row"><span class="when">It waits for review</span><span class="out review">each candidate track's that is the better audio (R6), as a stream of its own, laid whole at the offset where the loudness agrees</span>
           <span class="why">YouTube's is the last stream; <kbd>A</kbd> goes through them all (G5).</span></div></li>
-        <li><div class="row"><span class="when">Accepted; the track is the better audio (R6, against the Premium audio too) and at least <span class="num">72%</span> is the same waveform, or it is placed by offset</span><span class="out ok">the track's</span>
+        <li><div class="row"><span class="when">Accepted; the track is the better audio (R6, against the Premium audio too) and at least <span class="num">72%</span> is the same waveform, or you accepted it with the track laid whole at the offset where the loudness agrees (the stream you heard on the card)</span><span class="out ok">the track's</span>
           <span class="why">Its samples are copied bit for bit into the matching regions; the video's own audio fills the gaps at the track's level, with 20 ms crossfades. YouTube's stays as the second stream.</span></div></li>
         <li><div class="row"><span class="when">Accepted otherwise</span><span class="out ok">YouTube's</span></div></li>
         <li><div class="row"><span class="when">The track's audio belongs there and cannot be put in</span><span class="out later">failed: A7</span><span class="why">There is no falling back to YouTube's audio.</span></div></li>
@@ -792,14 +764,12 @@ del { background: var(--bad-soft); color: var(--bad); text-decoration: line-thro
     <tr><td class="n">30 min ×2</td><td>before a failed lookup is tried again</td><td>A7</td><td><code>requeueStale</code></td></tr>
     <tr><td class="n">10</td><td>results asked of each query</td><td>B</td><td><code>YtDlp::search</code></td></tr>
     <tr><td class="n">0.5 · 2 · 4 min</td><td>an upload's length against the track's</td><td>C3, C4</td><td><code>Matcher::lengthMismatch</code></td></tr>
-    <tr><td class="n">4 · 60%</td><td>uploads listened to; length of those listened to first</td><td>C9</td><td><code>runJob shortlist</code></td></tr>
+    <tr><td class="n">4</td><td>uploads listened to</td><td>C9</td><td><code>runJob shortlist</code></td></tr>
     <tr><td class="n">50% · 80% · 45 s</td><td>fingerprints that make it the song</td><td>R0</td><td><code>audioMatches</code></td></tr>
-    <tr><td class="n">72% · 60%</td><td>waveform that makes it the recording</td><td>R1</td><td><code>kOwnWaveform · audioReplaceable</code></td></tr>
-    <tr><td class="n">97%</td><td>waveform that outweighs a difference in names</td><td>R1</td><td><code>kOwnWaveformOtherVersion</code></td></tr>
+    <tr><td class="n">72%</td><td>waveform that makes it the recording</td><td>R1</td><td><code>kOwnWaveform · audioReplaceable</code></td></tr>
     <tr><td class="n">90%</td><td>of the track's length, below which a video is a cut</td><td>R1</td><td><code>kShortCut</code></td></tr>
-    <tr><td class="n">15 s</td><td>other audio inside the song before it counts as interrupted</td><td>R1, D1.6</td><td><code>kMaxInterruptedSec</code></td></tr>
-    <tr><td class="n">80% · 20% · 0.5</td><td>fingerprints, waveform and loudness agreement for placing by offset</td><td>R2</td><td><code>fitted</code></td></tr>
-    <tr><td class="n">15%</td><td>by which the track's quality must exceed YouTube's</td><td>R6</td><td><code>libraryIsBetter</code></td></tr>
+    <tr><td class="n">15 s</td><td>other audio inside the song before it counts as interrupted</td><td>R1</td><td><code>kMaxInterruptedSec</code></td></tr>
+    <tr><td class="n">15%</td><td>by which the track's quality must exceed YouTube's, for the video to play the track's audio</td><td>R6</td><td><code>libraryIsBetter</code></td></tr>
     <tr><td class="n">5,000</td><td>subscribers under which a channel's uploads are ignored, unless it is verified, one of several the upload is listed under, or a channel you allowed; yours to set, or to switch off</td><td>D7</td><td><code>ImportSettings minSubscribers</code></td></tr>
     <tr><td class="n">none</td><td>channels you allowed, each an artist's channel for every track; and channels you denied, whose uploads are never taken; yours to list</td><td>R5, D7, G7, G8, C10</td><td><code>Database channelLists</code></td></tr>
     <tr><td class="n">10% · 0.4% · 16</td><td>moving frame pairs; changed pixels; grey levels</td><td>D1.9</td><td><code>Muxer::checkStill</code></td></tr>

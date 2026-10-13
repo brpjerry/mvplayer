@@ -154,13 +154,18 @@ outline, for every track without a video
    track: more than 15 seconds of other audio inside the song sends it to
    review. If nothing passes, nothing is imported for that track.
    Only an upload on the artist's own channel is taken as the track's
-   video outright. The channel is the artist's when it is named after the
-   artist and nothing else ("Artist", "Artist Official"), when MusicBrainz
-   lists it for the artist (asked once per artist, remembered in the
-   library), or when you approved one of its videos for the artist in
-   review. Anything else that matches — a label's upload, a verified
-   re-upload channel, a video titled "Music Video" by anyone — goes to
-   review, where the card shows the channel.
+   video outright, and only when it is the same version by its title (not
+   a live take, a dance practice or a remix of the song) and at least 72%
+   of it is demonstrably the track's waveform. The channel is the artist's
+   when it is named after the artist and nothing else ("Artist", "Artist
+   Official", "DJGenki" for "DJ Genki", either half of "A and B"), when
+   MusicBrainz lists it for the artist (asked once per artist, remembered
+   in the library), or when you allowed it. Anything else that is the song
+   — a label's upload, a verified re-upload channel, a video titled "Music
+   Video" by anyone, the artist's own video over another mix — goes to
+   review, where the card shows the channel. What audio your file has does
+   not come into it: a lossy track gets a video on the same terms as a
+   lossless one, and only which audio the video plays depends on it.
    A video already in the library plays the audio of the track that got
    it first. When a later track turns out to be the video's own audio — at
    least 90% of the waveform, and clearly more than the track that holds it
@@ -179,13 +184,11 @@ outline, for every track without a video
    offset that is followed as it drifts. Where the two merely match poorly
    and the video adds nothing of its own, the track still goes in.
    The track's audio takes the video's place when 72% of it is demonstrably
-   the same waveform — nearly all of it where track and video name different
-   versions, since a version made over the original keeps most of it. The same performance in another mix
-   (reverb added, the voice at another level) shows less than that, as does
-   a cover over the same backing; there the fingerprints have to cover the
-   song, the loudness of the two has to move together at the offset found,
-   and neither may be marked as a version the other is not (live, remix,
-   cover, by title or album). The track is then placed whole at that offset.
+   the same waveform. The same performance in another mix (reverb added,
+   the voice at another level) shows less than that, as does a cover over
+   the same backing, and the waveforms cannot tell those apart: such a
+   video waits for you, with the track laid whole at the offset where the
+   loudness of the two moves together, so that you can hear both.
 5. **Mux** (`src/core/Muxer.cpp`): if the track is higher quality than
    YouTube's audio, its samples are copied bit-for-bit into the matching
    regions and the video's own audio (level-matched) fills the gaps, with 20 ms
