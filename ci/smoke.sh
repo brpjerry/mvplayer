@@ -1289,6 +1289,61 @@ echo "sk-ant-test-00000000000000000000" > "$WORK/claude-key"
 ffmpeg -v error -y -i "$WORK/lib5/Dee/five.flac" -af atempo=1.004 -c:a libopus -b:a 96k "$WORK/site-audio.opus"
 ffmpeg -v error -y -i "$WORK/mv.mkv" -map 0:v:0 -c copy -t 40 "$WORK/site-video.mkv"
 echo '{"entries": [{"id": "liv", "ie_key": "Youtube", "title": "Dee - Five", "channel": "Dee", "duration": 40, "view_count": 1000, "channel_is_verified": true}]}' > "$WORK/site-search.json"
+# The judge is shown frames of the picture, so the look at the picture cannot
+# be left out here, and its format selector has a ">" in it, which a batch
+# file would take for a redirection. On Windows the stand-in is a program for
+# these runs: it starts sh on the script named like itself, with its own
+# command line after it as it came.
+if [[ -n "$EXE" ]]; then
+    SH_EXE=$(cygpath -m "$(command -v sh)"); SH_EXE=${SH_EXE%.exe}.exe
+    cat > "$WORK/standin.c" <<C
+#include <windows.h>
+#include <wchar.h>
+
+static wchar_t self[32768], line[32768];
+
+int main(void)
+{
+    const wchar_t *sh = L"$SH_EXE";
+    const wchar_t *rest = GetCommandLineW();
+    STARTUPINFOW si;
+    PROCESS_INFORMATION pi;
+    DWORD code = 1;
+    DWORD n = GetModuleFileNameW(NULL, self, 32768);
+    if (n < 5 || n >= 32768)
+        return 127;
+    self[n - 4] = 0; /* without ".exe": the script */
+    if (*rest == L'"') {
+        rest = wcschr(rest + 1, L'"');
+        rest = rest ? rest + 1 : L"";
+    } else {
+        while (*rest && *rest != L' ' && *rest != L'\t')
+            ++rest;
+    }
+    if (wcslen(sh) + wcslen(self) + wcslen(rest) + 6 > 32767)
+        return 127;
+    wcscpy(line, L"\"");
+    wcscat(line, sh);
+    wcscat(line, L"\" \"");
+    wcscat(line, self);
+    wcscat(line, L"\"");
+    wcscat(line, rest);
+    ZeroMemory(&si, sizeof si);
+    si.cb = sizeof si;
+    si.dwFlags = STARTF_USESTDHANDLES;
+    si.hStdInput = GetStdHandle(STD_INPUT_HANDLE);
+    si.hStdOutput = GetStdHandle(STD_OUTPUT_HANDLE);
+    si.hStdError = GetStdHandle(STD_ERROR_HANDLE);
+    if (!CreateProcessW(NULL, line, NULL, NULL, TRUE, 0, NULL, NULL, &si, &pi))
+        return 127;
+    WaitForSingleObject(pi.hProcess, INFINITE);
+    GetExitCodeProcess(pi.hProcess, &code);
+    return (int)code;
+}
+C
+    gcc -O1 -o "$WORK/fake-site.exe" "$WORK/standin.c"
+    SITE="$WORK/fake-site.exe"
+fi
 answers() { python3 - "$WORK/judge-answers.json" "$1" "$2" "$3" <<'PY'
 import json, sys
 path, verdict, chosen, confidence = sys.argv[1], sys.argv[2], int(sys.argv[3]), float(sys.argv[4])
