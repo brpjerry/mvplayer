@@ -1,5 +1,6 @@
 #include "core/ChatGptAuth.h"
 #include "core/ChatGptTransport.h"
+#include "core/Util.h"
 
 #include <QCryptographicHash>
 #include <QDateTime>
@@ -10,7 +11,7 @@
 #include <QJsonArray>
 #include <QJsonDocument>
 #include <QLockFile>
-#include <QSaveFile>
+#include <QScopeGuard>
 #include <QSet>
 #include <QSettings>
 #include <QTcpSocket>
@@ -49,11 +50,17 @@ QString randomValue()
 }
 bool saveStore(const QString &file, const QJsonObject &store)
 {
-    QSaveFile out(file);
-    if (!out.open(QIODevice::WriteOnly)
-        || !out.setPermissions(QFileDevice::ReadOwner | QFileDevice::WriteOwner)) return false;
+    // QFile's creation permissions also set Windows ACLs; setPermissions()
+    // only toggles the read-only attribute there. Protect the temporary file
+    // before writing credentials, then replace the store atomically.
+    const QString temporary = file + QStringLiteral(".new-") + QUuid::createUuid().toString(QUuid::WithoutBraces);
+    QFile out(temporary);
+    if (!out.open(QIODevice::WriteOnly | QIODevice::NewOnly, QFileDevice::ReadOwner | QFileDevice::WriteOwner)) return false;
+    const auto cleanup = qScopeGuard([&] { out.close(); QFile::remove(temporary); });
     const QByteArray bytes = QJsonDocument(store).toJson(QJsonDocument::Compact);
-    return out.write(bytes) == bytes.size() && out.commit();
+    if (out.write(bytes) != bytes.size() || !out.flush()) return false;
+    out.close();
+    return replaceFile(temporary, file);
 }
 bool lockStore(QLockFile &lock, const QString &file, const std::atomic<bool> *cancel, bool wait = true)
 {

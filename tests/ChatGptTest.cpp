@@ -481,5 +481,20 @@ private slots:
         QVERIFY(!r.error.isEmpty()); QCOMPARE(server->responses, 0);
     }
 };
-QTEST_GUILESS_MAIN(ChatGptTest)
+int main(int argc, char **argv)
+{
+#ifdef Q_OS_WIN
+    // Windows reports emulated mode bits unless real NTFS checks are enabled.
+    // Enable before constructing the application or starting worker threads.
+#if QT_VERSION >= QT_VERSION_CHECK(6, 6, 0)
+    QNtfsPermissionCheckGuard permissions;
+#else
+    extern Q_CORE_EXPORT int qt_ntfs_permission_lookup;
+    ++qt_ntfs_permission_lookup;
+#endif
+#endif
+    QCoreApplication app(argc, argv);
+    ChatGptTest test;
+    return QTest::qExec(&test, argc, argv);
+}
 #include "ChatGptTest.moc"
