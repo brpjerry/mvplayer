@@ -19,3 +19,6 @@ packaging/windows/out/
 
 # Cookies
 cookies.txt
+
+# local experiments
+experiments/
