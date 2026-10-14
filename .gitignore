@@ -19,3 +19,6 @@ packaging/windows/out/
 
 # Cookies
 cookies.txt
+
+# Experiments: new files here stay local (files already tracked here stay tracked)
+experiments/
