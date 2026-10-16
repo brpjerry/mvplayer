@@ -671,7 +671,8 @@ the words is tried against what the judge once saw.
   queue, the playing track and its cover) until it is pressed again. A chip
   on a cover of an album in
   a video folder counts its tracks that have a video. The sidebar, the sort
-  menu (by album, by artist, chronologically) and the search box narrow the
+  menu (by album, by artist, chronologically, by the files' modification
+  date) and the search box narrow the
   albums as they do the videos; the mode is remembered. A right click on
   an album offers **Find videos for this album**, which looks its tracks up
   wherever their files are (Settings → Library lists such albums, each with

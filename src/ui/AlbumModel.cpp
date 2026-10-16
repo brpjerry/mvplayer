@@ -239,12 +239,12 @@ bool AlbumFilterModel::lessThan(const QModelIndex &left, const QModelIndex &righ
     const AlbumInfo &a = m_source->at(left.row());
     const AlbumInfo &b = m_source->at(right.row());
     const bool recent = m_facetType == QLatin1String("recent");
-    const QString mode = recent ? QStringLiteral("newest") : m_sortMode;
+    const QString mode = recent ? QStringLiteral("modified") : m_sortMode;
     const bool descending = recent || m_descending;
 
     // The mode's own key, in the chosen direction.
     int c = 0;
-    if (mode == QLatin1String("newest"))
+    if (mode == QLatin1String("modified"))
         c = a.newest < b.newest ? -1 : a.newest > b.newest ? 1 : 0;
     else if (mode == QLatin1String("year"))
         c = a.year < b.year ? -1 : a.year > b.year ? 1 : 0;
