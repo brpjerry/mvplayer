@@ -544,8 +544,12 @@ void ImportManager::undoVerdict()
     emit activityChanged();
     m_verdictPool.start([this, undo] {
         undoJob(*undo);
-        --m_reviewJobs;
         QMetaObject::invokeMethod(this, [this] {
+            // Counted down on the main thread, after whatever the job
+            // queued there (a re-lookup) has landed: a scan ending in
+            // between would otherwise find nothing busy, and a headless
+            // run would end with the track still pending.
+            --m_reviewJobs;
             emit activityChanged();
             pump();
         }, Qt::QueuedConnection);
@@ -972,8 +976,12 @@ void ImportManager::approveVideo(qint64 videoId, qint64 trackId, bool byJudge)
     const bool undoable = m_keepsUndo;
     m_verdictPool.start([this, videoId, trackId, cfg, undoable, byJudge] {
         approveJob(videoId, trackId, cfg, false, undoable, byJudge);
-        --m_reviewJobs;
         QMetaObject::invokeMethod(this, [this] {
+            // Counted down on the main thread, after whatever the job
+            // queued there (a re-lookup) has landed: a scan ending in
+            // between would otherwise find nothing busy, and a headless
+            // run would end with the track still pending.
+            --m_reviewJobs;
             emit activityChanged();
             pump();
         }, Qt::QueuedConnection);
@@ -987,8 +995,12 @@ void ImportManager::rejectVideo(qint64 videoId, bool byJudge)
     const bool undoable = m_keepsUndo;
     m_verdictPool.start([this, videoId, undoable, byJudge] {
         rejectJob(videoId, QString(), undoable, byJudge);
-        --m_reviewJobs;
         QMetaObject::invokeMethod(this, [this] {
+            // Counted down on the main thread, after whatever the job
+            // queued there (a re-lookup) has landed: a scan ending in
+            // between would otherwise find nothing busy, and a headless
+            // run would end with the track still pending.
+            --m_reviewJobs;
             emit activityChanged();
             pump();
         }, Qt::QueuedConnection);
@@ -1391,8 +1403,12 @@ void ImportManager::allowChannel(const QString &channelId, const QString &name, 
     const ImportSettings cfg = settings();
     m_verdictPool.start([this, channelId, cfg] {
         allowJob(channelId, cfg);
-        --m_reviewJobs;
         QMetaObject::invokeMethod(this, [this] {
+            // Counted down on the main thread, after whatever the job
+            // queued there (a re-lookup) has landed: a scan ending in
+            // between would otherwise find nothing busy, and a headless
+            // run would end with the track still pending.
+            --m_reviewJobs;
             emit activityChanged();
             pump();
         }, Qt::QueuedConnection);
@@ -1443,8 +1459,12 @@ void ImportManager::denyChannel(const QString &channelId, const QString &name, c
     emit activityChanged();
     m_verdictPool.start([this, channelId] {
         denyJob(channelId);
-        --m_reviewJobs;
         QMetaObject::invokeMethod(this, [this] {
+            // Counted down on the main thread, after whatever the job
+            // queued there (a re-lookup) has landed: a scan ending in
+            // between would otherwise find nothing busy, and a headless
+            // run would end with the track still pending.
+            --m_reviewJobs;
             emit activityChanged();
             pump();
         }, Qt::QueuedConnection);
@@ -2683,8 +2703,12 @@ void ImportManager::onScanFinished(const LibraryScanner::Result &r)
             const ImportSettings cfg = settings();
             m_auditPool.start([this, cfg] {
                 prepareCandidates(cfg);
-                --m_reviewJobs;
                 QMetaObject::invokeMethod(this, [this] {
+                    // Counted down on the main thread, after whatever the job
+                    // queued there (a re-lookup) has landed: a scan ending in
+                    // between would otherwise find nothing busy, and a headless
+                    // run would end with the track still pending.
+                    --m_reviewJobs;
                     emit activityChanged();
                     pump();
                 }, Qt::QueuedConnection);
