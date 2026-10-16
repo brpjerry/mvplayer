@@ -527,8 +527,8 @@ Popup {
                         wrapMode: Text.WordWrap
                         lineHeight: 1.3
                         text: App.musicDirs.length === 0
-                              ? "Tick the folders whose music is read. Nothing is read until one is ticked."
-                              : "The music in the ticked folders is read, everything under each included. A folder ticked off keeps its videos."
+                              ? "Every music file under the base is read for the player. Tick the folders whose tracks are looked up for videos; none is until one is ticked."
+                              : "Every music file under the base is read for the player. The tracks in the ticked folders are looked up for videos, everything under each included. A folder ticked off keeps its videos."
                         color: Theme.textFaint
                         font.pixelSize: 12
                     }

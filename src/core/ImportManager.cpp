@@ -544,8 +544,12 @@ void ImportManager::undoVerdict()
     emit activityChanged();
     m_verdictPool.start([this, undo] {
         undoJob(*undo);
-        --m_reviewJobs;
         QMetaObject::invokeMethod(this, [this] {
+            // Counted down on the main thread, after whatever the job
+            // queued there (a re-lookup) has landed: a scan ending in
+            // between would otherwise find nothing busy, and a headless
+            // run would end with the track still pending.
+            --m_reviewJobs;
             emit activityChanged();
             pump();
         }, Qt::QueuedConnection);
@@ -610,11 +614,13 @@ void ImportManager::rescan()
         m_rescanWanted = true;
         return;
     }
-    const QStringList roots = settings().musicDirs;
+    const ImportSettings cfg = settings();
+    const QStringList roots = cfg.libraryDirs.isEmpty() ? cfg.musicDirs : cfg.libraryDirs;
+    const QStringList lookup = cfg.musicDirs;
     m_scanning = true;
     emit activityChanged();
-    m_scanPool.start([this, roots] {
-        const LibraryScanner::Result r = LibraryScanner::scan(roots, *m_db, &m_cancel);
+    m_scanPool.start([this, roots, lookup] {
+        const LibraryScanner::Result r = LibraryScanner::scan(roots, lookup, *m_db, &m_cancel);
         QMetaObject::invokeMethod(this, [this, r] { onScanFinished(r); }, Qt::QueuedConnection);
     });
 }
@@ -970,8 +976,12 @@ void ImportManager::approveVideo(qint64 videoId, qint64 trackId, bool byJudge)
     const bool undoable = m_keepsUndo;
     m_verdictPool.start([this, videoId, trackId, cfg, undoable, byJudge] {
         approveJob(videoId, trackId, cfg, false, undoable, byJudge);
-        --m_reviewJobs;
         QMetaObject::invokeMethod(this, [this] {
+            // Counted down on the main thread, after whatever the job
+            // queued there (a re-lookup) has landed: a scan ending in
+            // between would otherwise find nothing busy, and a headless
+            // run would end with the track still pending.
+            --m_reviewJobs;
             emit activityChanged();
             pump();
         }, Qt::QueuedConnection);
@@ -985,8 +995,12 @@ void ImportManager::rejectVideo(qint64 videoId, bool byJudge)
     const bool undoable = m_keepsUndo;
     m_verdictPool.start([this, videoId, undoable, byJudge] {
         rejectJob(videoId, QString(), undoable, byJudge);
-        --m_reviewJobs;
         QMetaObject::invokeMethod(this, [this] {
+            // Counted down on the main thread, after whatever the job
+            // queued there (a re-lookup) has landed: a scan ending in
+            // between would otherwise find nothing busy, and a headless
+            // run would end with the track still pending.
+            --m_reviewJobs;
             emit activityChanged();
             pump();
         }, Qt::QueuedConnection);
@@ -1389,8 +1403,12 @@ void ImportManager::allowChannel(const QString &channelId, const QString &name, 
     const ImportSettings cfg = settings();
     m_verdictPool.start([this, channelId, cfg] {
         allowJob(channelId, cfg);
-        --m_reviewJobs;
         QMetaObject::invokeMethod(this, [this] {
+            // Counted down on the main thread, after whatever the job
+            // queued there (a re-lookup) has landed: a scan ending in
+            // between would otherwise find nothing busy, and a headless
+            // run would end with the track still pending.
+            --m_reviewJobs;
             emit activityChanged();
             pump();
         }, Qt::QueuedConnection);
@@ -1441,8 +1459,12 @@ void ImportManager::denyChannel(const QString &channelId, const QString &name, c
     emit activityChanged();
     m_verdictPool.start([this, channelId] {
         denyJob(channelId);
-        --m_reviewJobs;
         QMetaObject::invokeMethod(this, [this] {
+            // Counted down on the main thread, after whatever the job
+            // queued there (a re-lookup) has landed: a scan ending in
+            // between would otherwise find nothing busy, and a headless
+            // run would end with the track still pending.
+            --m_reviewJobs;
             emit activityChanged();
             pump();
         }, Qt::QueuedConnection);
@@ -2048,10 +2070,12 @@ int ImportManager::reimport(const QVector<qint64> &trackIds)
     QSet<qint64> recordings;
     QVector<qint64> marked;
     int queued = 0;
+    bool widened = false; // a track outside the video folders was named (H9)
     for (qint64 id : trackIds) {
         const std::optional<TrackInfo> t = m_db->track(id);
         if (!t || t->absent)
             continue;
+        widened |= t->lookup == 0;
         // Files of one recording are one lookup; a track that is already
         // waiting its turn is not asked twice.
         const qint64 key = t->recording > 0 ? t->recording : -t->id;
@@ -2082,6 +2106,10 @@ int ImportManager::reimport(const QVector<qint64> &trackIds)
         enqueue(t.id);
     qInfo("[import] re-importing %d tracks", queued);
     appendLog({{QStringLiteral("event"), QStringLiteral("reimport")}, {QStringLiteral("tracks"), queued}});
+    // A track looked up from now on has no fingerprint yet: the next scan
+    // takes it (A1), while its lookup runs under its own id meanwhile.
+    if (widened)
+        rescan();
     emit activityChanged();
     pump();
     return queued;
@@ -2655,6 +2683,7 @@ void ImportManager::onScanFinished(const LibraryScanner::Result &r)
             enqueue(t.id);
         for (qint64 id : r.videosChanged)
             emit videoChanged(id);
+        emit libraryChanged();
         if (!m_settledOnce) {
             m_settledOnce = true;
             // A library from before a video had one track: the videos that
@@ -2674,8 +2703,12 @@ void ImportManager::onScanFinished(const LibraryScanner::Result &r)
             const ImportSettings cfg = settings();
             m_auditPool.start([this, cfg] {
                 prepareCandidates(cfg);
-                --m_reviewJobs;
                 QMetaObject::invokeMethod(this, [this] {
+                    // Counted down on the main thread, after whatever the job
+                    // queued there (a re-lookup) has landed: a scan ending in
+                    // between would otherwise find nothing busy, and a headless
+                    // run would end with the track still pending.
+                    --m_reviewJobs;
                     emit activityChanged();
                     pump();
                 }, Qt::QueuedConnection);
@@ -2759,7 +2792,7 @@ void ImportManager::releaseVideo(const QString &ytId)
 void ImportManager::runJob(qint64 trackId, const ImportSettings &cfg)
 {
     std::optional<TrackInfo> maybe = m_db->track(trackId);
-    if (!maybe || maybe->state != QLatin1String("pending") || maybe->absent)
+    if (!maybe || maybe->state != QLatin1String("pending") || maybe->absent || maybe->lookup == 0)
         return;
     if (m_blocked)
         return; // stays pending; picked up again when the pause ends
@@ -2773,7 +2806,7 @@ void ImportManager::runJob(qint64 trackId, const ImportSettings &cfg)
             settled |= settleShared(maybe->videoId, cfg);
         if (settled) {
             maybe = m_db->track(trackId);
-            if (!maybe || maybe->state != QLatin1String("pending") || maybe->absent)
+            if (!maybe || maybe->state != QLatin1String("pending") || maybe->absent || maybe->lookup == 0)
                 return;
         }
     }

@@ -2,7 +2,8 @@ import QtQuick
 import MvPlayer.Core
 
 // The folders under the base directory, each with a check box: a ticked
-// folder's music is read, a part-ticked one has ticked folders inside.
+// folder's tracks are looked up for videos (every file under the base is
+// read for the player), a part-ticked one has ticked folders inside.
 // Scrolls on its own once taller than maxHeight.
 ListView {
     id: root

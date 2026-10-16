@@ -47,7 +47,7 @@ Item {
             horizontalAlignment: Text.AlignHCenter
             wrapMode: Text.WordWrap
             lineHeight: 1.35
-            text: root.hasBase ? "Only the music in the folders you tick is read, everything under each included. Your music folders are only read, never changed; the choice can be changed in Settings."
+            text: root.hasBase ? "Every music file under the base is read for the player; only the tracks in the folders you tick are looked up for videos, everything under each included. Your music folders are only read, never changed; the choice can be changed in Settings."
                                : "MV Player finds the music video for each track, downloads it at the best quality available and pairs it with your own audio. Your music folders are only read, never changed; which of them are read is chosen next."
             color: Theme.textDim
             font.pixelSize: 14

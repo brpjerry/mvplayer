@@ -178,6 +178,23 @@ public:
     // up before `secs` (Unix time).
     QVector<qint64> trackIdsImportedBefore(qint64 secs);
 
+    // The music library is wider than the video folders: a track is looked
+    // up only while TrackInfo::lookup holds (docs/import-rules.html, A12).
+    // An album asked for from the music player ("Find videos for album") is
+    // looked up wherever its files are; it is kept by album artist and title.
+    struct AlbumKey {
+        QString albumArtist;
+        QString album;
+    };
+    static QString albumKey(const QString &albumArtist, const QString &album);
+    QVector<AlbumKey> lookupAlbums();
+    void addLookupAlbum(const QString &albumArtist, const QString &album);
+    void removeLookupAlbum(const QString &albumArtist, const QString &album);
+    // The tracks of an album in the music library, in disc and track order.
+    QVector<qint64> trackIdsOfAlbum(const QString &albumArtist, const QString &album);
+    // The files indexed for the music player that are not looked up (A12).
+    QStringList pathsNotLookedUp();
+
     // An artist's YouTube channels, by id (or by name, for videos from
     // before ids were kept): from MusicBrainz, or vouched for by the user.
     bool isArtistChannel(const QString &artist, const QString &channelId, const QString &channelName);

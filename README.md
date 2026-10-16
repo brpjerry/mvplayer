@@ -86,20 +86,26 @@ how much of that needed no request.
 ## Choosing the music folders
 
 Settings → Library starts from a **base directory** (the folder that holds
-your music) and shows the folders under it as a tree with a check box each.
-Only the music in the ticked folders is read, everything under a ticked
-folder included; a part-filled box means some folders inside are ticked.
-Nothing is read until a folder is ticked. Unticking a folder inside a ticked
-one keeps the rest of that one ticked. Choosing another base directory drops
-the ticked folders that lie outside it (their videos stay, as below).
-Headless, `--music-dir` names the ticked folders directly.
+your music). Every music file under it is the music library, read for its
+tags. The folders under it are shown as a tree with a check box each: the
+ticked ones are the **video folders**, whose tracks are looked up for
+videos, everything under a ticked folder included; a part-filled box means
+some folders inside are ticked. A track outside every video folder is
+indexed and never fingerprinted or looked up, until its folder is ticked,
+its album is asked for, or a re-import names it. Unticking a folder inside
+a ticked one keeps the rest of that one ticked. Choosing another base
+directory drops the ticked folders that lie outside it (their videos stay,
+as below). Headless, `--library-dir` names the music library and
+`--music-dir` the video folders; without `--library-dir` the video folders
+are the whole library, and a run is refused where the library holds tracks
+outside them. `--lookup-album "<album artist>/<album>"` asks for an album.
 
-A track whose file is in none of the music folders any more — its folder was
-unticked in Settings, or the file deleted — is not forgotten: it is kept as
-absent, out of every count and never looked up. When the file is in a music
-folder again, by the same path (a parent folder added in place of its
-subfolders) or recognised by its sound at another, the track is back with
-its video and everything found out about it, without a search.
+A track whose file is in the music library no more — the base directory
+was moved away from it, or the file deleted — is not forgotten: it is kept
+as absent, out of every count and never looked up. When the file is in the
+music library again, by the same path or recognised by its sound at
+another, the track is back with its video and everything found out about
+it, without a search.
 
 The videos of absent tracks stay in the library and play as before. The
 icon with a struck-through note in the top bar (next to the review one, with

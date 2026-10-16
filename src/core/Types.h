@@ -50,6 +50,11 @@ struct TrackInfo {
     // judged by today's rules as one candidate among the search results,
     // and kept, sent to review, replaced or let go as they decide.
     bool reimport = false;
+    // Whether the track is looked up (docs/import-rules.html, A): 1 in a
+    // video folder (a ticked folder) or on an album asked for; 2 named by a
+    // re-import, which no scan takes back (H9); 0 indexed by its tags for the
+    // music player, not fingerprinted and not looked up (A12).
+    int lookup = 1;
 };
 
 inline double trackQuality(const TrackInfo &t)

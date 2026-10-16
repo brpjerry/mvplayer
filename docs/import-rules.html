@@ -177,10 +177,10 @@ del { background: var(--bad-soft); color: var(--bad); text-decoration: line-thro
 
 <div class="head">
   <h1>MV Player import rules</h1>
-  <p>How a track in the music folders comes to have a music video, to wait for your verdict on one, or to have none. One decision tree per stage of a lookup. This page is the reference, and a rule changes here first. A change is proposed in a copy of this page, additions in green and removals in red; once it is approved the marks come off, it becomes this page, and the code in <code>src/core</code> follows. Where the two disagree, that is a bug in one of them.</p>
+  <p>How a track in the music library comes to have a music video, to wait for your verdict on one, or to have none. One decision tree per stage of a lookup. This page is the reference, and a rule changes here first. A change is proposed in a copy of this page, additions in green and removals in red; once it is approved the marks come off, it becomes this page, and the code in <code>src/core</code> follows. Where the two disagree, that is a bug in one of them.</p>
   <p class="proposal" hidden>Proposed changes to the rules: <ins>additions</ins> and <del>removals</del>. Not approved yet; the code has not changed.</p>
   <p class="lede">These are the rules in <b>rules mode</b>. With the judge on (Settings → Judge), <a href="import-rules-judge.html">its own page</a> says what runs the lookup in its place (judge mode) or what the advice on a card is (advice mode); what stays of this page is listed there.</p>
-  <div class="stamp">Transcribed from the code on 2026-10-12 · every rule names where it lives · ids (A2, D5.2) are stable, for pointing at</div>
+  <div class="stamp">Transcribed from the code on 2026-10-15 · every rule names where it lives · ids (A2, D5.2) are stable, for pointing at</div>
   <div class="legend" aria-label="Legend">
     <span><span class="q">A question</span> its answers hang below</span>
     <span><span class="out ok">has its video</span></span>
@@ -215,13 +215,15 @@ del { background: var(--bad-soft); color: var(--bad); text-decoration: line-thro
 <section id="A">
   <header>
     <h2><span class="tag">A</span> Is the track looked up at all?</h2>
-    <p>Asked of every file found in the music folders, and again when a lookup starts.</p>
+    <p>Asked of every file found in the music library (the base directory), and again when a lookup starts. Only the files in a video folder (a folder ticked in Settings → Library) or on an album you asked for go past A12.</p>
     <div class="where">LibraryScanner::scan · AudioPrint::sameRecording · Matcher::isNonMvTrack · Matcher::isTalkTitle · TalkCheck::measure</div>
   </header>
   <div class="scroll">
   <ul class="tree">
-    <li><div class="row"><span class="q order">A file in the music folders</span></div>
+    <li><div class="row"><span class="q order">A file in the music library</span></div>
       <ul>
+        <li id="A12"><div class="row"><a class="id" href="#A12">A12</a><span class="when">In no video folder, and on no album you asked for</span><span class="out none">indexed, not looked up</span>
+          <span class="why">Its tags are read and it plays in music mode; it is not fingerprinted and no video is sought for it. It comes to A1 the day its folder is ticked, its album is asked for ("Find videos for album"), or a re-import names it (H9).</span></div></li>
         <li id="A1"><div class="row"><a class="id" href="#A1">A1</a><span class="when">It sounds like a recording already known</span><span class="out go">one more file of that recording</span>
           <span class="why">Fingerprints differ in under <span class="num">12%</span> of their bits and the lengths are within <span class="num">5 s</span>. The files share one lookup and one video; the best of them (lossless, then bitrate, then the one known longest) is the one listened to and the one whose tags the video carries. A file at a new place with the same content keeps what was known about it.</span></div></li>
         <li id="A2"><div class="row"><a class="id" href="#A2">A2</a><span class="when">Shorter than <span class="num">1:20</span></span><span class="out none">skipped</span>
@@ -249,6 +251,7 @@ del { background: var(--bad-soft); color: var(--bad); text-decoration: line-thro
         <li id="A9"><div class="row"><a class="id" href="#A9">A9</a><span class="when">Skipped, and the rule that skipped it has gone</span><span class="out later">at the next scan</span></div></li>
         <li id="A10"><div class="row"><a class="id" href="#A10">A10</a><span class="when">Title, artist or album changed, and it has no video</span><span class="out later">at once</span><span class="why">A track that has its video keeps it; the video takes the new tags.</span></div></li>
         <li id="A11"><div class="row"><a class="id" href="#A11">A11</a><span class="when">You ask for a re-import</span><span class="out go"><a href="#H">at once, by H</a></span></div></li>
+        <li id="A13"><div class="row"><a class="id" href="#A13">A13</a><span class="when">Not looked up (A12), and its folder is now ticked or its album asked for</span><span class="out later">at the next scan</span><span class="why">It is fingerprinted then, and goes through A1–A5 like a file just found.</span></div></li>
       </ul>
     </li>
   </ul>
@@ -481,12 +484,13 @@ del { background: var(--bad-soft); color: var(--bad); text-decoration: line-thro
   <div class="defs">
     <div class="def" id="R8"><h3><span class="id">R8</span>Who has what: tracks, videos, cards</h3>
       <ul>
-        <li><b>A track</b> is one recording: every file in the music folders with that sound counts as the same track (A1). The same song in another master, on another release, is another track.</li>
+        <li><b>The music library</b> is every music file under the base directory. <b>The video folders</b> are the folders ticked in it, and an album you asked for ("Find videos for album") counts as one: only their tracks are looked up (A12). The video folders always lie inside the music library.</li>
+        <li><b>A track</b> is one recording: every file in the video folders with that sound counts as the same track (A1). The same song in another master, on another release, is another track.</li>
         <li><b>In the library one track has one video, and one video has one track.</b> Nothing is shared there.</li>
         <li><b>Whose video it is,</b> when a second track could have it too: the one that is the closer fit to the upload's own audio (R9, D4.6). The other has no video, and goes back to the queue to see whether another video is its.</li>
         <li><b>In the review queue a card is one video.</b> It has one or more <b>candidate tracks</b>: the tracks whose video it could be. A track can be a candidate of several videos. Only here are tracks and videos many to many.</li>
         <li><b>Your verdict makes it one to one:</b> accepting gives the video to one of its candidates (G1).</li>
-        <li>A video that no track in the music folders has is an orphan.</li>
+        <li>A video that no track in the music library has is an orphan.</li>
       </ul></div>
 
     <div class="def" id="R0"><h3><span class="id">R0</span>The song</h3>
@@ -656,13 +660,15 @@ del { background: var(--bad-soft); color: var(--bad); text-decoration: line-thro
 <section id="H">
   <header>
     <h2><span class="tag">H</span> Re-import: a track looked up again by today's rules</h2>
-    <p>From the Re-import button, a sidebar entry's menu, a file or folder in Settings, or <code>--reimport</code>. The first three steps need no request to YouTube, and H1 and H2 are done the moment the re-import is asked for, pause or not.</p>
+    <p>From the Re-import button, a sidebar entry's menu, an album's menu, a file or folder in Settings, or <code>--reimport</code>. The first three steps need no request to YouTube, and H1 and H2 are done the moment the re-import is asked for, pause or not.</p>
     <div class="where">ImportManager::reimport · dropBrokenVideos · dropOutdatedOptions · settleShared · runJob</div>
   </header>
   <div class="scroll">
   <ul class="tree">
     <li><div class="row"><span class="q order">A track that is looked up again</span></div>
       <ul>
+        <li id="H9"><div class="row"><a class="id" href="#H9">H9</a><span class="when">It is not looked up (A12)</span><span class="out go">it is from now on</span>
+          <span class="why">A re-import names the track, so asking for one puts it among the tracks that are looked up, as ticking its folder would; it is fingerprinted at the next scan (A1) and then looked up by H6.</span></div></li>
         <li id="H1"><div class="row"><a class="id" href="#H1">H1</a><span class="when">A video of it has an empty or missing file</span><span class="out no">that video is deleted</span>
           <span class="why">A machine that goes down while a video is written can leave it empty. The upload is found and brought in again like any other.</span></div></li>
         <li id="H2"><div class="row"><a class="id" href="#H2">H2</a><span class="when">A video it is a candidate of is ruled out for it by its length (C3, C4), or is from a small channel by what the library kept of its channel (D7)</span><span class="out no">it is no longer a candidate of it</span>

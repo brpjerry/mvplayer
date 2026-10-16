@@ -19,7 +19,11 @@
 #include <memory>
 
 struct ImportSettings {
-    QStringList musicDirs;
+    QStringList musicDirs;         // the video folders: their tracks are looked up
+    // The music library the player lists: every audio file under these
+    // folders is indexed; only those under musicDirs, or on an album asked
+    // for, are looked up (docs/import-rules.html, A12). Empty: musicDirs.
+    QStringList libraryDirs;
     QString mvDir;
     bool replaceAudio = true;      // mux in library audio when it beats YouTube's
     bool allowUnofficial = false;  // accept uploads that do not look official
@@ -88,7 +92,8 @@ public:
     // looked up. Returns how many recordings were queued.
     int reimport(const QVector<qint64> &trackIds);
     int reimportVideo(qint64 videoId);
-    // A file of the music folders, or a folder: every track under it.
+    // A file of the music library, or a folder: every track under it. A
+    // track outside the video folders is looked up from now on (H9).
     int reimportPath(const QString &path);
 
     // Replacing a video by hand. replaceSearch looks for uploads that are
@@ -217,6 +222,8 @@ signals:
     void channelJudged(int ticket, qint64 videoId, bool accept, qint64 trackId, const QString &track, const QString &reason);
     void channelPreviewDone(int ticket);
     void activityChanged();
+    // The music library was read: tracks came, went or changed.
+    void libraryChanged();
     void idle();
     void undoChanged();
     // Judge mode: a lookup the judge settled by itself (W1, W3), or left
