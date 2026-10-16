@@ -655,6 +655,12 @@ the words is tried against what the judge once saw.
   instead (see above); the track's length is in the bar itself, beside the
   artist: the seek bar has the video's, and a video much shorter than its
   track is a cut of the song.
+- The sort button in the top bar orders the grid by title, by artist,
+  chronologically by the track's year ("Chronological - Audio") or by the day
+  the upload was published ("Chronological - Video", the year where the day
+  is not known), or by when the video was added. The arrow beside it flips
+  the direction; each order starts its natural way round, names A to Z and
+  dates newest first.
 - The sidebar lists one tag at a time. The selector above the list switches
   between album artists, artists, genres, albums and years, and the box under
   it filters the listed values. The search box at the top right searches every

@@ -340,9 +340,23 @@ void VideoFilterModel::setSortMode(const QString &mode)
 {
     if (mode == m_sortMode)
         return;
+    const bool descending = defaultDescending(mode);
+    const bool flipped = descending != m_descending;
     m_sortMode = mode;
+    m_descending = descending;
     invalidate();
     emit sortModeChanged();
+    if (flipped)
+        emit sortDescendingChanged();
+}
+
+void VideoFilterModel::setSortDescending(bool descending)
+{
+    if (descending == m_descending)
+        return;
+    m_descending = descending;
+    invalidate();
+    emit sortDescendingChanged();
 }
 
 bool VideoFilterModel::filterAcceptsRow(int sourceRow, const QModelIndex &) const
@@ -394,29 +408,53 @@ QVector<qint64> VideoFilterModel::videosWithFacet(const QString &type, const QSt
     return out;
 }
 
+// The modes' natural directions: names A to Z, dates newest first.
+bool VideoFilterModel::defaultDescending(const QString &mode)
+{
+    return mode == QLatin1String("year") || mode == QLatin1String("published") || mode == QLatin1String("added");
+}
+
+// When the upload was published, else the track's year. "2024-08-24" and
+// "2024" compare as text: an undated video of a year sorts before that
+// year's dated ones, and one with neither before them all.
+static QString publishedKey(const VideoInfo &v)
+{
+    if (!v.ytDate.isEmpty())
+        return v.ytDate;
+    return v.year ? QString::number(v.year) : QString();
+}
+
 bool VideoFilterModel::lessThan(const QModelIndex &left, const QModelIndex &right) const
 {
     const VideoInfo &a = m_source->at(left.row());
     const VideoInfo &b = m_source->at(right.row());
-    const QString mode = m_facetType == QLatin1String("recent") ? QStringLiteral("added") : m_sortMode;
+    const bool recent = m_facetType == QLatin1String("recent");
+    const QString mode = recent ? QStringLiteral("added") : m_sortMode;
+    const bool descending = recent || m_descending;
 
-    if (mode == QLatin1String("added")) {
-        if (a.addedAt != b.addedAt)
-            return a.addedAt > b.addedAt;
-        return a.id > b.id;
-    }
-    if (mode == QLatin1String("year") && a.year != b.year)
-        return a.year > b.year;
-    if (mode == QLatin1String("artist")) {
-        const int c = m_collator.compare(a.albumArtist, b.albumArtist);
-        if (c != 0)
-            return c < 0;
-        if (a.year != b.year)
-            return a.year < b.year;
-    }
-    const int c = m_collator.compare(a.title, b.title);
+    // The mode's own key, in the chosen direction.
+    int c = 0;
+    if (mode == QLatin1String("added"))
+        c = a.addedAt < b.addedAt ? -1 : a.addedAt > b.addedAt ? 1 : 0;
+    else if (mode == QLatin1String("year"))
+        c = a.year < b.year ? -1 : a.year > b.year ? 1 : 0;
+    else if (mode == QLatin1String("published"))
+        c = QString::compare(publishedKey(a), publishedKey(b));
+    else if (mode == QLatin1String("artist"))
+        c = m_collator.compare(a.albumArtist, b.albumArtist);
+    else
+        c = m_collator.compare(a.title, b.title);
     if (c != 0)
-        return c < 0;
+        return descending ? c > 0 : c < 0;
+
+    // Ties, the natural way round whatever the direction.
+    if (mode == QLatin1String("added"))
+        return a.id > b.id;
+    if (mode == QLatin1String("artist") && a.year != b.year)
+        return a.year < b.year;
+    const int t = m_collator.compare(a.title, b.title);
+    if (t != 0)
+        return t < 0;
     return a.id < b.id;
 }
 
