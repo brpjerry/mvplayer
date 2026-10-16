@@ -125,9 +125,18 @@ QString FolderTreeModel::commonAncestor(const QStringList &dirs)
     return path;
 }
 
+// A folder named with a leading dot is not shown anywhere: on Linux it is
+// hidden, and on Windows (where hidden is an attribute) it is still the
+// library's own kind of folder (.mvplayer), not music.
+static bool dotName(const QString &name)
+{
+    return name.startsWith(QLatin1Char('.'));
+}
+
 QStringList FolderTreeModel::subfolders(const QString &path)
 {
     QStringList names = QDir(path).entryList(QDir::Dirs | QDir::NoDotAndDotDot, QDir::NoSort);
+    names.erase(std::remove_if(names.begin(), names.end(), dotName), names.end());
     QCollator collator;
     collator.setNumericMode(true);
     collator.setCaseSensitivity(Qt::CaseInsensitive);
@@ -143,7 +152,11 @@ QStringList FolderTreeModel::subfolders(const QString &path)
 bool FolderTreeModel::hasSubfolders(const QString &path)
 {
     QDirIterator it(path, QDir::Dirs | QDir::NoDotAndDotDot);
-    return it.hasNext();
+    while (it.hasNext()) {
+        if (!dotName(it.nextFileInfo().fileName()))
+            return true;
+    }
+    return false;
 }
 
 QStringList FolderTreeModel::withChecked(const QStringList &dirs, const QString &rawPath, bool on)
