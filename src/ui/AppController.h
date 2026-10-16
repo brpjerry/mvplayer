@@ -96,6 +96,9 @@ class AppController : public QObject
     Q_PROPERTY(double subtitleShadow READ subtitleShadow WRITE setSubtitleShadow NOTIFY settingsChanged)
     // Whether a video grows to the full view when it starts, or plays in its thumbnail.
     Q_PROPERTY(bool autoExpand READ autoExpand WRITE setAutoExpand NOTIFY settingsChanged)
+    // Music mode: a track that has its music video plays the video, grown
+    // over the albums; the next track without one goes back to the music.
+    Q_PROPERTY(bool videoFollows READ videoFollows WRITE setVideoFollows NOTIFY settingsChanged)
     // Videos that no track in the music folders has.
     Q_PROPERTY(int untrackedCount READ untrackedCount NOTIFY activityChanged)
     // A YouTube Premium account's cookies.txt, kept beside the settings.
@@ -270,6 +273,8 @@ public:
     void setSubtitleShadow(double v);
     bool autoExpand() const { return m_autoExpand; }
     void setAutoExpand(bool v);
+    bool videoFollows() const { return m_videoFollows; }
+    void setVideoFollows(bool v);
     int untrackedCount() const { return m_untrackedCount; }
     Q_INVOKABLE int deleteUntracked();
     void setSkipStillImages(bool v);
@@ -484,6 +489,7 @@ private:
     double m_subtitleOutline = 2.2;
     double m_subtitleShadow = 0;
     bool m_autoExpand = true;
+    bool m_videoFollows = false;
     int m_untrackedCount = 0;
     QString m_replaceStage;
     qint64 m_replaceVideoId = 0;
