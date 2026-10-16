@@ -162,12 +162,15 @@ class AppController : public QObject
     // "auto" (follow the operating system), "dark" or "light"
     Q_PROPERTY(QString themeMode READ themeMode WRITE setThemeMode NOTIFY appearanceChanged)
     // The least width of a card in the video grid and in the album grid, in
-    // pixels; the grids fit as many columns as that allows (ui/thumbSize,
-    // ui/coverSize).
+    // pixels, in steps of cardSizeStep within each one's range; the grids
+    // fit as many columns as that allows (ui/thumbSize, ui/coverSize).
     Q_PROPERTY(int thumbSize READ thumbSize WRITE setThumbSize NOTIFY appearanceChanged)
     Q_PROPERTY(int coverSize READ coverSize WRITE setCoverSize NOTIFY appearanceChanged)
-    Q_PROPERTY(int minCardSize READ minCardSize CONSTANT)
-    Q_PROPERTY(int maxCardSize READ maxCardSize CONSTANT)
+    Q_PROPERTY(int thumbSizeMin READ thumbSizeMin CONSTANT)
+    Q_PROPERTY(int thumbSizeMax READ thumbSizeMax CONSTANT)
+    Q_PROPERTY(int coverSizeMin READ coverSizeMin CONSTANT)
+    Q_PROPERTY(int coverSizeMax READ coverSizeMax CONSTANT)
+    Q_PROPERTY(int cardSizeStep READ cardSizeStep CONSTANT)
     Q_PROPERTY(bool systemDark READ systemDark NOTIFY systemDarkChanged)
     // Which tag the sidebar lists: albumArtist | artist | genre | album | year
     Q_PROPERTY(QString sidebarFacet READ sidebarFacet WRITE setSidebarFacet NOTIFY appearanceChanged)
@@ -361,11 +364,19 @@ public:
     void setThumbSize(int px);
     int coverSize() const { return m_coverSize; }
     void setCoverSize(int px);
-    static constexpr int kMinCardSize = 180;
-    static constexpr int kMaxCardSize = 600;
-    static constexpr int kDefaultCardSize = 290;
-    int minCardSize() const { return kMinCardSize; }
-    int maxCardSize() const { return kMaxCardSize; }
+    static constexpr int kThumbSizeMin = 200;
+    static constexpr int kThumbSizeMax = 400;
+    static constexpr int kCoverSizeMin = 100;
+    static constexpr int kCoverSizeMax = 300;
+    static constexpr int kCardSizeStep = 50;
+    static constexpr int kDefaultCardSize = 300;
+    // Within the range, on a step.
+    static int snapCardSize(int px, int min, int max);
+    int thumbSizeMin() const { return kThumbSizeMin; }
+    int thumbSizeMax() const { return kThumbSizeMax; }
+    int coverSizeMin() const { return kCoverSizeMin; }
+    int coverSizeMax() const { return kCoverSizeMax; }
+    int cardSizeStep() const { return kCardSizeStep; }
     bool systemDark() const { return m_systemTheme.dark(); }
     QString sidebarFacet() const { return m_sidebarFacet; }
     void setSidebarFacet(const QString &key);

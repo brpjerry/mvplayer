@@ -690,9 +690,9 @@ the words is tried against what the judge once saw.
 - Settings → Appearance: dark, light, or **Auto**, which follows the operating
   system's preference and switches with it while the app is running.
 - Settings → Appearance also has two sliders, **Thumbnail size** and **Cover
-  art size**: the least width of a card in the video grid and in the album
-  grid (180 to 600 pixels, 290 by default). Each grid fits as many columns as
-  that allows.
+  art size**: the least width of a card in the video grid (200 to 400 pixels)
+  and in the album grid (100 to 300 pixels), in steps of 50, 300 by default.
+  Each grid fits as many columns as that allows.
 - Settings → Accent colour: a fixed colour (presets or the hue strip) or
   **Auto**, which takes the colour from the playing video. Auto looks at one
   downscaled frame a second, blends it with the previous samples and fades

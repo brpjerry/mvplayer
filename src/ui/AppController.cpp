@@ -184,8 +184,8 @@ AppController::AppController(const AppOptions &options, QObject *parent)
     if (m_mode != QLatin1String("music"))
         m_mode = QStringLiteral("video");
     m_themeMode = m_settings->value(QStringLiteral("ui/theme"), m_themeMode).toString();
-    m_thumbSize = qBound(kMinCardSize, m_settings->value(QStringLiteral("ui/thumbSize"), m_thumbSize).toInt(), kMaxCardSize);
-    m_coverSize = qBound(kMinCardSize, m_settings->value(QStringLiteral("ui/coverSize"), m_coverSize).toInt(), kMaxCardSize);
+    m_thumbSize = snapCardSize(m_settings->value(QStringLiteral("ui/thumbSize"), m_thumbSize).toInt(), kThumbSizeMin, kThumbSizeMax);
+    m_coverSize = snapCardSize(m_settings->value(QStringLiteral("ui/coverSize"), m_coverSize).toInt(), kCoverSizeMin, kCoverSizeMax);
     m_flickDeceleration = qBound(200.0, m_settings->value(QStringLiteral("ui/flickDeceleration"), m_flickDeceleration).toDouble(), 50000.0);
     connect(&m_systemTheme, &SystemTheme::darkChanged, this, &AppController::systemDarkChanged);
     m_touchpadGain = qBound(0.5, m_settings->value(QStringLiteral("ui/touchpadGain"), m_touchpadGain).toDouble(), 20.0);
@@ -1349,9 +1349,15 @@ void AppController::setThemeMode(const QString &mode)
     emit appearanceChanged();
 }
 
+int AppController::snapCardSize(int px, int min, int max)
+{
+    px = qBound(min, px, max);
+    return min + qRound(double(px - min) / kCardSizeStep) * kCardSizeStep;
+}
+
 void AppController::setThumbSize(int px)
 {
-    px = qBound(kMinCardSize, px, kMaxCardSize);
+    px = snapCardSize(px, kThumbSizeMin, kThumbSizeMax);
     if (px == m_thumbSize)
         return;
     m_thumbSize = px;
@@ -1361,7 +1367,7 @@ void AppController::setThumbSize(int px)
 
 void AppController::setCoverSize(int px)
 {
-    px = qBound(kMinCardSize, px, kMaxCardSize);
+    px = snapCardSize(px, kCoverSizeMin, kCoverSizeMax);
     if (px == m_coverSize)
         return;
     m_coverSize = px;
