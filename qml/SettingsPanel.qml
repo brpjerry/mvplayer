@@ -1014,27 +1014,26 @@ Popup {
 
                     Divider {}
 
-                    // How big the cards are: the grids fit as many columns
-                    // as the chosen width allows.
+                    // How big the cards are: how many go across.
                     SliderRow {
                         label: "Thumbnail size"
-                        hint: "How wide a video's card is at least. The video grid fits as many columns as that allows."
-                        from: App.thumbSizeMin
-                        to: App.thumbSizeMax
-                        step: App.cardSizeStep
-                        showValue: false
-                        value: App.thumbSize
-                        onMoved: (v) => App.thumbSize = v
+                        hint: "How many videos across in the video grid; fewer means bigger thumbnails."
+                        from: App.thumbColumnsMin
+                        to: App.thumbColumnsMax
+                        step: 1
+                        value: App.thumbColumns
+                        valueText: App.thumbColumns + " across"
+                        onMoved: (v) => App.thumbColumns = v
                     }
                     SliderRow {
                         label: "Cover art size"
-                        hint: "How wide an album's card is at least, in the music library."
-                        from: App.coverSizeMin
-                        to: App.coverSizeMax
-                        step: App.cardSizeStep
-                        showValue: false
-                        value: App.coverSize
-                        onMoved: (v) => App.coverSize = v
+                        hint: "How many albums across in the music library; fewer means bigger covers."
+                        from: App.coverColumnsMin
+                        to: App.coverColumnsMax
+                        step: 1
+                        value: App.coverColumns
+                        valueText: App.coverColumns + " across"
+                        onMoved: (v) => App.coverColumns = v
                     }
                     Item { width: 1; height: 8 }
                 }

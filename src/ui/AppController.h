@@ -161,16 +161,14 @@ class AppController : public QObject
     Q_PROPERTY(QString accent READ accent WRITE setAccent NOTIFY appearanceChanged)
     // "auto" (follow the operating system), "dark" or "light"
     Q_PROPERTY(QString themeMode READ themeMode WRITE setThemeMode NOTIFY appearanceChanged)
-    // The least width of a card in the video grid and in the album grid, in
-    // pixels, in steps of cardSizeStep within each one's range; the grids
-    // fit as many columns as that allows (ui/thumbSize, ui/coverSize).
-    Q_PROPERTY(int thumbSize READ thumbSize WRITE setThumbSize NOTIFY appearanceChanged)
-    Q_PROPERTY(int coverSize READ coverSize WRITE setCoverSize NOTIFY appearanceChanged)
-    Q_PROPERTY(int thumbSizeMin READ thumbSizeMin CONSTANT)
-    Q_PROPERTY(int thumbSizeMax READ thumbSizeMax CONSTANT)
-    Q_PROPERTY(int coverSizeMin READ coverSizeMin CONSTANT)
-    Q_PROPERTY(int coverSizeMax READ coverSizeMax CONSTANT)
-    Q_PROPERTY(int cardSizeStep READ cardSizeStep CONSTANT)
+    // How many cards across in the video grid and in the album grid
+    // (ui/thumbColumns, ui/coverColumns), within each one's range.
+    Q_PROPERTY(int thumbColumns READ thumbColumns WRITE setThumbColumns NOTIFY appearanceChanged)
+    Q_PROPERTY(int coverColumns READ coverColumns WRITE setCoverColumns NOTIFY appearanceChanged)
+    Q_PROPERTY(int thumbColumnsMin READ thumbColumnsMin CONSTANT)
+    Q_PROPERTY(int thumbColumnsMax READ thumbColumnsMax CONSTANT)
+    Q_PROPERTY(int coverColumnsMin READ coverColumnsMin CONSTANT)
+    Q_PROPERTY(int coverColumnsMax READ coverColumnsMax CONSTANT)
     Q_PROPERTY(bool systemDark READ systemDark NOTIFY systemDarkChanged)
     // Which tag the sidebar lists: albumArtist | artist | genre | album | year
     Q_PROPERTY(QString sidebarFacet READ sidebarFacet WRITE setSidebarFacet NOTIFY appearanceChanged)
@@ -360,23 +358,18 @@ public:
     void setAccent(const QString &accent);
     QString themeMode() const { return m_themeMode; }
     void setThemeMode(const QString &mode);
-    int thumbSize() const { return m_thumbSize; }
-    void setThumbSize(int px);
-    int coverSize() const { return m_coverSize; }
-    void setCoverSize(int px);
-    static constexpr int kThumbSizeMin = 200;
-    static constexpr int kThumbSizeMax = 400;
-    static constexpr int kCoverSizeMin = 100;
-    static constexpr int kCoverSizeMax = 300;
-    static constexpr int kCardSizeStep = 50;
-    static constexpr int kDefaultCardSize = 300;
-    // Within the range, on a step.
-    static int snapCardSize(int px, int min, int max);
-    int thumbSizeMin() const { return kThumbSizeMin; }
-    int thumbSizeMax() const { return kThumbSizeMax; }
-    int coverSizeMin() const { return kCoverSizeMin; }
-    int coverSizeMax() const { return kCoverSizeMax; }
-    int cardSizeStep() const { return kCardSizeStep; }
+    int thumbColumns() const { return m_thumbColumns; }
+    void setThumbColumns(int n);
+    int coverColumns() const { return m_coverColumns; }
+    void setCoverColumns(int n);
+    static constexpr int kThumbColumnsMin = 2;
+    static constexpr int kThumbColumnsMax = 6;
+    static constexpr int kCoverColumnsMin = 2;
+    static constexpr int kCoverColumnsMax = 8;
+    int thumbColumnsMin() const { return kThumbColumnsMin; }
+    int thumbColumnsMax() const { return kThumbColumnsMax; }
+    int coverColumnsMin() const { return kCoverColumnsMin; }
+    int coverColumnsMax() const { return kCoverColumnsMax; }
     bool systemDark() const { return m_systemTheme.dark(); }
     QString sidebarFacet() const { return m_sidebarFacet; }
     void setSidebarFacet(const QString &key);
@@ -507,8 +500,8 @@ private:
     QString m_sidebarFacet = QStringLiteral("albumArtist");
     SystemTheme m_systemTheme;
     QString m_themeMode = QStringLiteral("auto");
-    int m_thumbSize = kDefaultCardSize;
-    int m_coverSize = kDefaultCardSize;
+    int m_thumbColumns = 4;
+    int m_coverColumns = 3;
     double m_flickDeceleration = 4800; // px/s²: how quickly a flick glides to a stop
     double m_touchpadGain = 4.0;
     double m_wheelStep = 170;

@@ -58,8 +58,8 @@ Item {
         anchors.leftMargin: 18
         anchors.rightMargin: 18
 
-        // As many columns as the chosen card width allows (Settings → Appearance).
-        readonly property int columns: Math.max(1, Math.floor(width / App.thumbSize))
+        // As many across as chosen (Settings → Appearance).
+        readonly property int columns: Math.max(1, App.thumbColumns)
         cellWidth: Math.floor(width / columns)
         cellHeight: Math.round((cellWidth - 20) * 9 / 16) + 74
 

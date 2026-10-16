@@ -184,8 +184,11 @@ AppController::AppController(const AppOptions &options, QObject *parent)
     if (m_mode != QLatin1String("music"))
         m_mode = QStringLiteral("video");
     m_themeMode = m_settings->value(QStringLiteral("ui/theme"), m_themeMode).toString();
-    m_thumbSize = snapCardSize(m_settings->value(QStringLiteral("ui/thumbSize"), m_thumbSize).toInt(), kThumbSizeMin, kThumbSizeMax);
-    m_coverSize = snapCardSize(m_settings->value(QStringLiteral("ui/coverSize"), m_coverSize).toInt(), kCoverSizeMin, kCoverSizeMax);
+    m_thumbColumns = qBound(kThumbColumnsMin, m_settings->value(QStringLiteral("ui/thumbColumns"), m_thumbColumns).toInt(), kThumbColumnsMax);
+    m_coverColumns = qBound(kCoverColumnsMin, m_settings->value(QStringLiteral("ui/coverColumns"), m_coverColumns).toInt(), kCoverColumnsMax);
+    // The sliders were a card width in pixels for a day; those keys are gone.
+    m_settings->remove(QStringLiteral("ui/thumbSize"));
+    m_settings->remove(QStringLiteral("ui/coverSize"));
     m_flickDeceleration = qBound(200.0, m_settings->value(QStringLiteral("ui/flickDeceleration"), m_flickDeceleration).toDouble(), 50000.0);
     connect(&m_systemTheme, &SystemTheme::darkChanged, this, &AppController::systemDarkChanged);
     m_touchpadGain = qBound(0.5, m_settings->value(QStringLiteral("ui/touchpadGain"), m_touchpadGain).toDouble(), 20.0);
@@ -1349,29 +1352,23 @@ void AppController::setThemeMode(const QString &mode)
     emit appearanceChanged();
 }
 
-int AppController::snapCardSize(int px, int min, int max)
+void AppController::setThumbColumns(int n)
 {
-    px = qBound(min, px, max);
-    return min + qRound(double(px - min) / kCardSizeStep) * kCardSizeStep;
-}
-
-void AppController::setThumbSize(int px)
-{
-    px = snapCardSize(px, kThumbSizeMin, kThumbSizeMax);
-    if (px == m_thumbSize)
+    n = qBound(kThumbColumnsMin, n, kThumbColumnsMax);
+    if (n == m_thumbColumns)
         return;
-    m_thumbSize = px;
-    m_settings->setValue(QStringLiteral("ui/thumbSize"), m_thumbSize);
+    m_thumbColumns = n;
+    m_settings->setValue(QStringLiteral("ui/thumbColumns"), m_thumbColumns);
     emit appearanceChanged();
 }
 
-void AppController::setCoverSize(int px)
+void AppController::setCoverColumns(int n)
 {
-    px = snapCardSize(px, kCoverSizeMin, kCoverSizeMax);
-    if (px == m_coverSize)
+    n = qBound(kCoverColumnsMin, n, kCoverColumnsMax);
+    if (n == m_coverColumns)
         return;
-    m_coverSize = px;
-    m_settings->setValue(QStringLiteral("ui/coverSize"), m_coverSize);
+    m_coverColumns = n;
+    m_settings->setValue(QStringLiteral("ui/coverColumns"), m_coverColumns);
     emit appearanceChanged();
 }
 
