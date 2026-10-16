@@ -1002,6 +1002,12 @@ Popup {
                         checked: App.autoExpand
                         onToggled: (c) => App.autoExpand = c
                     }
+                    SwitchRow {
+                        label: "Play the music video when a track has one"
+                        hint: "In the music library: a track that has its video plays the video, grown over the albums, and the next track without one goes back to the music."
+                        checked: App.videoFollows
+                        onToggled: (c) => App.videoFollows = c
+                    }
 
                     Divider {}
 

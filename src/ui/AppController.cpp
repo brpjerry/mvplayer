@@ -169,6 +169,7 @@ AppController::AppController(const AppOptions &options, QObject *parent)
     m_subtitleOutline = qBound(0.0, m_settings->value(QStringLiteral("player/subtitleOutline"), 2.2).toDouble(), 6.0);
     m_subtitleShadow = qBound(0.0, m_settings->value(QStringLiteral("player/subtitleShadow"), 0.0).toDouble(), 6.0);
     m_autoExpand = m_settings->value(QStringLiteral("player/autoExpand"), true).toBool();
+    m_videoFollows = m_settings->value(QStringLiteral("player/videoFollows"), false).toBool();
     m_cfg.ytdlpArgs = m_settings->value(QStringLiteral("import/ytdlpArgs")).toStringList();
     if (YtDlp::looksLikeCookies(cookiesPath()))
         m_cfg.cookiesFile = cookiesPath();
@@ -649,6 +650,7 @@ void AppController::saveSettings()
     m_settings->setValue(QStringLiteral("player/subtitleOutline"), m_subtitleOutline);
     m_settings->setValue(QStringLiteral("player/subtitleShadow"), m_subtitleShadow);
     m_settings->setValue(QStringLiteral("player/autoExpand"), m_autoExpand);
+    m_settings->setValue(QStringLiteral("player/videoFollows"), m_videoFollows);
 }
 
 void AppController::fitDirsToBase()
@@ -1212,6 +1214,15 @@ void AppController::setSubtitleShadow(double v)
     if (v == m_subtitleShadow)
         return;
     m_subtitleShadow = v;
+    saveSettings();
+    emit settingsChanged();
+}
+
+void AppController::setVideoFollows(bool v)
+{
+    if (v == m_videoFollows)
+        return;
+    m_videoFollows = v;
     saveSettings();
     emit settingsChanged();
 }

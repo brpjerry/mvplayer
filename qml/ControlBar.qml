@@ -14,7 +14,8 @@ Rectangle {
     property bool fullscreen: false
     property bool canStep: false
     property bool musicMode: false    // the music library is on show: no fullscreen, no subtitles
-    readonly property bool trackPlaying: current !== null && current.kind === "track"
+    property bool videoUp: false      // ...unless a track's music video plays in its place
+    readonly property bool trackPlaying: current !== null && current.kind === "track" && !videoUp
     // Held while its popup is open, so that it stays in fullscreen.
     readonly property bool hovered: hover.hovered || seek.dragging || sources.visible
 
@@ -566,7 +567,7 @@ Rectangle {
 
         IconButton {
             anchors.verticalCenter: parent.verticalCenter
-            visible: root.hasMedia && root.mpv.hasSubtitles && !root.musicMode
+            visible: root.hasMedia && root.mpv.hasSubtitles && (!root.musicMode || root.videoUp)
             icon: Icons.subtitles
             iconSize: 20
             checked: App.subtitlesOn
@@ -586,7 +587,7 @@ Rectangle {
 
         IconButton {
             anchors.verticalCenter: parent.verticalCenter
-            visible: !root.musicMode
+            visible: !root.musicMode || root.videoUp
             icon: root.fullscreen ? Icons.fullscreenExit : Icons.fullscreen
             iconSize: 22
             enabled: root.hasMedia && !root.trackPlaying

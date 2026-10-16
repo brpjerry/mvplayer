@@ -673,7 +673,10 @@ the words is tried against what the judge once saw.
   albums as they do the videos; the mode is remembered. A right click on
   an album offers **Find videos for this album**, which looks its tracks up
   wherever their files are (Settings → Library lists such albums, each with
-  a button to take it off again), and **Re-import album videos**.
+  a button to take it off again), and **Re-import album videos**. With
+  Settings → Playback → **Play the music video when a track has one** on, a
+  track that has its video plays the video, grown over the albums, and the
+  next track without one goes back to the music.
 - The sort button in the top bar orders the grid by title, by artist,
   chronologically by the track's year ("Chronological - Audio") or by the day
   the upload was published ("Chronological - Video", the year where the day

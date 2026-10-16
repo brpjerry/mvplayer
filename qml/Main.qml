@@ -28,7 +28,7 @@ ApplicationWindow {
         if (on === fullscreen)
             return
         if (on) {
-            if (!player.current || player.current.kind === "track")
+            if (!player.current || (player.current.kind === "track" && !player.videoUp))
                 return
             visibilityBeforeFullscreen = visibility
             if (view !== "player")
@@ -39,7 +39,7 @@ ApplicationWindow {
         }
     }
     function showPlayer() {
-        if (!player.current || player.current.kind === "track")
+        if (!player.current || (player.current.kind === "track" && !player.videoUp))
             return
         releaseTextFocus()
         view = "player"
@@ -124,13 +124,30 @@ ApplicationWindow {
         property bool shuffle: false
         property int repeatMode: 0  // 0 off, 1 all, 2 one
         property var history: []    // indices played, for "previous" while shuffling
+        // A track of the music library whose music video is playing in its
+        // place (App.videoFollows): the player layer is up over the albums.
+        property bool videoUp: false
 
         function load(i) {
             index = i
             current = queue[i]
-            // A track of the music library plays from its file, with no
-            // picture: the player layer stays closed and the grid stays.
             if (current.kind === "track") {
+                if (App.videoFollows && current.videoId > 0 && current.videoPath) {
+                    // Its video, grown over the albums, with the track's
+                    // audio where the file has it.
+                    videoUp = true
+                    mpv.firstAudioTrack = App.firstAudioTrack(current.videoId)
+                    playerView.beginLoad(current.videoPath)
+                    if (window.view !== "player") {
+                        window.releaseTextFocus()
+                        window.view = "player"
+                        playerView.openFrom(0)
+                    }
+                    return
+                }
+                // From its file, with no picture: the player layer stays
+                // closed and the grid stays.
+                videoUp = false
                 if (window.fullscreen)
                     window.setFullscreen(false)
                 window.view = "grid"
@@ -138,6 +155,7 @@ ApplicationWindow {
                 window.mpv.load(current.path)
                 return
             }
+            videoUp = false
             // (Under review it starts on the audio of its candidate on show.)
             mpv.firstAudioTrack = App.firstAudioTrack(current.videoId)
             playerView.beginLoad(current.path)
@@ -220,6 +238,7 @@ ApplicationWindow {
         }
 
         function stop() {
+            videoUp = false
             window.mpv.stop()
             if (window.fullscreen)
                 window.setFullscreen(false)
@@ -460,6 +479,7 @@ ApplicationWindow {
             overlay: window.fullscreen
             fullscreen: window.fullscreen
             musicMode: App.mode === "music"
+            videoUp: player.videoUp
             shuffle: player.shuffle
             repeatMode: player.repeatMode
             canStep: player.queue.length > 1
@@ -470,7 +490,7 @@ ApplicationWindow {
             onRepeatCycled: player.repeatMode = (player.repeatMode + 1) % 3
             onFullscreenToggled: window.setFullscreen(!window.fullscreen)
             onNowPlayingClicked: {
-                if (player.current && player.current.kind === "track") {
+                if (player.current && player.current.kind === "track" && !player.videoUp) {
                     // The album of the playing track, in the music library.
                     App.mode = "music"
                     albumGrid.reveal(player.current.albumKey)
@@ -595,6 +615,7 @@ ApplicationWindow {
         case "sort-direction": App.videos.sortDescending = arg === "desc"; return "ok" // sort-direction asc|desc
         case "order": return JSON.stringify(App.videos.snapshot().slice(0, parseInt(arg) || 20).map(v => v.title)) // order [n]: the grid's first titles
         case "mode": if (arg) App.mode = arg; return App.mode // mode [video|music]
+        case "video-follows": App.videoFollows = arg !== "off"; return "ok" // video-follows on|off
         case "albums": return JSON.stringify(App.albums.snapshot().slice(0, parseInt(arg) || 20).map(a => a.albumArtist + " — " + a.album)) // albums [n]: the album grid's first albums
         case "album-tracks": return JSON.stringify(App.albumTracks(parseInt(arg)).map(t => t.title)) // album-tracks <row>
         case "play-album": { // play-album <row> [track]
@@ -752,6 +773,7 @@ ApplicationWindow {
                 queueLength: player.queue.length, queueKind: player.current ? (player.current.kind || "video") : null,
                 musicPanel: nowPlaying.active, musicPanelWidth: nowPlaying.width,
                 lookupAlbums: App.lookupAlbums.length, albumMenu: albumGrid.menuOpen,
+                videoFollows: App.videoFollows, videoUp: player.videoUp,
                 playing: player.current ? player.current.title : null, index: player.index,
                 position: mpv.position, duration: mpv.duration, paused: mpv.paused, active: mpv.active, muted: mpv.muted,
                 hwdec: mpv.hwdec, videoSize: mpv.videoSize.width + "x" + mpv.videoSize.height,
