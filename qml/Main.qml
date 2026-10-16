@@ -451,7 +451,7 @@ ApplicationWindow {
             anchors.right: parent.right
             anchors.top: parent.top
             anchors.bottom: controlBar.top
-            active: App.mode === "music" && !window.fullscreen
+            active: App.mode === "music" && !window.fullscreen && App.musicPanel
             queue: player.queue
             index: player.index
             current: player.current
@@ -637,6 +637,7 @@ ApplicationWindow {
         case "order": return JSON.stringify(App.videos.snapshot().slice(0, parseInt(arg) || 20).map(v => v.title)) // order [n]: the grid's first titles
         case "mode": if (arg) App.mode = arg; return App.mode // mode [video|music]
         case "video-follows": App.videoFollows = arg !== "off"; return "ok" // video-follows on|off
+        case "music-panel": if (arg) App.musicPanel = arg !== "off"; return App.musicPanel ? "on" : "off" // music-panel [on|off]: the panel right of the albums
         case "thumb-columns": if (arg) App.thumbColumns = parseInt(arg); return "" + App.thumbColumns // thumb-columns [n]: videos across
         case "cover-columns": if (arg) App.coverColumns = parseInt(arg); return "" + App.coverColumns // cover-columns [n]: albums across
         case "albums": return JSON.stringify(App.albums.snapshot().slice(0, parseInt(arg) || 20).map(a => a.albumArtist + " — " + a.album)) // albums [n]: the album grid's first albums
@@ -794,7 +795,7 @@ ApplicationWindow {
                 mode: App.mode, albumCount: App.albumCount, albumsShown: App.albums.count, libraryTracks: App.libraryTrackCount,
                 albumSort: App.albums.sortMode, albumDescending: App.albums.sortDescending, albumFacet: App.albums.facetType,
                 queueLength: player.queue.length, queueKind: player.current ? (player.current.kind || "video") : null,
-                musicPanel: nowPlaying.active, musicPanelWidth: nowPlaying.width,
+                musicPanel: nowPlaying.active, musicPanelWidth: nowPlaying.width, musicPanelOn: App.musicPanel,
                 lookupAlbums: App.lookupAlbums.length, albumMenu: albumGrid.menuOpen,
                 videoFollows: App.videoFollows, videoUp: player.videoUp,
                 thumbColumns: App.thumbColumns, coverColumns: App.coverColumns, gridColumns: grid.view.columns, albumColumns: albumGrid.view.columns,

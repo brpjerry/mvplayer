@@ -666,8 +666,10 @@ the words is tried against what the judge once saw.
   the base directory as a grid of covers (the picture beside the album's
   first file, else the one in its tags). Clicking an album plays it from its
   first track, the rest of the album queued after it, from the music files
-  themselves; the bottom bar's controls work as for a video, and the
-  fullscreen and subtitle buttons go away. A chip on a cover of an album in
+  themselves; the bottom bar's controls work as for a video, and in place of
+  the fullscreen button a switch hides the panel right of the albums (the
+  queue, the playing track and its cover) until it is pressed again. A chip
+  on a cover of an album in
   a video folder counts its tracks that have a video. The sidebar, the sort
   menu (by album, by artist, chronologically) and the search box narrow the
   albums as they do the videos; the mode is remembered. A right click on

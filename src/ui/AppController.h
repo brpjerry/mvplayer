@@ -165,6 +165,9 @@ class AppController : public QObject
     // (ui/thumbColumns, ui/coverColumns), within each one's range.
     Q_PROPERTY(int thumbColumns READ thumbColumns WRITE setThumbColumns NOTIFY appearanceChanged)
     Q_PROPERTY(int coverColumns READ coverColumns WRITE setCoverColumns NOTIFY appearanceChanged)
+    // The panel right of the album grid (queue, track, cover) is on show;
+    // off until it is asked for again (ui/musicPanel).
+    Q_PROPERTY(bool musicPanel READ musicPanel WRITE setMusicPanel NOTIFY appearanceChanged)
     Q_PROPERTY(int thumbColumnsMin READ thumbColumnsMin CONSTANT)
     Q_PROPERTY(int thumbColumnsMax READ thumbColumnsMax CONSTANT)
     Q_PROPERTY(int coverColumnsMin READ coverColumnsMin CONSTANT)
@@ -362,6 +365,8 @@ public:
     void setThumbColumns(int n);
     int coverColumns() const { return m_coverColumns; }
     void setCoverColumns(int n);
+    bool musicPanel() const { return m_musicPanel; }
+    void setMusicPanel(bool on);
     static constexpr int kThumbColumnsMin = 2;
     static constexpr int kThumbColumnsMax = 6;
     static constexpr int kCoverColumnsMin = 2;
@@ -502,6 +507,7 @@ private:
     QString m_themeMode = QStringLiteral("auto");
     int m_thumbColumns = 4;
     int m_coverColumns = 3;
+    bool m_musicPanel = true;
     double m_flickDeceleration = 4800; // px/s²: how quickly a flick glides to a stop
     double m_touchpadGain = 4.0;
     double m_wheelStep = 170;

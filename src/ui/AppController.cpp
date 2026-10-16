@@ -186,6 +186,7 @@ AppController::AppController(const AppOptions &options, QObject *parent)
     m_themeMode = m_settings->value(QStringLiteral("ui/theme"), m_themeMode).toString();
     m_thumbColumns = qBound(kThumbColumnsMin, m_settings->value(QStringLiteral("ui/thumbColumns"), m_thumbColumns).toInt(), kThumbColumnsMax);
     m_coverColumns = qBound(kCoverColumnsMin, m_settings->value(QStringLiteral("ui/coverColumns"), m_coverColumns).toInt(), kCoverColumnsMax);
+    m_musicPanel = m_settings->value(QStringLiteral("ui/musicPanel"), m_musicPanel).toBool();
     // The sliders were a card width in pixels for a day; those keys are gone.
     m_settings->remove(QStringLiteral("ui/thumbSize"));
     m_settings->remove(QStringLiteral("ui/coverSize"));
@@ -1359,6 +1360,15 @@ void AppController::setThumbColumns(int n)
         return;
     m_thumbColumns = n;
     m_settings->setValue(QStringLiteral("ui/thumbColumns"), m_thumbColumns);
+    emit appearanceChanged();
+}
+
+void AppController::setMusicPanel(bool on)
+{
+    if (on == m_musicPanel)
+        return;
+    m_musicPanel = on;
+    m_settings->setValue(QStringLiteral("ui/musicPanel"), m_musicPanel);
     emit appearanceChanged();
 }
 

@@ -13,7 +13,7 @@ Rectangle {
     property int repeatMode: 0        // 0 off, 1 all, 2 one
     property bool fullscreen: false
     property bool canStep: false
-    property bool musicMode: false    // the music library is on show: no fullscreen, no subtitles
+    property bool musicMode: false    // the music library is on show: the panel switch in place of fullscreen
     property bool videoUp: false      // ...unless a track's music video plays in its place
     readonly property bool trackPlaying: current !== null && current.kind === "track" && !videoUp
     // Held while its popup is open, so that it stays in fullscreen.
@@ -567,7 +567,9 @@ Rectangle {
 
         IconButton {
             anchors.verticalCenter: parent.verticalCenter
-            visible: root.hasMedia && root.mpv.hasSubtitles && (!root.musicMode || root.videoUp)
+            // What plays decides, not the mode, so a mode switch moves
+            // nothing in this row.
+            visible: root.hasMedia && root.mpv.hasSubtitles
             icon: Icons.subtitles
             iconSize: 20
             checked: App.subtitlesOn
@@ -593,6 +595,17 @@ Rectangle {
             enabled: root.hasMedia && !root.trackPlaying
             tooltip: root.fullscreen ? "Exit fullscreen (F)" : "Fullscreen (F)"
             onClicked: root.fullscreenToggled()
+        }
+        // In its place over the music library: the panel of the queue and
+        // the playing track, hidden until asked for again. Same size, so
+        // the volume bar stays where it is across a mode switch.
+        IconButton {
+            anchors.verticalCenter: parent.verticalCenter
+            visible: root.musicMode && !root.videoUp
+            icon: App.musicPanel ? Icons.panelShown : Icons.panelHidden
+            iconSize: 22
+            tooltip: App.musicPanel ? "Hide the queue and track" : "Show the queue and track"
+            onClicked: App.musicPanel = !App.musicPanel
         }
     }
 }
