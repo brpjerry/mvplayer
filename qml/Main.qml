@@ -613,8 +613,26 @@ ApplicationWindow {
         case "fps": FrameStats.visible = arg !== "off"; return "ok"
         case "accent": App.accent = arg; return "ok"
         case "theme": App.themeMode = arg; return "ok"
-        case "add-music": App.addMusicDir(arg); return "ok"
-        case "remove-music": App.removeMusicDir(arg); return "ok"
+        case "add-music": App.addMusicDir(arg); return "ok" // ticks a folder (widening the base if it lies outside)
+        case "remove-music": App.removeMusicDir(arg); return "ok" // unticks one
+        case "base-dir": App.baseDir = arg; return "ok" // the base directory the folder tree shows
+        case "check-folder": App.setFolderChecked(arg, true); return "ok"
+        case "uncheck-folder": App.setFolderChecked(arg, false); return "ok"
+        case "folder-expand": { // folder-expand <path>: opens or closes a folder of the tree
+            const row = App.folderTree.rowOf(arg)
+            if (row < 0) return "not shown"
+            App.folderTree.toggleExpanded(row); return "ok"
+        }
+        case "folder-tree": { // the rows on show: [{path, depth, expanded, hasChildren, checkState}]
+            const rows = []
+            const m = App.folderTree
+            for (let i = 0; i < m.count; ++i) {
+                const ix = m.index(i, 0)
+                rows.push({ path: m.data(ix, Qt.UserRole + 1), depth: m.data(ix, Qt.UserRole + 3), expanded: m.data(ix, Qt.UserRole + 4),
+                            hasChildren: m.data(ix, Qt.UserRole + 5), checkState: m.data(ix, Qt.UserRole + 6) })
+            }
+            return JSON.stringify(rows)
+        }
         case "sidebar": App.sidebarFacet = arg; return "ok"
         case "wheel": { // wheel <pixelDy> <angleDy> <phase>: feed the grid's scroll handler
             const w = arg.split(" ")
@@ -660,7 +678,7 @@ ApplicationWindow {
                 judgeKey: App.judgeKeySet, judgeKeyHint: App.judgeKeyHint, judgeChecking: App.judgeChecking, judgeState: App.judgeState, judgeStatus: App.judgeStatus, adviceLeft: App.adviceLeft, judgeThreads: App.judgeThreads, keepEverything: App.keepEverything,
                 replacing: App.replacing, replaceStage: App.replaceStage, replaceDialog: replaceDialog.opened, replaceOptions: replaceDialog.options.length, replaceMode: replaceDialog.mode,
                 accent: "" + Theme.accent, accentMode: App.accent, theme: App.themeMode, dark: Theme.dark,
-                systemDark: App.systemDark, bg: "" + Theme.bg, musicDirs: App.musicDirs, frameColor: "" + mpv.frameColor,
+                systemDark: App.systemDark, bg: "" + Theme.bg, baseDir: App.baseDir, musicDirs: App.musicDirs, frameColor: "" + mpv.frameColor,
                 frameColorValid: mpv.frameColorValid, sidebar: App.sidebarFacet,
                 anchor: playerView.anchorAvailable ? [Math.round(playerView.anchorRect.x), Math.round(playerView.anchorRect.y), Math.round(playerView.anchorRect.width)] : null,
                 contentY: grid.view.contentY, flicking: grid.view.flicking,

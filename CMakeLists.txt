@@ -59,6 +59,9 @@ if(BUILD_TESTING)
     qt_add_executable(mvplayer-chatgpt-test tests/ChatGptTest.cpp)
     target_link_libraries(mvplayer-chatgpt-test PRIVATE mvcore Qt6::Test)
     add_test(NAME chatgpt COMMAND mvplayer-chatgpt-test)
+    qt_add_executable(mvplayer-foldertree-test tests/FolderTreeTest.cpp src/ui/FolderTreeModel.h src/ui/FolderTreeModel.cpp)
+    target_link_libraries(mvplayer-foldertree-test PRIVATE mvcore Qt6::Test)
+    add_test(NAME foldertree COMMAND mvplayer-foldertree-test)
 endif()
 
 option(MV_BUILD_GUI "Build the graphical player" ON)
@@ -90,6 +93,7 @@ qt_add_executable(mvplayer
     src/ui/AccentColor.h src/ui/AccentColor.cpp
     src/ui/SystemTheme.h src/ui/SystemTheme.cpp
     src/ui/VideoModel.h src/ui/VideoModel.cpp
+    src/ui/FolderTreeModel.h src/ui/FolderTreeModel.cpp
     src/ui/AppController.h src/ui/AppController.cpp
     src/ui/FrameStats.h src/ui/FrameStats.cpp
     src/ui/IdleInhibitor.h src/ui/IdleInhibitor.cpp
@@ -128,6 +132,8 @@ set(MV_QML_FILES
     qml/Spinner.qml
     qml/FlatButton.qml
     qml/FlatSwitch.qml
+    qml/FlatCheck.qml
+    qml/FolderTree.qml
     qml/Tooltip.qml
     qml/KineticWheel.qml
     qml/WindowControls.qml
