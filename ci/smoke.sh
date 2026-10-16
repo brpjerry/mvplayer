@@ -29,7 +29,7 @@ TEST_LOG="$WORK/unit-tests.txt"
 TEST_LOG_ARG="$TEST_LOG"
 if [[ -n "$EXE" ]]; then TEST_LOG_ARG=$(cygpath -m "$TEST_LOG"); fi
 TEST_RESULT=0
-for t in chatgpt foldertree albummodel covers; do
+for t in chatgpt foldertree database albummodel covers; do
     "$BUILD/mvplayer-$t-test$EXE" -o "$TEST_LOG_ARG,txt" || TEST_RESULT=$?
     cat "$TEST_LOG"
     if [[ "$TEST_RESULT" -ne 0 ]]; then exit "$TEST_RESULT"; fi

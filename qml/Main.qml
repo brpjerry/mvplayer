@@ -604,6 +604,11 @@ ApplicationWindow {
         }
         case "queue": return JSON.stringify({ index: player.index, kind: player.current ? (player.current.kind || "video") : null, titles: player.queue.map(q => q.title) })
         case "reveal-album": return "" + albumGrid.reveal(App.albums.get(parseInt(arg)).key) // reveal-album <row>
+        case "album-menu": albumGrid.openMenu(parseInt(arg), null); return "ok" // album-menu <row>: the card's right-click menu
+        case "lookup-album": { const a = App.albums.get(parseInt(arg)); return "" + App.lookupAlbum(a.albumArtist, a.album) } // lookup-album <row>: how many tracks it brings in
+        case "unlookup-album": { const a = App.albums.get(parseInt(arg)); App.removeLookupAlbum(a.albumArtist, a.album); return "ok" }
+        case "reimport-album": { const a = App.albums.get(parseInt(arg)); return "" + App.reimportAlbum(a.albumArtist, a.album) } // reimport-album <row>: lookups queued
+        case "lookup-albums": return JSON.stringify(App.lookupAlbums.map(a => a.albumArtist + " — " + a.album))
         case "album-sort": App.albums.sortMode = arg; return "ok"
         case "album-facet": {
             const s = arg.indexOf(" ")
@@ -746,6 +751,7 @@ ApplicationWindow {
                 albumSort: App.albums.sortMode, albumDescending: App.albums.sortDescending, albumFacet: App.albums.facetType,
                 queueLength: player.queue.length, queueKind: player.current ? (player.current.kind || "video") : null,
                 musicPanel: nowPlaying.active, musicPanelWidth: nowPlaying.width,
+                lookupAlbums: App.lookupAlbums.length, albumMenu: albumGrid.menuOpen,
                 playing: player.current ? player.current.title : null, index: player.index,
                 position: mpv.position, duration: mpv.duration, paused: mpv.paused, active: mpv.active, muted: mpv.muted,
                 hwdec: mpv.hwdec, videoSize: mpv.videoSize.width + "x" + mpv.videoSize.height,

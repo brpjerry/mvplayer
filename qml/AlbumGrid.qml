@@ -1,4 +1,5 @@
 import QtQuick
+import QtQuick.Controls.Basic
 import MvPlayer.Core
 
 // The music library as album covers, in the video grid's manner: the same
@@ -11,10 +12,24 @@ Item {
     property bool currentPlaying: false
 
     signal activated(int row)
-    signal menuRequested(int row, Item item)
 
     readonly property alias view: grid
     readonly property alias wheel: wheel
+    readonly property bool menuOpen: menu.opened
+
+    // A right click on a card: play the album, ask for its videos (A12), or
+    // look its tracks up again by today's rules (H).
+    function openMenu(row, item) {
+        const a = App.albums.get(row)
+        if (!a || !a.key)
+            return
+        const p = item ? item.mapToItem(root, item.width / 2 - 20, item.height / 2 - 40) : Qt.point(root.width / 2 - 130, 60)
+        menu.row = row
+        menu.album = a
+        menu.x = Math.max(8, Math.min(p.x, root.width - menu.width - 8))
+        menu.y = Math.max(8, Math.min(p.y, root.height - menu.height - 8))
+        menu.open()
+    }
 
     // Brings an album's card into view; returns its row, or -1.
     function reveal(key) {
@@ -50,7 +65,7 @@ Item {
             current: key === root.currentKey
             playing: current && root.currentPlaying
             onActivated: root.activated(index)
-            onMenuRequested: root.menuRequested(index, card)
+            onMenuRequested: root.openMenu(index, card)
         }
 
         add: Transition {
@@ -88,6 +103,108 @@ Item {
             touchpadGain: App.touchpadGain
             wheelStep: App.wheelStep
             deceleration: App.flickDeceleration
+        }
+    }
+
+    Popup {
+        id: menu
+        property int row: -1
+        property var album: ({})
+        readonly property int tracks: album.trackCount || 0
+        readonly property int lookedUp: album.lookupCount || 0
+        readonly property int videos: album.videoCount || 0
+        width: 268
+        padding: 6
+        closePolicy: Popup.CloseOnEscape | Popup.CloseOnPressOutsideParent
+        transformOrigin: Popup.TopLeft
+        enter: Transition {
+            ParallelAnimation {
+                NumberAnimation { property: "opacity"; from: 0; to: 1; duration: Theme.normal }
+                NumberAnimation { property: "scale"; from: 0.95; to: 1; duration: Theme.slow; easing.type: Easing.BezierSpline; easing.bezierCurve: Theme.emphasized }
+            }
+        }
+        exit: Transition { NumberAnimation { property: "opacity"; to: 0; duration: Theme.fast } }
+        background: Rectangle {
+            radius: Theme.radius
+            color: Theme.raised
+            border.width: 1
+            border.color: Theme.line
+        }
+        function pick(key) {
+            if (key === "play")
+                root.activated(row)
+            else if (key === "lookup")
+                App.lookupAlbum(album.albumArtist, album.album)
+            else if (key === "reimport")
+                App.reimportAlbum(album.albumArtist, album.album)
+            close()
+        }
+        contentItem: Column {
+            Repeater {
+                model: [
+                    { key: "play", icon: Icons.play, text: "Play", show: true, why: "" },
+                    { key: "lookup", icon: Icons.movie, text: "Find videos for this album", show: menu.lookedUp < menu.tracks,
+                      why: "Its tracks are looked up wherever their files are, from now on. Settings → Library lists such albums." },
+                    { key: "reimport", icon: Icons.refresh,
+                      text: menu.videos > 0 ? "Re-import " + menu.videos + (menu.videos === 1 ? " video" : " videos") : "Look its tracks up again",
+                      show: menu.lookedUp > 0,
+                      why: "By today's rules: a video that still fits is kept, one that no longer does goes to review or is replaced." }
+                ]
+                Column {
+                    id: entry
+                    required property var modelData
+                    visible: modelData.show
+                    width: menu.availableWidth
+                    Item {
+                        width: parent.width
+                        height: 34
+                        enabled: entry.modelData.key === "play" || App.configured
+                        opacity: enabled ? 1 : 0.4
+                        Rectangle {
+                            anchors.fill: parent
+                            radius: Theme.radiusSmall
+                            color: Theme.hover
+                            opacity: entryMouse.containsMouse ? 1 : 0
+                            Behavior on opacity { NumberAnimation { duration: Theme.fast } }
+                        }
+                        Icon {
+                            x: 10
+                            anchors.verticalCenter: parent.verticalCenter
+                            path: entry.modelData.icon
+                            size: 16
+                            color: Theme.textDim
+                        }
+                        Text {
+                            x: 34
+                            width: parent.width - 44
+                            anchors.verticalCenter: parent.verticalCenter
+                            text: entry.modelData.text
+                            color: Theme.text
+                            font.pixelSize: 13
+                            elide: Text.ElideRight
+                        }
+                        MouseArea {
+                            id: entryMouse
+                            anchors.fill: parent
+                            hoverEnabled: true
+                            cursorShape: Qt.PointingHandCursor
+                            onClicked: menu.pick(entry.modelData.key)
+                        }
+                    }
+                    Text {
+                        visible: entry.modelData.why.length > 0
+                        width: parent.width
+                        leftPadding: 10
+                        rightPadding: 10
+                        topPadding: 2
+                        bottomPadding: 8
+                        text: entry.modelData.why
+                        color: Theme.textFaint
+                        font.pixelSize: 11
+                        wrapMode: Text.WordWrap
+                    }
+                }
+            }
         }
     }
 

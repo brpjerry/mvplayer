@@ -670,7 +670,10 @@ the words is tried against what the judge once saw.
   fullscreen and subtitle buttons go away. A chip on a cover of an album in
   a video folder counts its tracks that have a video. The sidebar, the sort
   menu (by album, by artist, chronologically) and the search box narrow the
-  albums as they do the videos; the mode is remembered.
+  albums as they do the videos; the mode is remembered. A right click on
+  an album offers **Find videos for this album**, which looks its tracks up
+  wherever their files are (Settings → Library lists such albums, each with
+  a button to take it off again), and **Re-import album videos**.
 - The sort button in the top bar orders the grid by title, by artist,
   chronologically by the track's year ("Chronological - Audio") or by the day
   the upload was published ("Chronological - Video", the year where the day
