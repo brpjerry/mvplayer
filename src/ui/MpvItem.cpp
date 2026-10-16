@@ -244,6 +244,9 @@ MpvItem::MpvItem(QQuickItem *parent)
     setOption(mpv, "keep-open", "yes");
     setOption(mpv, "idle", "yes");
     setOption(mpv, "audio-display", "no");
+    // One queued file after another with no silence between, where the
+    // audio format allows (an album's tracks).
+    setOption(mpv, "gapless-audio", "weak");
     setOption(mpv, "audio-client-name", "MV Player");
     setOption(mpv, "video-timing-offset", "0");
     // YouTube's encodes band badly in dark gradients. A little stronger than
@@ -362,6 +365,25 @@ void MpvItem::load(const QString &path)
         m_active = true;
         emit activeChanged();
     }
+}
+
+void MpvItem::queueNext(const QString &path)
+{
+    if (!m_core->mpv || !m_active)
+        return;
+    clearNext();
+    const QByteArray p = path.toUtf8();
+    const char *cmd[] = {"loadfile", p.constData(), "append", nullptr};
+    mpv_command_async(m_core->mpv, 0, cmd);
+}
+
+void MpvItem::clearNext()
+{
+    if (!m_core->mpv)
+        return;
+    // Everything but the file that plays.
+    const char *cmd[] = {"playlist-clear", nullptr};
+    mpv_command_async(m_core->mpv, 0, cmd);
 }
 
 void MpvItem::stop()
@@ -666,6 +688,17 @@ void MpvItem::drainEvents()
                 mpv_set_property(m_core->mpv, "aid", MPV_FORMAT_INT64, &first);
             }
             mpv_hook_continue(m_core->mpv, hook->id);
+            break;
+        }
+        case MPV_EVENT_START_FILE: {
+            // Going on to a queued file: the colour starts afresh too.
+            m_restartColor = true;
+            char *path = nullptr;
+            if (mpv_get_property(m_core->mpv, "path", MPV_FORMAT_STRING, &path) >= 0 && path) {
+                const QString started = QString::fromUtf8(path);
+                mpv_free(path);
+                emit fileStarted(started);
+            }
             break;
         }
         case MPV_EVENT_FILE_LOADED:

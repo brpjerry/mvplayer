@@ -1,6 +1,9 @@
 #include "ui/AppController.h"
+
+#include "ui/AccentColor.h"
 #include "core/Judge.h"
 #include <QDirIterator>
+#include <QImage>
 #include <QDesktopServices>
 #include <functional>
 
@@ -1342,6 +1345,20 @@ void AppController::setAccent(const QString &accent)
     m_accent = accent;
     m_settings->setValue(QStringLiteral("ui/accent"), m_accent);
     emit appearanceChanged();
+}
+
+QString AppController::coverAccent(const QUrl &cover) const
+{
+    const QString file = cover.isLocalFile() ? cover.toLocalFile() : cover.toString();
+    if (file.isEmpty())
+        return {};
+    QImage img(file);
+    if (img.isNull())
+        return {};
+    // The same tiny picture the video's sampler works from.
+    img = img.scaled(16, 16, Qt::IgnoreAspectRatio, Qt::SmoothTransformation).convertToFormat(QImage::Format_RGBA8888);
+    const QByteArray rgba(reinterpret_cast<const char *>(img.constBits()), qsizetype(img.sizeInBytes()));
+    return AccentColor::fromFrame(rgba).name();
 }
 
 void AppController::setThemeMode(const QString &mode)

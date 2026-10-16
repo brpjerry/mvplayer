@@ -80,6 +80,11 @@ public:
 
     Q_INVOKABLE void load(const QString &path);
     Q_INVOKABLE void stop();
+    // The file to go on to when this one ends, in mpv's own playlist, so
+    // that the audio runs on without a gap; fileStarted says when it has.
+    // clearNext takes it back. A load() replaces both.
+    Q_INVOKABLE void queueNext(const QString &path);
+    Q_INVOKABLE void clearNext();
     Q_INVOKABLE void seek(double seconds, bool exact = true);
     Q_INVOKABLE void seekRelative(double seconds);
     Q_INVOKABLE void togglePause();
@@ -102,6 +107,7 @@ signals:
     void colorSamplingChanged();
     void frameColorChanged();
     void firstFrame();  // the newly loaded file is now on screen
+    void fileStarted(const QString &path); // mpv began a file: the one loaded, or the one queued after it
     void endReached();  // playback ran to the end of the file
     void seeked();      // playback resumed somewhere new: after a seek, or a file's start
     void loadFailed(const QString &reason);

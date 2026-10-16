@@ -144,8 +144,50 @@ ApplicationWindow {
         // A track of the music library whose music video is playing in its
         // place (App.videoFollows): the player layer is up over the albums.
         property bool videoUp: false
+        // Gapless: while a track plays from its file, the one that follows
+        // is queued in mpv (pendingNext), which goes on to it by itself;
+        // onFileStarted then takes the queue there without a load.
+        property int pendingNext: -1
+        property int loads: 0   // how many times a file was loaded afresh (tests)
+
+        // What next(true) would choose, without choosing it.
+        function upcoming() {
+            if (queue.length === 0)
+                return -1
+            if (repeatMode === 2)
+                return index
+            if (shuffle && queue.length > 1) {
+                let n
+                do {
+                    n = Math.floor(Math.random() * queue.length)
+                } while (n === index)
+                return n
+            }
+            const n = index + 1
+            if (n < queue.length)
+                return n
+            return repeatMode === 1 ? 0 : -1
+        }
+        // A track played from its file, as this one is.
+        function fromFile(item) {
+            return item && item.kind === "track" && !(App.videoFollows && item.videoId > 0 && item.videoPath)
+        }
+        function armNext() {
+            const n = fromFile(current) && !videoUp ? upcoming() : -1
+            if (n >= 0 && fromFile(queue[n])) {
+                pendingNext = n
+                window.mpv.queueNext(queue[n].path)
+            } else {
+                pendingNext = -1
+                window.mpv.clearNext()
+            }
+        }
+        onShuffleChanged: if (current) armNext()
+        onRepeatModeChanged: if (current) armNext()
 
         function load(i) {
+            pendingNext = -1
+            loads += 1
             index = i
             current = queue[i]
             if (current.kind === "track") {
@@ -170,6 +212,7 @@ ApplicationWindow {
                 window.view = "grid"
                 playerView.close()
                 window.mpv.load(current.path)
+                armNext()
                 return
             }
             videoUp = false
@@ -289,6 +332,19 @@ ApplicationWindow {
             if (!player.next(true))
                 player.stop()
         }
+        // mpv went on to the track queued after the playing one.
+        function onFileStarted(path) {
+            const n = player.pendingNext
+            if (n < 0 || n >= player.queue.length || player.queue[n].path !== path)
+                return
+            if (n !== player.index) {
+                player.history.push(player.index)
+                player.index = n
+                player.current = player.queue[n]
+            }
+            player.pendingNext = -1
+            player.armNext()
+        }
         function onLoadFailed(reason) {
             console.warn("playback failed:", reason)
             if (!player.next(true))
@@ -336,10 +392,15 @@ ApplicationWindow {
     // picture of the playing video, changing slowly.
     readonly property bool autoAccent: App.accent === "auto"
     Binding { target: window.mpv; property: "colorSampling"; value: window.autoAccent }
+    // A track played from its file has no picture to sample: its album's
+    // cover gives the colour instead.
+    readonly property string trackAccent: autoAccent && player.current && player.current.kind === "track" && !player.videoUp
+                                          ? App.coverAccent(player.current.thumb) : ""
     Binding {
         target: Theme
         property: "accentSource"
         value: !window.autoAccent ? App.accent
+             : window.trackAccent !== "" ? window.trackAccent
              : player.current && window.mpv.frameColorValid ? window.mpv.frameColor : Theme.defaultAccent
     }
     Binding { target: Theme; property: "accentFade"; value: window.autoAccent ? 800 : 300 }
@@ -623,6 +684,8 @@ ApplicationWindow {
         case "previous": player.previous(); return "ok"
         case "stop": player.stop(); return "ok"
         case "seek": mpv.seek(parseFloat(arg), true); return "ok"
+        case "repeat": if (arg) player.repeatMode = parseInt(arg); return "" + player.repeatMode // repeat [0|1|2]: off, all, one
+        case "shuffle": if (arg) player.shuffle = arg !== "off"; return player.shuffle ? "on" : "off" // shuffle [on|off]
         case "audio": mpv.audioTrack = parseInt(arg); return "ok"
         case "switch-audio": controlBar.switchAudio(); return "ok" // as the key on the chip does
         case "search": topBar.searchText = arg; return "ok"
@@ -795,6 +858,7 @@ ApplicationWindow {
                 mode: App.mode, albumCount: App.albumCount, albumsShown: App.albums.count, libraryTracks: App.libraryTrackCount,
                 albumSort: App.albums.sortMode, albumDescending: App.albums.sortDescending, albumFacet: App.albums.facetType,
                 queueLength: player.queue.length, queueKind: player.current ? (player.current.kind || "video") : null,
+                pendingNext: player.pendingNext, loads: player.loads, trackAccent: window.trackAccent,
                 musicPanel: nowPlaying.active, musicPanelWidth: nowPlaying.width, musicPanelOn: App.musicPanel,
                 lookupAlbums: App.lookupAlbums.length, albumMenu: albumGrid.menuOpen,
                 videoFollows: App.videoFollows, videoUp: player.videoUp,

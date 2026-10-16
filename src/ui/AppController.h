@@ -359,6 +359,9 @@ public:
 
     QString accent() const { return m_accent; }
     void setAccent(const QString &accent);
+    // The accent a picture gives (as a frame of the playing video does):
+    // "#rrggbb", or "" when the file cannot be read.
+    Q_INVOKABLE QString coverAccent(const QUrl &cover) const;
     QString themeMode() const { return m_themeMode; }
     void setThemeMode(const QString &mode);
     int thumbColumns() const { return m_thumbColumns; }
