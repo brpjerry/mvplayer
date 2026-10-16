@@ -134,6 +134,7 @@ set(MV_QML_FILES
     qml/AlbumGrid.qml
     qml/AlbumCard.qml
     qml/ModePill.qml
+    qml/NowPlayingPanel.qml
     qml/PlayerView.qml
     qml/ControlBar.qml
     qml/SeekBar.qml
