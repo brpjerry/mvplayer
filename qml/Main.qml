@@ -342,7 +342,7 @@ ApplicationWindow {
         Item {
             id: mainArea
             anchors.left: reviewPanel.right
-            anchors.right: parent.right
+            anchors.right: nowPlaying.left
             anchors.top: parent.top
             anchors.bottom: controlBar.top
 
@@ -398,6 +398,25 @@ ApplicationWindow {
                     anchors.fill: parent
                     visible: !App.configured
                 }
+            }
+        }
+
+        // In music mode, right of the grid: the queue, the playing track
+        // and its cover.
+        NowPlayingPanel {
+            id: nowPlaying
+            anchors.right: parent.right
+            anchors.top: parent.top
+            anchors.bottom: controlBar.top
+            active: App.mode === "music" && !window.fullscreen
+            queue: player.queue
+            index: player.index
+            current: player.current
+            playing: window.playingNow
+            onPlayRequested: (i) => player.load(i)
+            onVideoRequested: (videoId) => {
+                App.mode = "video"
+                window.revealVideo(videoId)
             }
         }
 
@@ -726,6 +745,7 @@ ApplicationWindow {
                 mode: App.mode, albumCount: App.albumCount, albumsShown: App.albums.count, libraryTracks: App.libraryTrackCount,
                 albumSort: App.albums.sortMode, albumDescending: App.albums.sortDescending, albumFacet: App.albums.facetType,
                 queueLength: player.queue.length, queueKind: player.current ? (player.current.kind || "video") : null,
+                musicPanel: nowPlaying.active, musicPanelWidth: nowPlaying.width,
                 playing: player.current ? player.current.title : null, index: player.index,
                 position: mpv.position, duration: mpv.duration, paused: mpv.paused, active: mpv.active, muted: mpv.muted,
                 hwdec: mpv.hwdec, videoSize: mpv.videoSize.width + "x" + mpv.videoSize.height,
