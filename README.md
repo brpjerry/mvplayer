@@ -689,6 +689,10 @@ the words is tried against what the judge once saw.
   tag of every video.
 - Settings → Appearance: dark, light, or **Auto**, which follows the operating
   system's preference and switches with it while the app is running.
+- Settings → Appearance also has two sliders, **Thumbnail size** and **Cover
+  art size**: the least width of a card in the video grid and in the album
+  grid (180 to 600 pixels, 290 by default). Each grid fits as many columns as
+  that allows.
 - Settings → Accent colour: a fixed colour (presets or the hue strip) or
   **Auto**, which takes the colour from the playing video. Auto looks at one
   downscaled frame a second, blends it with the previous samples and fades

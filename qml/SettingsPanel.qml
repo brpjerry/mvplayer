@@ -232,7 +232,7 @@ Popup {
             id: valueLabel
             anchors.right: parent.right
             anchors.verticalCenter: parent.verticalCenter
-            width: 30
+            width: Math.max(30, implicitWidth)
             horizontalAlignment: Text.AlignRight
             text: sliderRow.valueText
             color: Theme.textDim
@@ -987,6 +987,29 @@ Popup {
                                 onPositionChanged: if (pressed) pick()
                             }
                         }
+                    }
+
+                    Divider {}
+
+                    // How big the cards are: the grids fit as many columns
+                    // as the chosen width allows.
+                    SliderRow {
+                        label: "Thumbnail size"
+                        hint: "How wide a video's card is at least. The video grid fits as many columns as that allows."
+                        from: App.minCardSize
+                        to: App.maxCardSize
+                        value: App.thumbSize
+                        valueText: App.thumbSize + " px"
+                        onMoved: (v) => App.thumbSize = Math.round(v / 10) * 10
+                    }
+                    SliderRow {
+                        label: "Cover art size"
+                        hint: "How wide an album's card is at least, in the music library."
+                        from: App.minCardSize
+                        to: App.maxCardSize
+                        value: App.coverSize
+                        valueText: App.coverSize + " px"
+                        onMoved: (v) => App.coverSize = Math.round(v / 10) * 10
                     }
                     Item { width: 1; height: 8 }
                 }
