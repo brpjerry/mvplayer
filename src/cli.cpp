@@ -56,7 +56,8 @@ int main(int argc, char **argv)
     parser.setApplicationDescription(QStringLiteral("Builds a music video library from an audio library."));
     parser.addHelpOption();
     parser.addOptions({
-        {QStringLiteral("music-dir"), QStringLiteral("Audio library folder to read (never modified; repeatable)."), QStringLiteral("dir")},
+        {QStringLiteral("music-dir"), QStringLiteral("Video folder: an audio library folder whose tracks are looked up (never modified; repeatable)."), QStringLiteral("dir")},
+        {QStringLiteral("library-dir"), QStringLiteral("The music library the player lists: its tracks outside every --music-dir are indexed by their tags, not looked up (repeatable; the video folders alone by default)."), QStringLiteral("dir")},
         {QStringLiteral("mv-dir"), QStringLiteral("Music video library to write."), QStringLiteral("dir"),
          QDir(QStandardPaths::writableLocation(QStandardPaths::MoviesLocation)).filePath(QStringLiteral("MVs"))},
         {QStringLiteral("jobs"), QStringLiteral("Tracks to process in parallel."), QStringLiteral("n"), QStringLiteral("2")},
@@ -93,6 +94,7 @@ int main(int argc, char **argv)
         {QStringLiteral("check-quality"), QStringLiteral("Look at the videos already imported again and rebuild those the account is offered in better quality.")},
         {QStringLiteral("reimport"), QStringLiteral("Look the tracks at this path (a music file, or a folder of them) up again by today's rules: a video that still fits is kept, one that no longer does goes to review or is replaced (repeatable)."), QStringLiteral("path")},
         {QStringLiteral("reimport-before"), QStringLiteral("Likewise every track with a video whose last lookup was before this time (ISO 8601, e.g. 2026-10-05T16:35 or 2026-10-05)."), QStringLiteral("time")},
+        {QStringLiteral("lookup-album"), QStringLiteral("Look an album of the music library up wherever its files are, as <album artist>/<album> (repeatable)."), QStringLiteral("album")},
     });
     parser.addPositionalArgument(QStringLiteral("command"), QStringLiteral("Optional: align <track> <video> | mux <track> <video> <out.mkv> | check-video <video> [keyframes] | same-recording <file> <file> | same-version <track title> <album> <video title> [own] | check-cookies [video id] | convert-subs <file.srv3> <out without extension> | talk-check <file>... | rank-check <track title> <artist> <video title> <channel> [verified] | artist-channels <artist>"));
     parser.process(app);
@@ -295,12 +297,15 @@ int main(int argc, char **argv)
         return 0;
     }
 
-    if (!parser.isSet(QStringLiteral("music-dir")) && pos.value(0) != QLatin1String("check-cookies"))
+    if (!parser.isSet(QStringLiteral("music-dir")) && !parser.isSet(QStringLiteral("library-dir"))
+        && pos.value(0) != QLatin1String("check-cookies"))
         parser.showHelp(2);
 
     ImportSettings cfg;
     for (const QString &d : parser.values(QStringLiteral("music-dir")))
         cfg.musicDirs << QDir(d).absolutePath();
+    for (const QString &d : parser.values(QStringLiteral("library-dir")))
+        cfg.libraryDirs << QDir(d).absolutePath();
     cfg.mvDir = QDir(parser.value(QStringLiteral("mv-dir"))).absolutePath();
     cfg.concurrency = parser.value(QStringLiteral("jobs")).toInt();
     cfg.allowUnofficial = parser.isSet(QStringLiteral("allow-unofficial"));
@@ -405,6 +410,32 @@ int main(int argc, char **argv)
     if (!db.init(&err)) {
         out << "error: cannot open library database: " << err << Qt::endl;
         return 1;
+    }
+    // Without the music library named, the video folders are the whole
+    // library: refused where it holds tracks outside them, which the scan
+    // would take for gone.
+    if (cfg.libraryDirs.isEmpty()) {
+        int outside = 0;
+        for (const QString &p : db.pathsNotLookedUp()) {
+            bool under = false;
+            for (const QString &d : std::as_const(cfg.musicDirs))
+                under |= p.startsWith(d.endsWith(QLatin1Char('/')) ? d : d + QLatin1Char('/'), pathCase);
+            outside += under ? 0 : 1;
+        }
+        if (outside > 0) {
+            out << "error: the library holds " << outside << " tracks indexed for the music player outside the folders given;"
+                << " name the music library with --library-dir" << Qt::endl;
+            return 2;
+        }
+    }
+    for (const QString &a : parser.values(QStringLiteral("lookup-album"))) {
+        const int slash = a.lastIndexOf(QLatin1Char('/'));
+        if (slash <= 0 || slash == a.size() - 1) {
+            out << "error: --lookup-album takes <album artist>/<album>" << Qt::endl;
+            return 2;
+        }
+        db.addLookupAlbum(a.left(slash), a.mid(slash + 1));
+        out << "looking up the album " << a.mid(slash + 1) << " by " << a.left(slash) << Qt::endl;
     }
 
     ImportManager mgr(&db);

@@ -45,6 +45,17 @@ QStringList normaliseRoots(const QStringList &roots)
     return top;
 }
 
+// Whether `path` lies under one of the (normalised) roots.
+bool underAny(const QString &path, const QStringList &roots)
+{
+    for (const QString &r : roots) {
+        const QString prefix = r.endsWith(QLatin1Char('/')) ? r : r + QLatin1Char('/');
+        if (path.startsWith(prefix, pathCase))
+            return true;
+    }
+    return false;
+}
+
 // Two files with the same bytes of audio and the same tags, wherever they are.
 QString contentKey(const TrackInfo &t)
 {
@@ -87,10 +98,22 @@ QVector<AudioPrint::Print> printsOf(const QStringList &files, const std::atomic<
 
 constexpr int kPrintBatch = 16; // files fingerprinted between two saves
 
-Result scan(const QStringList &rootsIn, Database &db, const std::atomic<bool> *cancel)
+Result scan(const QStringList &libraryRoots, const QStringList &lookupRoots, Database &db, const std::atomic<bool> *cancel)
 {
     Result res;
-    const QStringList roots = normaliseRoots(rootsIn);
+    const QStringList roots = normaliseRoots(libraryRoots + lookupRoots);
+    const QStringList lookupDirs = normaliseRoots(lookupRoots);
+    QSet<QString> lookupAlbums;
+    for (const Database::AlbumKey &a : db.lookupAlbums())
+        lookupAlbums.insert(Database::albumKey(a.albumArtist, a.album));
+    // A12: looked up (1) under a video folder or on an album asked for;
+    // indexed by its tags alone (0) otherwise. A track a re-import named (2)
+    // is looked up from then on, wherever it is (H9).
+    const auto lookupOf = [&](const TrackInfo &t, int before) {
+        if (before == 2)
+            return 2;
+        return underAny(t.path, lookupDirs) || lookupAlbums.contains(Database::albumKey(t.albumArtist, t.album)) ? 1 : 0;
+    };
     const QHash<QString, TrackInfo> known = db.tracksByPath();
     const QStringList &exts = TagReader::audioExtensions();
     const qint64 now = QDateTime::currentSecsSinceEpoch();
@@ -135,6 +158,8 @@ Result scan(const QStringList &rootsIn, Database &db, const std::atomic<bool> *c
         t.state = old.state;
         t.message = old.message;
         t.absent = false;
+        if (old.lookup == 2)
+            t.lookup = 2; // named by a re-import: stays looked up (H9)
         // Its video was deleted while it was away: to be looked up again.
         if (old.absent && t.state == QLatin1String("done") && t.videoId <= 0) {
             t.state = QStringLiteral("pending");
@@ -178,14 +203,37 @@ Result scan(const QStringList &rootsIn, Database &db, const std::atomic<bool> *c
 
             const auto old = known.constFind(path);
             if (old != known.constEnd() && old->mtime == mtime && old->size == size) {
+                const int want = lookupOf(*old, old->lookup);
                 if (old->absent) {
                     // Its folder is part of the library again: the track is
                     // back with its video and all that was found out.
                     TrackInfo t = *old;
+                    t.lookup = want;
                     refresh(t, *old);
                     ++res.returned;
-                    note(t, QStringLiteral("returned"), QStringLiteral("back in the music folders: keeps its video and state"));
+                    note(t, QStringLiteral("returned"), QStringLiteral("back in the music library: keeps its video and state"));
                     continue;
+                }
+                if (old->lookup != want) {
+                    // Its folder was ticked or its album asked for (A13), or
+                    // the other way round; what was found out stays either way.
+                    TrackInfo t = *old;
+                    t.lookup = want;
+                    if (want > 0 && t.recording <= 0 && t.attempts == 0 && t.state == QLatin1String("pending")) {
+                        // Looked at like a file just found (A2–A4).
+                        QString why;
+                        if (Matcher::isNonMvTrack(t, &why)) {
+                            t.state = QStringLiteral("skipped");
+                            t.message = why;
+                        }
+                    }
+                    if (save(t)) {
+                        ++res.changed;
+                        note(t, want > 0 ? QStringLiteral("lookup") : QStringLiteral("indexed"),
+                             want > 0 ? QStringLiteral("now in a video folder or on an album asked for: to be looked up")
+                                  : QStringLiteral("in no video folder and on no album asked for any more: indexed, not looked up"));
+                        continue;
+                    }
                 }
                 // Skipped for its title or its length by a rule that has
                 // changed since (a "TV size" track): looked up after all
@@ -194,7 +242,7 @@ Result scan(const QStringList &rootsIn, Database &db, const std::atomic<bool> *c
                 // every rule's skip is asked once (Q5); the judge's own
                 // skips stand until the tags change (Q4).
                 const bool judged = old->message.startsWith(QLatin1String("the judge"));
-                if (old->state == QLatin1String("skipped") && !judged && !Matcher::isNonMvTrack(*old)
+                if (want > 0 && old->state == QLatin1String("skipped") && !judged && !Matcher::isNonMvTrack(*old)
                     && (Matcher::judgeRunsLookups() || !Matcher::isTalkTitle(old->title))) {
                     TrackInfo t = *old;
                     t.state = QStringLiteral("pending");
@@ -226,6 +274,7 @@ Result scan(const QStringList &rootsIn, Database &db, const std::atomic<bool> *c
                     current.insert(old->id, *old);
                 continue;
             }
+            t.lookup = lookupOf(t, 0);
 
             if (old == known.constEnd())
                 fresh << t; // new, or a known track at a new place: settled after the walk
@@ -300,6 +349,14 @@ Result scan(const QStringList &rootsIn, Database &db, const std::atomic<bool> *c
     };
     QVector<Todo> todo;
     for (TrackInfo &t : fresh) {
+        if (t.lookup == 0) {
+            // A12: for the music player; nothing is sought for it.
+            if (save(t)) {
+                ++res.added;
+                note(t, QStringLiteral("indexed"), QStringLiteral("in no video folder and on no album asked for: indexed, not looked up"));
+            }
+            continue;
+        }
         QString why;
         if (Matcher::isNonMvTrack(t, &why)) {
             // Never looked up, so there is nothing to carry over or share.
@@ -314,7 +371,7 @@ Result scan(const QStringList &rootsIn, Database &db, const std::atomic<bool> *c
         todo.append({t, true});
     }
     for (auto c = current.constBegin(); c != current.constEnd(); ++c) {
-        if (c->state != QLatin1String("skipped") && !prints.contains(c->id))
+        if (c->lookup > 0 && c->state != QLatin1String("skipped") && !prints.contains(c->id))
             todo.append({*c, false});
     }
     // New files first: they may be tracks that went missing, which has to be

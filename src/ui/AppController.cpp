@@ -200,6 +200,7 @@ AppController::AppController(const AppOptions &options, QObject *parent)
         }
         fitDirsToBase();
     }
+    syncLibraryDirs();
     if (!options.mvDir.isEmpty())
         m_cfg.mvDir = QDir(options.mvDir).absolutePath();
     m_folderTree.setChecked(m_cfg.musicDirs);
@@ -231,6 +232,9 @@ void AppController::shutdown()
 
 bool AppController::configured() const
 {
+    // A base directory alone is a music library, with no video folder yet.
+    if (!m_cfg.libraryDirs.isEmpty() && QDir(m_cfg.libraryDirs.first()).exists())
+        return true;
     for (const QString &d : m_cfg.musicDirs) {
         if (QDir(d).exists())
             return true;
@@ -498,12 +502,23 @@ void AppController::fitDirsToBase()
     m_cfg.musicDirs = kept;
 }
 
+// The base directory is the music library, read for the player; the
+// folders given on the command line are read on their own, as before there
+// was a base.
+void AppController::syncLibraryDirs()
+{
+    m_cfg.libraryDirs.clear();
+    if (m_options.musicDirs.isEmpty() && !m_baseDir.isEmpty())
+        m_cfg.libraryDirs << m_baseDir;
+}
+
 void AppController::applyMusicDirs(QStringList dirs)
 {
     dirs.removeDuplicates();
-    const bool wasOpen = m_manager && !m_manager->settings().musicDirs.isEmpty();
+    const bool wasOpen = m_manager != nullptr;
     m_cfg.musicDirs = dirs;
     m_options.musicDirs.clear();
+    syncLibraryDirs();
     saveSettings();
     m_folderTree.setChecked(m_cfg.musicDirs);
     if (wasOpen) {
@@ -525,16 +540,11 @@ void AppController::setBaseDir(const QString &dir)
     if (d.compare(m_baseDir, pathCase) == 0)
         return;
     m_baseDir = d;
-    const QStringList before = m_cfg.musicDirs;
     fitDirsToBase();
     m_folderTree.setRoot(m_baseDir);
-    if (m_cfg.musicDirs != before) {
-        applyMusicDirs(m_cfg.musicDirs);
-    } else {
-        m_options.musicDirs.clear();
-        saveSettings();
-        emit settingsChanged();
-    }
+    // The base is the music library: it is read anew whether or not the
+    // ticked folders changed with it.
+    applyMusicDirs(m_cfg.musicDirs);
 }
 
 void AppController::setFolderChecked(const QString &path, bool on)

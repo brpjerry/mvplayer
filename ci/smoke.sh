@@ -758,6 +758,40 @@ echo "$OUT" | grep -E "^deleted|^\[library\]"
 [[ "$OUT" == *"deleted 1 untracked videos"* && "$(tracks_low)" == "[]" ]]
 [[ ! -e "$WORK/mvlib4/C/Low [xyz].mkv" && ! -e "$WORK/mvlib4/C/Low [xyz].en.srt" && ! -d "$WORK/mvlib4/C" ]]
 
+echo "== music library wider than the video folders"
+# A12: the music library (--library-dir) is read for the player; only the
+# tracks under a video folder (--music-dir) or on an album asked for are
+# fingerprinted and looked up. A13 and H9: asking for the album, or a
+# re-import, brings a track in.
+mkdir -p "$WORK/lib-ml/Look/Al" "$WORK/lib-ml/Only/Bl" "$WORK/lib-ml/Only/Cl" "$WORK/mvlib-ml"
+ffmpeg -v error -y -f lavfi -i "$(song 262 31)" -metadata title="Looked" -metadata artist=Gia -metadata album_artist=Gia -metadata album=Al -metadata track=1 "$WORK/lib-ml/Look/Al/01.flac"
+ffmpeg -v error -y -f lavfi -i "$(song 294 41)" -metadata title="Indexed" -metadata artist=Gia -metadata album_artist=Gia -metadata album=Bl -metadata track=1 -metadata disc=1 "$WORK/lib-ml/Only/Bl/01.flac"
+ffmpeg -v error -y -f lavfi -i "$(song 349 29)" -metadata title="Indexed two" -metadata artist=Gia -metadata album_artist=Gia -metadata album=Bl -metadata track=2 -metadata disc=1 "$WORK/lib-ml/Only/Bl/02.flac"
+ffmpeg -v error -y -f lavfi -i "$(song 392 53)" -metadata title="Indexed three" -metadata artist=Gia -metadata album_artist=Gia -metadata album=Cl -metadata track=1 "$WORK/lib-ml/Only/Cl/01.flac"
+touch -d "10 seconds ago" "$WORK"/lib-ml/*/*/*.flac
+tracks_ml() { python3 -c "import sqlite3, sys; print(sqlite3.connect(sys.argv[1]).execute(\"SELECT title, lookup, fingerprint IS NOT NULL, state FROM tracks ORDER BY title\").fetchall())" "$WORK/mvlib-ml/.mvplayer/library.db"; }
+echo 100 > "$WORK/calls"
+OUT=$(MVPLAYER_YTDLP="$FAKE" timeout 120 "$BUILD/mvplayer-import" --library-dir "$WORK/lib-ml" --music-dir "$WORK/lib-ml/Look" --mv-dir "$WORK/mvlib-ml" --jobs 1 2>&1)
+echo "$OUT" | grep -E "^\[scan\]|^done:"
+[[ "$OUT" == *"4 tracks: 4 new"* && "$OUT" == *"done: 0 videos; tracks: not_found=1"* ]]
+[[ "$(tracks_ml)" == "[('Indexed', 0, 0, 'pending'), ('Indexed three', 0, 0, 'pending'), ('Indexed two', 0, 0, 'pending'), ('Looked', 1, 1, 'not_found')]" ]]
+grep -q '"what":"indexed"' "$WORK/mvlib-ml/.mvplayer/import-log.jsonl"
+# The video folders alone would take the rest of the library for gone: refused.
+! OUT=$("$BUILD/mvplayer-import" --music-dir "$WORK/lib-ml/Look" --mv-dir "$WORK/mvlib-ml" 2>&1)
+[[ "$OUT" == *"--library-dir"* ]]
+# An album asked for is looked up wherever its files are (A13).
+echo 100 > "$WORK/calls"
+OUT=$(MVPLAYER_YTDLP="$FAKE" timeout 120 "$BUILD/mvplayer-import" --library-dir "$WORK/lib-ml" --music-dir "$WORK/lib-ml/Look" --mv-dir "$WORK/mvlib-ml" --jobs 1 --lookup-album "Gia/Bl" 2>&1)
+echo "$OUT" | grep -E "^looking|^\[scan\]|^done:"
+[[ "$OUT" == *"4 tracks: 0 new, 2 changed"* && "$OUT" == *"tracks: not_found=3"* ]]
+[[ "$(tracks_ml)" == "[('Indexed', 1, 1, 'not_found'), ('Indexed three', 0, 0, 'pending'), ('Indexed two', 1, 1, 'not_found'), ('Looked', 1, 1, 'not_found')]" ]]
+# A re-import names the track: looked up from now on (H9).
+echo 100 > "$WORK/calls"
+OUT=$(MVPLAYER_YTDLP="$FAKE" timeout 120 "$BUILD/mvplayer-import" --library-dir "$WORK/lib-ml" --music-dir "$WORK/lib-ml/Look" --mv-dir "$WORK/mvlib-ml" --jobs 1 --reimport "$WORK/lib-ml/Only/Cl" 2>&1)
+echo "$OUT" | grep -E "^re-importing|^done:"
+[[ "$OUT" == *"re-importing 1 tracks"* && "$OUT" == *"tracks: not_found=4"* ]]
+[[ "$(python3 -c "import sqlite3, sys; print(sqlite3.connect(sys.argv[1]).execute(\"SELECT lookup, state FROM tracks WHERE title = 'Indexed three'\").fetchall())" "$WORK/mvlib-ml/.mvplayer/library.db")" == "[(2, 'not_found')]" ]]
+
 echo "== a download that trickles"
 # YouTube sometimes serves a download at a crawl. It is given up after two
 # intervals without progress instead of holding a job for half an hour.
@@ -867,7 +901,7 @@ one mvlib17 --music-dir "$WORK/lib18" --approve "ten=$WORK/lib18/Jay/tenth.flac"
 # of them as candidates, and "Tenth" is given its audio in the file.
 sql mvlib24 "ALTER TABLE videos ADD COLUMN review_group INTEGER; UPDATE videos SET review_group = id;
     DROP TABLE candidates; ALTER TABLE videos DROP COLUMN yt_stream; ALTER TABLE videos DROP COLUMN vouched;
-    DROP TABLE channel_lists; PRAGMA user_version = 4;
+    DROP TABLE channel_lists; DROP INDEX tracks_lookup; ALTER TABLE tracks DROP COLUMN lookup; DROP TABLE lookup_albums; PRAGMA user_version = 4;
     UPDATE tracks SET state = 'done', video_id = (SELECT id FROM videos)"
 python3 - "$WORK/mvlib24/.mvplayer/library.db" "$WORK/lib18/Jay/tenth.flac" <<'PY'
 import sqlite3, sys
@@ -882,7 +916,7 @@ PY
 OUT=$(one mvlib24 --music-dir "$WORK/lib18"); echo "$OUT"
 [[ "$OUT" == *"library brought up from layout 4"* ]]
 [[ "$OUT" == *"library brought up from layout 5"* ]]
-[[ "$(ask mvlib24 "PRAGMA user_version")" == "[(7,)]" && "$(ask mvlib24 "$STATES")" == "[('Ten', 'review', None), ('Tenth', 'review', None)]" ]]
+[[ "$(ask mvlib24 "PRAGMA user_version")" == "[(8,)]" && "$(ask mvlib24 "$STATES")" == "[('Ten', 'review', None), ('Tenth', 'review', None)]" ]]
 [[ "$(ask mvlib24 "SELECT v.yt_id, t.title, c.stream, c.fit > 0 FROM candidates c JOIN videos v ON v.id = c.video_id JOIN tracks t ON t.recording = c.track_key ORDER BY t.title")" == "[('ten', 'Ten', 1, 1), ('ten', 'Tenth', 2, 1)]" ]]
 [[ "$(codecs mvlib24 "Ten [ten].mkv")" == "h264 flac flac opus " ]]
 
@@ -1094,10 +1128,10 @@ echo "== a library from before channels were allowed or denied"
 # Accepting a video used to vouch for its channel, for the artists of the
 # track. Those channels no longer count by that; the videos that are in the
 # library on the strength of it keep it, each as an upload you accepted.
-sql mvlib48 "ALTER TABLE videos DROP COLUMN vouched; DROP TABLE channel_lists; PRAGMA user_version = 5;
+sql mvlib48 "ALTER TABLE videos DROP COLUMN vouched; DROP TABLE channel_lists; DROP INDEX tracks_lookup; ALTER TABLE tracks DROP COLUMN lookup; DROP TABLE lookup_albums; PRAGMA user_version = 5;
     INSERT INTO artist_channels (artist, channel_id, channel, source) VALUES ('Jay', 'UCreupreupreupreupreup-_', '', 'approved')"
 OUT=$(chan mvlib48 --music-dir "$WORK/lib17"); echo "$OUT"
-[[ "$OUT" == *"library brought up from layout 5"* && "$OUT" == *"library brought up from layout 6"* && "$(ask mvlib48 "PRAGMA user_version")" == "[(7,)]" ]]
+[[ "$OUT" == *"library brought up from layout 5"* && "$OUT" == *"library brought up from layout 6"* && "$(ask mvlib48 "PRAGMA user_version")" == "[(8,)]" ]]
 [[ "$(ask mvlib48 "SELECT vouched FROM videos")" == "[(1,)]" && "$(ask mvlib48 "SELECT COUNT(*) FROM artist_channels WHERE source = 'approved'")" == "[(0,)]" ]]
 [[ "$(ask mvlib48 "SELECT COUNT(*) FROM channel_lists")" == "[(0,)]" ]]
 

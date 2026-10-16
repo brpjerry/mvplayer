@@ -48,7 +48,7 @@ QJsonObject jsonObj(const QString &s)
 const char *kTrackCols =
     "id, path, mtime, size, title, artist, album_artist, album, genre, year, track_no, disc_no, "
     "duration, codec, bitrate, sample_rate, bits, channels, lossless, tags_json, state, video_id, "
-    "attempts, last_attempt, message, recording, absent, reimport";
+    "attempts, last_attempt, message, recording, absent, reimport, lookup";
 
 TrackInfo readTrack(const QSqlQuery &q)
 {
@@ -82,6 +82,7 @@ TrackInfo readTrack(const QSqlQuery &q)
     t.recording = q.value(i++).toLongLong();
     t.absent = q.value(i++).toBool();
     t.reimport = q.value(i++).toBool();
+    t.lookup = q.value(i++).toInt();
     return t;
 }
 
@@ -209,7 +210,7 @@ QSqlDatabase Database::conn()
 
 // The layout below is the one this version reads and writes. The one before
 // it is brought up to it (upgradeLayout); any other is refused.
-constexpr int kSchema = 7;
+constexpr int kSchema = 8;
 
 namespace {
 // A track is a recording: its number, or minus the file's id where it has none.
@@ -237,11 +238,16 @@ const char *kJudgeAdviceSql =
     " mode TEXT NOT NULL, model TEXT NOT NULL, keep INTEGER NOT NULL, probability REAL NOT NULL,"
     " kind TEXT, source TEXT, version TEXT, whole TEXT, note TEXT, asked_at INTEGER NOT NULL DEFAULT 0,"
     " PRIMARY KEY (video_id, track_key))";
+// Albums asked for from the music player ("Find videos for album"): looked
+// up wherever their files are (docs/import-rules.html, A12).
+const char *kLookupAlbumsSql =
+    "CREATE TABLE IF NOT EXISTS lookup_albums ("
+    " album_artist TEXT NOT NULL, album TEXT NOT NULL, PRIMARY KEY (album_artist, album))";
 }
 
 bool Database::upgradeLayout(int from, QString *error)
 {
-    if (from != 4 && from != 5 && from != 6)
+    if (from != 4 && from != 5 && from != 6 && from != 7)
         return false;
     QSqlDatabase db = conn();
     if (from == 5) {
@@ -277,7 +283,15 @@ bool Database::upgradeLayout(int from, QString *error)
     };
     // Layout 6 to 7: the judge's advice on videos under review.
     const QStringList toSeven = {QString::fromLatin1(kJudgeAdviceSql), QStringLiteral("PRAGMA user_version = 7")};
-    const QStringList steps = from == 6 ? toSeven : from == 5 ? toSix : QStringList{
+    // Layout 7 to 8: the music library is wider than the video folders. A
+    // track says whether it is looked up, and the albums asked for are kept.
+    const QStringList toEight = {
+        QStringLiteral("ALTER TABLE tracks ADD COLUMN lookup INTEGER NOT NULL DEFAULT 1"),
+        QString::fromLatin1(kLookupAlbumsSql),
+        QStringLiteral("CREATE INDEX IF NOT EXISTS tracks_lookup ON tracks(lookup, state)"),
+        QStringLiteral("PRAGMA user_version = 8"),
+    };
+    const QStringList steps = from == 7 ? toEight : from == 6 ? toSeven : from == 5 ? toSix : QStringList{
         QStringLiteral("CREATE TABLE candidates ("
                        " video_id INTEGER NOT NULL REFERENCES videos(id) ON DELETE CASCADE,"
                        " track_key INTEGER NOT NULL,"
@@ -329,7 +343,9 @@ bool Database::upgradeLayout(int from, QString *error)
             *error = db.lastError().text();
         return false;
     }
-    if (from == 6)
+    if (from == 7)
+        qInfo("[db] library brought up from layout 7: the music library is wider than the video folders");
+    else if (from == 6)
         qInfo("[db] library brought up from layout 6: the judge's advice is kept with a video under review");
     else if (from == 5)
         qInfo("[db] library brought up from layout 5: channels are allowed or denied by you; an accepted video vouches for itself");
@@ -407,7 +423,8 @@ bool Database::init(QString *error)
             " recording INTEGER, fingerprint BLOB, fp_size INTEGER,"
             " searched_title TEXT,"
             " absent INTEGER NOT NULL DEFAULT 0,"
-            " reimport INTEGER NOT NULL DEFAULT 0)"),
+            " reimport INTEGER NOT NULL DEFAULT 0,"
+            " lookup INTEGER NOT NULL DEFAULT 1)"),
         // Videos turned down for a track: by recording, or by track where
         // the recording is not known.
         QStringLiteral("CREATE TABLE IF NOT EXISTS rejected_videos ("
@@ -429,7 +446,9 @@ bool Database::init(QString *error)
         QStringLiteral("CREATE INDEX IF NOT EXISTS candidates_track ON candidates(track_key)"),
         QString::fromLatin1(kChannelListsSql),
         QString::fromLatin1(kJudgeAdviceSql),
+        QString::fromLatin1(kLookupAlbumsSql),
         QStringLiteral("CREATE INDEX IF NOT EXISTS tracks_state ON tracks(state)"),
+        QStringLiteral("CREATE INDEX IF NOT EXISTS tracks_lookup ON tracks(lookup, state)"),
         QStringLiteral("CREATE INDEX IF NOT EXISTS tracks_video ON tracks(video_id)"),
         QStringLiteral("CREATE INDEX IF NOT EXISTS tracks_recording ON tracks(recording)"),
         QStringLiteral("PRAGMA user_version = %1").arg(kSchema),
@@ -541,7 +560,7 @@ QVector<TrackInfo> Database::tracksInState(const QStringList &states)
     for (int i = 0; i < states.size(); ++i)
         marks << QStringLiteral("?");
     QSqlQuery q(conn());
-    q.prepare(QStringLiteral("SELECT %1 FROM tracks WHERE state IN (%2) AND absent = 0 ORDER BY path")
+    q.prepare(QStringLiteral("SELECT %1 FROM tracks WHERE state IN (%2) AND absent = 0 AND lookup > 0 ORDER BY path")
                   .arg(QLatin1String(kTrackCols), marks.join(QLatin1Char(','))));
     for (const QString &s : states)
         q.addBindValue(s);
@@ -557,7 +576,7 @@ QVector<TrackInfo> Database::trackSummariesInState(const QStringList &states)
     QVector<TrackInfo> out;
     QSqlQuery q(conn());
     q.prepare(QStringLiteral("SELECT title, artist, album_artist, state, message FROM tracks "
-                             "WHERE state IN (%1) AND absent = 0 ORDER BY path")
+                             "WHERE state IN (%1) AND absent = 0 AND lookup > 0 ORDER BY path")
                   .arg(QStringList(states.size(), QStringLiteral("?")).join(QLatin1Char(','))));
     for (const QString &s : states)
         q.addBindValue(s);
@@ -591,8 +610,8 @@ bool Database::upsertTrack(TrackInfo &t)
     q.prepare(QStringLiteral(
         "INSERT INTO tracks (path, mtime, size, title, artist, album_artist, album, genre, year,"
         " track_no, disc_no, duration, codec, bitrate, sample_rate, bits, channels, lossless,"
-        " tags_json, state, video_id, attempts, last_attempt, message, recording)"
-        " VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)"
+        " tags_json, state, video_id, attempts, last_attempt, message, recording, lookup)"
+        " VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)"
         " ON CONFLICT(path) DO UPDATE SET"
         " mtime=excluded.mtime, size=excluded.size, title=excluded.title, artist=excluded.artist,"
         " album_artist=excluded.album_artist, album=excluded.album, genre=excluded.genre,"
@@ -602,7 +621,7 @@ bool Database::upsertTrack(TrackInfo &t)
         " lossless=excluded.lossless, tags_json=excluded.tags_json, state=excluded.state,"
         " video_id=excluded.video_id, attempts=excluded.attempts,"
         " last_attempt=excluded.last_attempt, message=excluded.message, recording=excluded.recording,"
-        " absent=0"));
+        " lookup=excluded.lookup, absent=0"));
     q.addBindValue(t.path);
     q.addBindValue(t.mtime);
     q.addBindValue(t.size);
@@ -628,6 +647,7 @@ bool Database::upsertTrack(TrackInfo &t)
     q.addBindValue(t.lastAttempt);
     q.addBindValue(t.message);
     q.addBindValue(t.recording > 0 ? QVariant(t.recording) : QVariant());
+    q.addBindValue(t.lookup);
     if (!run(q))
         return false;
 
@@ -748,7 +768,7 @@ int Database::requeueUntriedTitles()
     };
     QHash<qint64, Group> groups;
     QSqlQuery q(conn());
-    q.prepare(QStringLiteral("SELECT %1, searched_title FROM tracks WHERE state = 'not_found' AND recording IS NOT NULL")
+    q.prepare(QStringLiteral("SELECT %1, searched_title FROM tracks WHERE state = 'not_found' AND recording IS NOT NULL AND lookup > 0")
                   .arg(QLatin1String(kTrackCols)));
     if (!run(q))
         return 0;
@@ -892,7 +912,7 @@ void Database::resetTracks(const QStringList &fromStates)
 {
     for (const QString &s : fromStates) {
         QSqlQuery q(conn());
-        q.prepare(QStringLiteral("UPDATE tracks SET state = 'pending', message = '' WHERE state = ?"));
+        q.prepare(QStringLiteral("UPDATE tracks SET state = 'pending', message = '' WHERE state = ? AND lookup > 0"));
         q.addBindValue(s);
         run(q);
     }
@@ -905,7 +925,7 @@ void Database::requeueStale(qint64 failedAfterSecs, qint64 notFoundAfterSecs)
         // 1st failure: failedAfterSecs, then x2 per attempt, at most the not-found interval.
         QSqlQuery q(conn());
         q.prepare(QStringLiteral(
-            "UPDATE tracks SET state = 'pending' WHERE state = 'failed'"
+            "UPDATE tracks SET state = 'pending' WHERE state = 'failed' AND lookup > 0"
             " AND last_attempt < ? - min(? * (1 << min(max(attempts, 1) - 1, 12)), ?)"));
         q.addBindValue(now);
         q.addBindValue(failedAfterSecs);
@@ -914,7 +934,7 @@ void Database::requeueStale(qint64 failedAfterSecs, qint64 notFoundAfterSecs)
     }
     {
         QSqlQuery q(conn());
-        q.prepare(QStringLiteral("UPDATE tracks SET state = 'pending' WHERE state = 'not_found' AND last_attempt < ?"));
+        q.prepare(QStringLiteral("UPDATE tracks SET state = 'pending' WHERE state = 'not_found' AND lookup > 0 AND last_attempt < ?"));
         q.addBindValue(now - notFoundAfterSecs);
         run(q);
     }
@@ -938,7 +958,7 @@ QHash<QString, int> Database::trackStateCounts()
 {
     QHash<QString, int> out;
     QSqlQuery q(conn());
-    q.prepare(QStringLiteral("SELECT state, COUNT(*) FROM tracks WHERE absent = 0 GROUP BY state"));
+    q.prepare(QStringLiteral("SELECT state, COUNT(*) FROM tracks WHERE absent = 0 AND lookup > 0 GROUP BY state"));
     if (run(q)) {
         while (q.next())
             out.insert(q.value(0).toString(), q.value(1).toInt());
@@ -1395,7 +1415,10 @@ void Database::setTrackReimport(qint64 trackId)
     // The whole recording: the lookup runs under its best file, whichever
     // that is (see pendingRecordings), and that file has to carry the mark.
     QSqlQuery q(conn());
-    q.prepare(QStringLiteral("UPDATE tracks SET state = 'pending', reimport = 1, message = ''"
+    // A re-import names the track: one outside the video folders is looked
+    // up from now on (H9), which no scan takes back.
+    q.prepare(QStringLiteral("UPDATE tracks SET state = 'pending', reimport = 1, message = '',"
+                             " lookup = CASE WHEN lookup = 0 THEN 2 ELSE lookup END"
                              " WHERE absent = 0 AND (id = ? OR recording = (SELECT recording FROM tracks WHERE id = ?))"));
     q.addBindValue(trackId);
     q.addBindValue(trackId);
@@ -1441,6 +1464,68 @@ QVector<qint64> Database::trackIdsImportedBefore(qint64 secs)
     if (run(q)) {
         while (q.next())
             out << q.value(0).toLongLong();
+    }
+    return out;
+}
+
+QString Database::albumKey(const QString &albumArtist, const QString &album)
+{
+    return albumArtist + QChar(0x1f) + album;
+}
+
+QVector<Database::AlbumKey> Database::lookupAlbums()
+{
+    QVector<AlbumKey> out;
+    QSqlQuery q(conn());
+    q.prepare(QStringLiteral("SELECT album_artist, album FROM lookup_albums ORDER BY album_artist, album"));
+    if (run(q)) {
+        while (q.next())
+            out << AlbumKey{q.value(0).toString(), q.value(1).toString()};
+    }
+    return out;
+}
+
+void Database::addLookupAlbum(const QString &albumArtist, const QString &album)
+{
+    QSqlQuery q(conn());
+    q.prepare(QStringLiteral("INSERT OR IGNORE INTO lookup_albums (album_artist, album) VALUES (?, ?)"));
+    q.addBindValue(albumArtist);
+    q.addBindValue(album);
+    run(q);
+}
+
+void Database::removeLookupAlbum(const QString &albumArtist, const QString &album)
+{
+    QSqlQuery q(conn());
+    q.prepare(QStringLiteral("DELETE FROM lookup_albums WHERE album_artist = ? AND album = ?"));
+    q.addBindValue(albumArtist);
+    q.addBindValue(album);
+    run(q);
+}
+
+QVector<qint64> Database::trackIdsOfAlbum(const QString &albumArtist, const QString &album)
+{
+    QVector<qint64> out;
+    QSqlQuery q(conn());
+    q.prepare(QStringLiteral("SELECT id FROM tracks WHERE absent = 0 AND album_artist = ? AND album = ?"
+                             " ORDER BY disc_no, track_no, path"));
+    q.addBindValue(albumArtist);
+    q.addBindValue(album);
+    if (run(q)) {
+        while (q.next())
+            out << q.value(0).toLongLong();
+    }
+    return out;
+}
+
+QStringList Database::pathsNotLookedUp()
+{
+    QStringList out;
+    QSqlQuery q(conn());
+    q.prepare(QStringLiteral("SELECT path FROM tracks WHERE absent = 0 AND lookup = 0 ORDER BY path"));
+    if (run(q)) {
+        while (q.next())
+            out << q.value(0).toString();
     }
     return out;
 }

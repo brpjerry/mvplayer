@@ -406,6 +406,7 @@ private:
     // Keeps the ticked folders inside the base: outside ones go, an ancestor
     // of the base becomes the base itself.
     void fitDirsToBase();
+    void syncLibraryDirs();
     bool m_checkingCookies = false;
     int m_cookiesCheck = 0; // counts checks, so that a late answer about replaced cookies is dropped
     QString m_cookiesState, m_cookiesStatus;
