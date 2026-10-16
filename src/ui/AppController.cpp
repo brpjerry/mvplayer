@@ -288,6 +288,7 @@ void AppController::openLibrary()
     emit candidatesChanged();
     m_covers.setDir(QDir(dataDir).filePath(QStringLiteral("covers")));
     reloadAlbums();
+    emit lookupAlbumsChanged();
 
     m_cfg.captureDir = m_keepEverything ? captureFolder() : QString();
     m_manager = std::make_unique<ImportManager>(m_db.get());
@@ -478,6 +479,52 @@ QVariantList AppController::albumTracks(int row) const
         out << m;
     }
     return out;
+}
+
+QVariantList AppController::lookupAlbums() const
+{
+    QVariantList out;
+    if (!m_db)
+        return out;
+    for (const Database::AlbumKey &k : m_db->lookupAlbums())
+        out << QVariantMap{{QStringLiteral("albumArtist"), k.albumArtist}, {QStringLiteral("album"), k.album}};
+    return out;
+}
+
+int AppController::lookupAlbum(const QString &albumArtist, const QString &album)
+{
+    if (!m_db)
+        return 0;
+    int brought = 0;
+    for (const TrackInfo &t : m_db->tracksOfAlbum(albumArtist, album))
+        brought += t.lookup == 0 ? 1 : 0;
+    m_db->addLookupAlbum(albumArtist, album);
+    emit lookupAlbumsChanged();
+    // The next scan takes its tracks in: fingerprinted, then looked up (A13).
+    if (m_manager)
+        m_manager->rescan();
+    return brought;
+}
+
+void AppController::removeLookupAlbum(const QString &albumArtist, const QString &album)
+{
+    if (!m_db)
+        return;
+    m_db->removeLookupAlbum(albumArtist, album);
+    emit lookupAlbumsChanged();
+    // Its tracks outside the video folders are indexed only again, at the
+    // next scan; what they have stays with them.
+    if (m_manager)
+        m_manager->rescan();
+}
+
+int AppController::reimportAlbum(const QString &albumArtist, const QString &album)
+{
+    if (!m_manager || !m_db)
+        return 0;
+    const int n = m_manager->reimport(m_db->trackIdsOfAlbum(albumArtist, album));
+    refreshCounts();
+    return n;
 }
 
 void AppController::rebuildFacets()

@@ -63,6 +63,10 @@ class AppController : public QObject
     Q_PROPERTY(AlbumFilterModel *albums READ albums CONSTANT)
     Q_PROPERTY(int albumCount READ albumCount NOTIFY facetsChanged)
     Q_PROPERTY(int libraryTrackCount READ libraryTrackCount NOTIFY facetsChanged)
+    // Albums asked for from the grid ("Find videos for this album"): looked
+    // up wherever their files are (docs/import-rules.html, A12). Each
+    // {albumArtist, album}.
+    Q_PROPERTY(QVariantList lookupAlbums READ lookupAlbums NOTIFY lookupAlbumsChanged)
 
     // The music library: a base directory, and the folders ticked under it
     // (musicDirs, the ones that are read). The tree shows the base's folders.
@@ -224,6 +228,13 @@ public:
     // cover), codec, bitrate, lossless, sampleRate, bits, lookup, state,
     // review: false}.
     Q_INVOKABLE QVariantList albumTracks(int row) const;
+    QVariantList lookupAlbums() const;
+    // Asks for an album (returns how many of its tracks were not looked up
+    // until now), takes one off again, or looks an album's tracks up again
+    // by today's rules (returns how many lookups were queued, H).
+    Q_INVOKABLE int lookupAlbum(const QString &albumArtist, const QString &album);
+    Q_INVOKABLE void removeLookupAlbum(const QString &albumArtist, const QString &album);
+    Q_INVOKABLE int reimportAlbum(const QString &albumArtist, const QString &album);
     Q_INVOKABLE void keepOrphan(qint64 videoId);
     // False while the music folders are being read.
     Q_INVOKABLE bool deleteOrphan(qint64 videoId);
@@ -391,6 +402,7 @@ signals:
     void adviceQueueChanged();
     void facetsChanged();
     void modeChanged();
+    void lookupAlbumsChanged();
     void settingsChanged();
     void activityChanged();
     void cookiesCheckChanged();

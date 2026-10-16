@@ -532,6 +532,65 @@ Popup {
                         color: Theme.textFaint
                         font.pixelSize: 12
                     }
+                    // Albums asked for from the music library's grid: looked
+                    // up wherever their files are (A12).
+                    Column {
+                        visible: App.lookupAlbums.length > 0
+                        width: parent.width
+                        spacing: 2
+                        Item { width: 1; height: 12 }
+                        Text {
+                            width: parent.width
+                            text: "Albums looked up on their own"
+                            color: Theme.text
+                            font.pixelSize: 14
+                        }
+                        Text {
+                            width: parent.width
+                            text: "Asked for from the music library (“Find videos for this album”): their tracks are looked up wherever their files are. One taken off keeps its videos."
+                            color: Theme.textDim
+                            font.pixelSize: 12
+                            wrapMode: Text.WordWrap
+                            bottomPadding: 4
+                        }
+                        Repeater {
+                            model: App.lookupAlbums
+                            Item {
+                                id: lookupRow
+                                required property var modelData
+                                width: parent.width
+                                height: 32
+                                Icon {
+                                    x: 2
+                                    anchors.verticalCenter: parent.verticalCenter
+                                    path: Icons.music
+                                    size: 16
+                                    color: Theme.textDim
+                                }
+                                Text {
+                                    anchors.left: parent.left
+                                    anchors.leftMargin: 26
+                                    anchors.right: removeAlbum.left
+                                    anchors.rightMargin: 8
+                                    anchors.verticalCenter: parent.verticalCenter
+                                    text: lookupRow.modelData.albumArtist + "  —  " + (lookupRow.modelData.album.length > 0 ? lookupRow.modelData.album : "Unknown album")
+                                    color: Theme.text
+                                    font.pixelSize: 13
+                                    elide: Text.ElideRight
+                                }
+                                IconButton {
+                                    id: removeAlbum
+                                    anchors.right: parent.right
+                                    anchors.verticalCenter: parent.verticalCenter
+                                    size: 28
+                                    iconSize: 16
+                                    icon: Icons.close
+                                    tooltip: "No longer looked up on its own"
+                                    onClicked: App.removeLookupAlbum(lookupRow.modelData.albumArtist, lookupRow.modelData.album)
+                                }
+                            }
+                        }
+                    }
                     Item { width: 1; height: 10 }
                     FolderRow {
                         label: "Music video library"

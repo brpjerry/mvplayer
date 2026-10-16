@@ -1473,6 +1473,15 @@ QString Database::albumKey(const QString &albumArtist, const QString &album)
     return albumArtist + QChar(0x1f) + album;
 }
 
+namespace {
+// A missing tag is NULL in the tracks table (and would bind as NULL): an
+// album without a title is the one whose title is empty.
+QVariant textOrEmpty(const QString &s)
+{
+    return s.isNull() ? QVariant(QString::fromLatin1("")) : QVariant(s);
+}
+} // namespace
+
 QVector<Database::AlbumKey> Database::lookupAlbums()
 {
     QVector<AlbumKey> out;
@@ -1489,8 +1498,8 @@ void Database::addLookupAlbum(const QString &albumArtist, const QString &album)
 {
     QSqlQuery q(conn());
     q.prepare(QStringLiteral("INSERT OR IGNORE INTO lookup_albums (album_artist, album) VALUES (?, ?)"));
-    q.addBindValue(albumArtist);
-    q.addBindValue(album);
+    q.addBindValue(textOrEmpty(albumArtist));
+    q.addBindValue(textOrEmpty(album));
     run(q);
 }
 
@@ -1498,8 +1507,8 @@ void Database::removeLookupAlbum(const QString &albumArtist, const QString &albu
 {
     QSqlQuery q(conn());
     q.prepare(QStringLiteral("DELETE FROM lookup_albums WHERE album_artist = ? AND album = ?"));
-    q.addBindValue(albumArtist);
-    q.addBindValue(album);
+    q.addBindValue(textOrEmpty(albumArtist));
+    q.addBindValue(textOrEmpty(album));
     run(q);
 }
 
@@ -1507,10 +1516,10 @@ QVector<qint64> Database::trackIdsOfAlbum(const QString &albumArtist, const QStr
 {
     QVector<qint64> out;
     QSqlQuery q(conn());
-    q.prepare(QStringLiteral("SELECT id FROM tracks WHERE absent = 0 AND album_artist = ? AND album = ?"
+    q.prepare(QStringLiteral("SELECT id FROM tracks WHERE absent = 0 AND COALESCE(album_artist, '') = ? AND COALESCE(album, '') = ?"
                              " ORDER BY disc_no, track_no, path"));
-    q.addBindValue(albumArtist);
-    q.addBindValue(album);
+    q.addBindValue(textOrEmpty(albumArtist));
+    q.addBindValue(textOrEmpty(album));
     if (run(q)) {
         while (q.next())
             out << q.value(0).toLongLong();
@@ -1584,10 +1593,10 @@ QVector<TrackInfo> Database::tracksOfAlbum(const QString &albumArtist, const QSt
 {
     QVector<TrackInfo> out;
     QSqlQuery q(conn());
-    q.prepare(QStringLiteral("SELECT %1 FROM tracks WHERE absent = 0 AND album_artist = ? AND album = ?"
+    q.prepare(QStringLiteral("SELECT %1 FROM tracks WHERE absent = 0 AND COALESCE(album_artist, '') = ? AND COALESCE(album, '') = ?"
                              " ORDER BY disc_no, track_no, path").arg(QLatin1String(kTrackCols)));
-    q.addBindValue(albumArtist);
-    q.addBindValue(album);
+    q.addBindValue(textOrEmpty(albumArtist));
+    q.addBindValue(textOrEmpty(album));
     if (run(q)) {
         while (q.next())
             out << readTrack(q);
