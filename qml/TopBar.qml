@@ -297,7 +297,7 @@ Item {
                 id: sortMenu
                 x: sortButton.width - width
                 y: sortButton.height + 10
-                width: 190
+                width: 210
                 padding: 6
                 closePolicy: Popup.CloseOnEscape | Popup.CloseOnPressOutsideParent
                 transformOrigin: Popup.TopRight
@@ -319,7 +319,8 @@ Item {
                         model: [
                             { key: "title", label: "Title" },
                             { key: "artist", label: "Artist" },
-                            { key: "year", label: "Newest release" },
+                            { key: "year", label: "Chronological - Audio" },
+                            { key: "published", label: "Chronological - Video" },
                             { key: "added", label: "Recently added" }
                         ]
                         Item {
@@ -365,6 +366,23 @@ Item {
                     }
                 }
             }
+        }
+
+        // The direction of the order on show: names A to Z or Z to A, dates
+        // newest or oldest first. Picking an order in the menu resets it.
+        IconButton {
+            id: directionButton
+            anchors.verticalCenter: parent.verticalCenter
+            icon: App.videos.sortDescending ? Icons.arrowDown : Icons.arrowUp
+            enabled: sortButton.enabled
+            tooltipBelow: true
+            tooltip: {
+                const names = App.videos.sortMode === "title" || App.videos.sortMode === "artist"
+                if (names)
+                    return App.videos.sortDescending ? "Z to A" : "A to Z"
+                return App.videos.sortDescending ? "Newest first" : "Oldest first"
+            }
+            onClicked: App.videos.sortDescending = !App.videos.sortDescending
         }
 
         SearchBox {

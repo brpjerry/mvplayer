@@ -521,6 +521,8 @@ ApplicationWindow {
         }
         case "section": showSection(arg); return "ok" // library | review | orphans
         case "sort": App.videos.sortMode = arg; return "ok"
+        case "sort-direction": App.videos.sortDescending = arg === "desc"; return "ok" // sort-direction asc|desc
+        case "order": return JSON.stringify(App.videos.snapshot().slice(0, parseInt(arg) || 20).map(v => v.title)) // order [n]: the grid's first titles
         case "fullscreen": setFullscreen(arg !== "off"); return "ok"
         case "sources": controlBar.toggleSources(); return "ok"
         case "imports": { // imports on|off: the import panel; answers how long opening or closing took, in ms
@@ -666,6 +668,7 @@ ApplicationWindow {
                 ignoreSmallChannels: App.ignoreSmallChannels, minSubscribers: App.minSubscribers,
                 channelDialog: channelDialog.opened,
                 facet: App.videos.facetType, facetValue: App.videos.facetValue, section: App.videos.section,
+                sortMode: App.videos.sortMode, sortDescending: App.videos.sortDescending,
                 orphanCount: App.orphanCount, reviewLabel: controlBar.reviewLabel, trackLength: controlBar.trackLength,
                 candidates: controlBar.candidates.length, candidate: controlBar.shown,
                 candidateTitle: controlBar.candidate ? controlBar.candidate.title : null,

@@ -106,6 +106,7 @@ class VideoFilterModel : public QSortFilterProxyModel
     Q_PROPERTY(QString facetType READ facetType NOTIFY facetChanged)
     Q_PROPERTY(QString facetValue READ facetValue NOTIFY facetChanged)
     Q_PROPERTY(QString sortMode READ sortMode WRITE setSortMode NOTIFY sortModeChanged)
+    Q_PROPERTY(bool sortDescending READ sortDescending WRITE setSortDescending NOTIFY sortDescendingChanged)
     Q_PROPERTY(int count READ count NOTIFY countChanged)
 
 public:
@@ -116,8 +117,16 @@ public:
     QString section() const { return m_section; }
     QString facetType() const { return m_facetType; }
     QString facetValue() const { return m_facetValue; }
+    // sortMode: title | artist | year (the track's year: Chronological - Audio)
+    // | published (the day the upload was published: Chronological - Video)
+    // | added. Choosing a mode puts its direction the natural way round
+    // (names A to Z, dates newest first); sortDescending then flips the
+    // mode's own key, ties keep their order.
     QString sortMode() const { return m_sortMode; }
     void setSortMode(const QString &mode);
+    bool sortDescending() const { return m_descending; }
+    void setSortDescending(bool descending);
+    static bool defaultDescending(const QString &mode);
     int count() const { return rowCount(); }
 
     // type: all | recent | albumArtist | artist | genre | album | year. It
@@ -140,6 +149,7 @@ signals:
     void sectionChanged();
     void facetChanged();
     void sortModeChanged();
+    void sortDescendingChanged();
     void countChanged();
 
 protected:
@@ -160,5 +170,6 @@ private:
     QString m_facetType = QStringLiteral("all");
     QString m_facetValue;
     QString m_sortMode = QStringLiteral("title");
+    bool m_descending = false;
     QCollator m_collator;
 };
