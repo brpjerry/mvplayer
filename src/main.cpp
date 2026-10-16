@@ -93,6 +93,7 @@ int main(int argc, char **argv)
     qmlRegisterSingletonInstance(uri, 1, 0, "YtDlpUpdater", &ytDlpUpdater);
     qmlRegisterSingletonInstance(uri, 1, 0, "WindowFrame", &windowFrame);
     qmlRegisterAnonymousType<VideoFilterModel>(uri, 1);
+    qmlRegisterAnonymousType<AlbumFilterModel>(uri, 1);
     qmlRegisterAnonymousType<JobModel>(uri, 1);
     qmlRegisterUncreatableType<FolderTreeModel>(uri, 1, 0, "FolderTreeModel", QStringLiteral("App.folderTree is the one there is"));
 

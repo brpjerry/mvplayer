@@ -95,6 +95,8 @@ AppController::AppController(const AppOptions &options, QObject *parent)
     , m_model(new VideoModel(this))
     , m_filter(new VideoFilterModel(m_model, this))
     , m_jobs(new JobModel(this))
+    , m_albumModel(new AlbumModel(this))
+    , m_albums(new AlbumFilterModel(m_albumModel, this))
 {
     if (options.configFile.isEmpty())
 #ifdef Q_OS_WIN
@@ -177,6 +179,9 @@ AppController::AppController(const AppOptions &options, QObject *parent)
         m_cfg.pauseBaseSecs = qEnvironmentVariableIntValue("MVPLAYER_PAUSE_SECS");
     m_accent = m_settings->value(QStringLiteral("ui/accent"), m_accent).toString();
     m_sidebarFacet = m_settings->value(QStringLiteral("ui/sidebarFacet"), m_sidebarFacet).toString();
+    m_mode = m_settings->value(QStringLiteral("ui/mode"), m_mode).toString();
+    if (m_mode != QLatin1String("music"))
+        m_mode = QStringLiteral("video");
     m_themeMode = m_settings->value(QStringLiteral("ui/theme"), m_themeMode).toString();
     m_flickDeceleration = qBound(200.0, m_settings->value(QStringLiteral("ui/flickDeceleration"), m_flickDeceleration).toDouble(), 50000.0);
     connect(&m_systemTheme, &SystemTheme::darkChanged, this, &AppController::systemDarkChanged);
@@ -214,6 +219,13 @@ AppController::AppController(const AppOptions &options, QObject *parent)
     connect(m_model, &QAbstractItemModel::rowsRemoved, this, scheduleFacets);
     connect(m_model, &QAbstractItemModel::dataChanged, this, scheduleFacets);
     connect(m_model, &QAbstractItemModel::modelReset, this, &AppController::rebuildFacets);
+    // The albums follow the music library: read again shortly after a scan,
+    // or after a video comes or goes (the cards count them).
+    m_albumTimer.setSingleShot(true);
+    m_albumTimer.setInterval(150);
+    connect(&m_albumTimer, &QTimer::timeout, this, &AppController::reloadAlbums);
+    connect(m_albumModel, &QAbstractItemModel::modelReset, this, &AppController::rebuildFacets);
+    connect(&m_covers, &CoverCache::coverReady, m_albumModel, &AlbumModel::setCover);
 
     openLibrary();
 }
@@ -274,6 +286,8 @@ void AppController::openLibrary()
     for (const VideoInfo &v : std::as_const(videos))
         updateShown(v);
     emit candidatesChanged();
+    m_covers.setDir(QDir(dataDir).filePath(QStringLiteral("covers")));
+    reloadAlbums();
 
     m_cfg.captureDir = m_keepEverything ? captureFolder() : QString();
     m_manager = std::make_unique<ImportManager>(m_db.get());
@@ -308,6 +322,9 @@ void AppController::openLibrary()
         emit candidatesChanged();
         refreshCounts();
     });
+    connect(m_manager.get(), &ImportManager::libraryChanged, this, [this] { m_albumTimer.start(); });
+    connect(m_manager.get(), &ImportManager::videoAdded, this, [this] { m_albumTimer.start(); });
+    connect(m_manager.get(), &ImportManager::videoRemoved, this, [this] { m_albumTimer.start(); });
     connect(m_manager.get(), &ImportManager::channelListsChanged, this, &AppController::channelListsChanged);
     connect(m_manager.get(), &ImportManager::channelJudged, this,
             [this](int ticket, qint64 videoId, bool accept, qint64, const QString &track, const QString &reason) {
@@ -358,6 +375,9 @@ void AppController::openLibrary()
 
 void AppController::closeLibrary()
 {
+    m_albumTimer.stop();
+    m_libraryTracks = 0;
+    m_albumModel->reset({});
     if (m_manager) {
         m_manager->stop();
         m_manager.reset();
@@ -382,6 +402,82 @@ void AppController::refreshCounts()
     m_untrackedCount = int(untracked.size());
     m_model->setUntracked(untracked);
     emit activityChanged();
+}
+
+// The albums of the music library, for music mode's grid; a cover that is
+// not made yet is made in the background and arrives through CoverCache.
+void AppController::reloadAlbums()
+{
+    QVector<AlbumInfo> albums;
+    int tracks = 0;
+    if (m_db) {
+        for (const Database::AlbumSummary &s : m_db->albumSummaries()) {
+            AlbumInfo a = AlbumInfo::from(s);
+            a.cover = m_covers.lookup(a.key, a.firstPath, true);
+            tracks += a.tracks;
+            albums << a;
+        }
+    }
+    m_libraryTracks = tracks;
+    m_albumModel->reset(albums);
+}
+
+void AppController::setMode(const QString &mode)
+{
+    const QString m = mode == QLatin1String("music") ? QStringLiteral("music") : QStringLiteral("video");
+    if (m == m_mode)
+        return;
+    m_mode = m;
+    m_settings->setValue(QStringLiteral("ui/mode"), m_mode);
+    emit modeChanged();
+    rebuildFacets();
+}
+
+QVariantList AppController::albumTracks(int row) const
+{
+    QVariantList out;
+    if (!m_db || row < 0 || row >= m_albums->rowCount())
+        return out;
+    const AlbumInfo &a = m_albumModel->at(m_albums->mapToSource(m_albums->index(row, 0)).row());
+    const QUrl cover = a.cover.isEmpty() ? QUrl() : QUrl::fromLocalFile(a.cover);
+    for (const TrackInfo &t : m_db->tracksOfAlbum(a.albumArtist, a.album)) {
+        QVariantMap m{
+            {QStringLiteral("kind"), QStringLiteral("track")},
+            {QStringLiteral("trackId"), t.id},
+            {QStringLiteral("videoId"), t.videoId},
+            {QStringLiteral("videoPath"), QString()},
+            {QStringLiteral("ytTitle"), QString()},
+            {QStringLiteral("path"), t.path},
+            {QStringLiteral("title"), t.title},
+            {QStringLiteral("artist"), t.artist},
+            {QStringLiteral("albumArtist"), t.albumArtist},
+            {QStringLiteral("album"), t.album},
+            {QStringLiteral("albumKey"), a.key},
+            {QStringLiteral("genre"), t.genre},
+            {QStringLiteral("year"), t.year},
+            {QStringLiteral("trackNo"), t.trackNo},
+            {QStringLiteral("discNo"), t.discNo},
+            {QStringLiteral("duration"), t.duration},
+            {QStringLiteral("durationText"), formatDuration(t.duration)},
+            {QStringLiteral("thumb"), cover},
+            {QStringLiteral("codec"), t.codec},
+            {QStringLiteral("bitrate"), t.bitrate},
+            {QStringLiteral("lossless"), t.lossless},
+            {QStringLiteral("sampleRate"), t.sampleRate},
+            {QStringLiteral("bits"), t.bitsPerSample},
+            {QStringLiteral("lookup"), t.lookup},
+            {QStringLiteral("state"), t.state},
+            {QStringLiteral("review"), false},
+        };
+        if (t.videoId > 0) {
+            if (const std::optional<VideoInfo> v = m_db->video(t.videoId)) {
+                m.insert(QStringLiteral("videoPath"), v->path);
+                m.insert(QStringLiteral("ytTitle"), v->ytTitle);
+            }
+        }
+        out << m;
+    }
+    return out;
 }
 
 void AppController::rebuildFacets()
@@ -426,6 +522,25 @@ void AppController::rebuildFacets()
                     ++counts[value];
                 if (orphan)
                     ++orphanCounts[value];
+            }
+        }
+        // In music mode the library's list counts albums, not videos.
+        if (m_mode == QLatin1String("music")) {
+            counts.clear();
+            for (const AlbumInfo &a : m_albumModel->albums()) {
+                QStringList values;
+                if (key == QLatin1String("albumArtist"))
+                    values = splitMulti(a.albumArtist);
+                else if (key == QLatin1String("artist"))
+                    values = splitMulti(a.artists);
+                else if (key == QLatin1String("genre"))
+                    values = splitMulti(a.genres);
+                else if (key == QLatin1String("album") && !a.album.isEmpty())
+                    values << a.album;
+                else if (key == QLatin1String("year") && a.year > 0)
+                    values << QString::number(a.year);
+                for (const QString &value : std::as_const(values))
+                    ++counts[value];
             }
         }
         auto itemsOf = [&](const QHash<QString, int> &counts) {

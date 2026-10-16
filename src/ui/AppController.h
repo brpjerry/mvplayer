@@ -5,6 +5,8 @@
 #include "core/ChatGptAuth.h"
 #include "ui/SystemTheme.h"
 #include "ui/VideoModel.h"
+#include "ui/AlbumModel.h"
+#include "ui/CoverCache.h"
 #include "ui/FolderTreeModel.h"
 
 #include <QAbstractListModel>
@@ -54,6 +56,13 @@ class AppController : public QObject
     Q_PROPERTY(QString undoLabel READ undoLabel NOTIFY undoChanged)
     // Library videos whose tracks are gone, for the user to keep or delete.
     Q_PROPERTY(int orphanCount READ orphanCount NOTIFY facetsChanged)
+
+    // Which library the window shows: "video" (the music videos) or
+    // "music" (the albums of the music library, played from their files).
+    Q_PROPERTY(QString mode READ mode WRITE setMode NOTIFY modeChanged)
+    Q_PROPERTY(AlbumFilterModel *albums READ albums CONSTANT)
+    Q_PROPERTY(int albumCount READ albumCount NOTIFY facetsChanged)
+    Q_PROPERTY(int libraryTrackCount READ libraryTrackCount NOTIFY facetsChanged)
 
     // The music library: a base directory, and the folders ticked under it
     // (musicDirs, the ones that are read). The tree shows the base's folders.
@@ -203,6 +212,18 @@ public:
     // that of its candidate on show.
     Q_INVOKABLE int firstAudioTrack(qint64 videoId) const;
     int orphanCount() const { return m_orphanCount; }
+    QString mode() const { return m_mode; }
+    void setMode(const QString &mode);
+    AlbumFilterModel *albums() const { return m_albums; }
+    int albumCount() const { return m_albumModel->rowCount(); }
+    int libraryTrackCount() const { return m_libraryTracks; }
+    // The files of the album at `row` of the albums on show, in disc and
+    // track order, as the queue takes them: each {kind: "track", trackId,
+    // videoId, videoPath, ytTitle, path, title, artist, albumArtist, album,
+    // albumKey, year, trackNo, discNo, duration, durationText, thumb (the
+    // cover), codec, bitrate, lossless, sampleRate, bits, lookup, state,
+    // review: false}.
+    Q_INVOKABLE QVariantList albumTracks(int row) const;
     Q_INVOKABLE void keepOrphan(qint64 videoId);
     // False while the music folders are being read.
     Q_INVOKABLE bool deleteOrphan(qint64 videoId);
@@ -369,6 +390,7 @@ signals:
     void adviceChanged(qint64 videoId);
     void adviceQueueChanged();
     void facetsChanged();
+    void modeChanged();
     void settingsChanged();
     void activityChanged();
     void cookiesCheckChanged();
@@ -386,6 +408,7 @@ private:
     void openLibrary();
     void closeLibrary();
     void rebuildFacets();
+    void reloadAlbums();
     void refreshCounts();
     void saveSettings();
     QString cookiesPath() const;
@@ -418,6 +441,12 @@ private:
     VideoModel *m_model;
     VideoFilterModel *m_filter;
     JobModel *m_jobs;
+    AlbumModel *m_albumModel;
+    AlbumFilterModel *m_albums;
+    CoverCache m_covers;
+    QTimer m_albumTimer;
+    QString m_mode = QStringLiteral("video");
+    int m_libraryTracks = 0;
 
     QVariantList m_facets;
     QTimer m_facetTimer;

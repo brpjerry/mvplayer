@@ -1530,6 +1530,78 @@ QStringList Database::pathsNotLookedUp()
     return out;
 }
 
+QVector<Database::AlbumSummary> Database::albumSummaries()
+{
+    QVector<AlbumSummary> out;
+    QSqlQuery q(conn());
+    q.prepare(QStringLiteral("SELECT album_artist, album, artist, genre, year, duration, mtime, video_id IS NOT NULL, lookup, path"
+                             " FROM tracks WHERE absent = 0 ORDER BY album_artist, album, disc_no, track_no, path"));
+    if (!run(q))
+        return out;
+    QStringList artists, genres; // of the album being gathered
+    const auto flush = [&] {
+        if (out.isEmpty())
+            return;
+        out.last().artists = artists.join(QStringLiteral("; "));
+        out.last().genres = genres.join(QStringLiteral("; "));
+    };
+    while (q.next()) {
+        const QString albumArtist = q.value(0).toString();
+        const QString album = q.value(1).toString();
+        if (out.isEmpty() || out.last().albumArtist != albumArtist || out.last().album != album) {
+            flush();
+            AlbumSummary a;
+            a.albumArtist = albumArtist;
+            a.album = album;
+            a.firstPath = q.value(9).toString();
+            out << a;
+            artists.clear();
+            genres.clear();
+        }
+        AlbumSummary &a = out.last();
+        for (const QString &v : splitMulti(q.value(2).toString())) {
+            if (!artists.contains(v))
+                artists << v;
+        }
+        for (const QString &v : splitMulti(q.value(3).toString())) {
+            if (!genres.contains(v))
+                genres << v;
+        }
+        const int year = q.value(4).toInt();
+        if (year > 0 && (a.year == 0 || year < a.year))
+            a.year = year;
+        a.duration += q.value(5).toDouble();
+        a.newest = qMax(a.newest, q.value(6).toLongLong());
+        a.videos += q.value(7).toBool() ? 1 : 0;
+        a.lookedUp += q.value(8).toInt() > 0 ? 1 : 0;
+        ++a.tracks;
+    }
+    flush();
+    return out;
+}
+
+QVector<TrackInfo> Database::tracksOfAlbum(const QString &albumArtist, const QString &album)
+{
+    QVector<TrackInfo> out;
+    QSqlQuery q(conn());
+    q.prepare(QStringLiteral("SELECT %1 FROM tracks WHERE absent = 0 AND album_artist = ? AND album = ?"
+                             " ORDER BY disc_no, track_no, path").arg(QLatin1String(kTrackCols)));
+    q.addBindValue(albumArtist);
+    q.addBindValue(album);
+    if (run(q)) {
+        while (q.next())
+            out << readTrack(q);
+    }
+    return out;
+}
+
+int Database::libraryTrackCount()
+{
+    QSqlQuery q(conn());
+    q.prepare(QStringLiteral("SELECT COUNT(*) FROM tracks WHERE absent = 0"));
+    return run(q) && q.next() ? q.value(0).toInt() : 0;
+}
+
 namespace {
 QString rejectionKey(const TrackInfo &t)
 {

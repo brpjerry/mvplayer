@@ -20,21 +20,26 @@ Item {
 
     implicitHeight: 64
 
+    // The library on show: the albums in music mode, else the videos.
+    readonly property bool music: App.mode === "music"
+    readonly property var shownModel: music ? App.albums : App.videos
+
     // Narrowed to one tag's videos, the heading is the tag.
-    readonly property bool tagged: App.videos.facetType !== "all" && App.videos.facetType !== "recent"
+    readonly property bool tagged: shownModel.facetType !== "all" && shownModel.facetType !== "recent"
     readonly property string browseTitle: {
-        const t = App.videos.facetType
-        const section = App.videos.section
+        const t = shownModel.facetType
+        const section = music ? "library" : App.videos.section
         if (section === "review" && !tagged) return "To Review"
         if (section === "orphans" && !tagged) return "Orphaned Videos"
-        if (t === "all") return "All Videos"
+        if (t === "all") return music ? "All Albums" : "All Videos"
         if (t === "recent") return "Recently Added"
-        return App.videos.facetValue
+        return shownModel.facetValue
     }
     readonly property string browseSubtitle: {
-        const n = App.videos.count
-        const section = App.videos.section
-        const noun = section === "orphans" && tagged ? (n === 1 ? " orphaned video" : " orphaned videos")
+        const n = shownModel.count
+        const section = music ? "library" : App.videos.section
+        const noun = music ? (n === 1 ? " album" : " albums")
+                   : section === "orphans" && tagged ? (n === 1 ? " orphaned video" : " orphaned videos")
                    : (n === 1 ? " video" : " videos") + (section === "review" && tagged ? " to review" : "")
         if (searchField.text.trim().length > 0)
             return n + noun + " matching “" + searchField.text.trim() + "”"
@@ -177,8 +182,14 @@ Item {
 
         // Advice mode: the judge's answer for every card at once (X2), and
         // its confident answers carried out as verdicts, once confirmed (X4).
-        readonly property bool adviceTools: App.videos.section === "review" && App.judgeMode === "advice" && App.reviewCount > 0
+        readonly property bool adviceTools: !root.music && App.videos.section === "review" && App.judgeMode === "advice" && App.reviewCount > 0
         property var judgePlan: null // {accept, reject} while "Accept all" waits for a yes
+
+        // Videos | Music
+        ModePill {
+            anchors.verticalCenter: parent.verticalCenter
+        }
+
         FlatButton {
             visible: tools.adviceTools && tools.judgePlan === null
             anchors.verticalCenter: parent.verticalCenter
@@ -254,7 +265,7 @@ Item {
                 required property var modelData
                 readonly property bool open: App.videos.section === modelData.section
                 anchors.verticalCenter: parent.verticalCenter
-                visible: modelData.count > 0 || open
+                visible: (modelData.count > 0 || open) && !root.music
                 icon: modelData.icon
                 checked: open
                 tooltip: open ? "Back to the library" : modelData.count + (modelData.count === 1 ? " video" : " videos") + modelData.what
@@ -290,7 +301,7 @@ Item {
             checked: sortMenu.visible
             tooltip: sortMenu.visible ? "" : "Sort order"
             tooltipBelow: true
-            enabled: App.videos.facetType !== "recent"
+            enabled: root.shownModel.facetType !== "recent"
             onClicked: sortMenu.visible ? sortMenu.close() : sortMenu.open()
 
             Popup {
@@ -316,7 +327,11 @@ Item {
                 }
                 contentItem: Column {
                     Repeater {
-                        model: [
+                        model: root.music ? [
+                            { key: "title", label: "Album" },
+                            { key: "artist", label: "Artist" },
+                            { key: "year", label: "Chronological - Audio" }
+                        ] : [
                             { key: "title", label: "Title" },
                             { key: "artist", label: "Artist" },
                             { key: "year", label: "Chronological - Audio" },
@@ -326,7 +341,7 @@ Item {
                         Item {
                             id: option
                             required property var modelData
-                            readonly property bool current: App.videos.sortMode === modelData.key
+                            readonly property bool current: root.shownModel.sortMode === modelData.key
                             width: sortMenu.availableWidth
                             height: 34
                             Rectangle {
@@ -358,7 +373,7 @@ Item {
                                 anchors.fill: parent
                                 hoverEnabled: true
                                 onClicked: {
-                                    App.videos.sortMode = option.modelData.key
+                                    root.shownModel.sortMode = option.modelData.key
                                     sortMenu.close()
                                 }
                             }
@@ -373,16 +388,16 @@ Item {
         IconButton {
             id: directionButton
             anchors.verticalCenter: parent.verticalCenter
-            icon: App.videos.sortDescending ? Icons.arrowDown : Icons.arrowUp
+            icon: root.shownModel.sortDescending ? Icons.arrowDown : Icons.arrowUp
             enabled: sortButton.enabled
             tooltipBelow: true
             tooltip: {
-                const names = App.videos.sortMode === "title" || App.videos.sortMode === "artist"
+                const names = root.shownModel.sortMode === "title" || root.shownModel.sortMode === "artist"
                 if (names)
-                    return App.videos.sortDescending ? "Z to A" : "A to Z"
-                return App.videos.sortDescending ? "Newest first" : "Oldest first"
+                    return root.shownModel.sortDescending ? "Z to A" : "A to Z"
+                return root.shownModel.sortDescending ? "Newest first" : "Oldest first"
             }
-            onClicked: App.videos.sortDescending = !App.videos.sortDescending
+            onClicked: root.shownModel.sortDescending = !root.shownModel.sortDescending
         }
 
         SearchBox {

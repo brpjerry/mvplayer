@@ -14,8 +14,14 @@ Rectangle {
 
     color: Theme.surface
 
+    // Which library's rows are listed: the albums in music mode, else the
+    // videos. A facet picked stays when the mode changes.
+    readonly property var shownModel: App.mode === "music" ? App.albums : App.videos
+    readonly property bool music: App.mode === "music"
+
     function select(type, value) {
         App.videos.setFacet(type, value)
+        App.albums.setFacet(type, value)
         root.navigated()
     }
 
@@ -108,7 +114,7 @@ Rectangle {
     // switches in the middle of the cross-fade below.
     property string shownKey: App.sidebarFacet
     // Likewise the section of the grid whose values are listed.
-    property string shownSection: App.videos.section
+    property string shownSection: App.mode === "music" ? "library" : App.videos.section
     readonly property var facet: {
         const all = App.facets
         for (let i = 0; i < all.length; ++i) {
@@ -143,7 +149,7 @@ Rectangle {
     Connections {
         target: App.videos
         function onSectionChanged() {
-            if (App.videos.section !== root.shownSection)
+            if ((App.mode === "music" ? "library" : App.videos.section) !== root.shownSection)
                 swap.restart()
         }
     }
@@ -155,7 +161,7 @@ Rectangle {
                 if (root.shownKey !== App.sidebarFacet)
                     filter.clear()
                 root.shownKey = App.sidebarFacet
-                root.shownSection = App.videos.section
+                root.shownSection = App.mode === "music" ? "library" : App.videos.section
                 list.contentY = 0
             }
         }
@@ -208,17 +214,17 @@ Rectangle {
 
         SidebarItem {
             id: allRow
-            label: "All Videos"
+            label: root.music ? "All Albums" : "All Videos"
             icon: Icons.grid
-            count: App.videos.section === "review" ? App.reviewCount : App.videos.section === "orphans" ? App.orphanCount : App.videoCount
-            selected: App.videos.facetType === "all"
+            count: root.music ? App.albumCount : App.videos.section === "review" ? App.reviewCount : App.videos.section === "orphans" ? App.orphanCount : App.videoCount
+            selected: root.shownModel.facetType === "all"
             onClicked: root.select("all", "")
-            onRightClicked: root.askReimport(allRow, "all", "", count)
+            onRightClicked: if (!root.music) root.askReimport(allRow, "all", "", count)
         }
         SidebarItem {
             label: "Recently Added"
             icon: Icons.clock
-            selected: App.videos.facetType === "recent"
+            selected: root.shownModel.facetType === "recent"
             onClicked: root.select("recent", "")
         }
 
@@ -320,7 +326,7 @@ Rectangle {
                                 anchors.right: parent.right
                                 anchors.rightMargin: 12
                                 anchors.verticalCenter: parent.verticalCenter
-                                text: (option.modelData.items[App.videos.section] || []).length
+                                text: (option.modelData.items[root.shownSection] || []).length
                                 color: option.current ? Theme.accent : Theme.textFaint
                                 font.pixelSize: 11
                                 font.features: { "tnum": 1 }
@@ -379,7 +385,7 @@ Rectangle {
                 required property var modelData
                 label: modelData.name
                 count: modelData.count
-                selected: App.videos.facetType === root.shownKey && App.videos.facetValue === modelData.name
+                selected: root.shownModel.facetType === root.shownKey && root.shownModel.facetValue === modelData.name
                 onClicked: root.select(root.shownKey, modelData.name)
                 onRightClicked: root.askReimport(row, root.shownKey, modelData.name, modelData.count)
             }
