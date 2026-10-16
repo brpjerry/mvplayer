@@ -13,6 +13,8 @@ Rectangle {
     property int repeatMode: 0        // 0 off, 1 all, 2 one
     property bool fullscreen: false
     property bool canStep: false
+    property bool musicMode: false    // the music library is on show: no fullscreen, no subtitles
+    readonly property bool trackPlaying: current !== null && current.kind === "track"
     // Held while its popup is open, so that it stays in fullscreen.
     readonly property bool hovered: hover.hovered || seek.dragging || sources.visible
 
@@ -39,7 +41,7 @@ Rectangle {
     function toggleSources() {
         if (sources.visible)
             sources.close()
-        else if (hasMedia && !sourcesInPanel)
+        else if (hasMedia && !sourcesInPanel && !trackPlaying)
             sources.open()
     }
     // What a video under review is playing right now; empty otherwise.
@@ -208,8 +210,8 @@ Rectangle {
         RoundedImage {
             id: art
             anchors.verticalCenter: parent.verticalCenter
-            width: 80
-            height: 45
+            width: root.trackPlaying ? 52 : 80
+            height: root.trackPlaying ? 52 : 45
             radius: 6
             source: root.current ? root.current.thumb : ""
             dim: artMouse.containsMouse ? 0.3 : 0
@@ -564,7 +566,7 @@ Rectangle {
 
         IconButton {
             anchors.verticalCenter: parent.verticalCenter
-            visible: root.hasMedia && root.mpv.hasSubtitles
+            visible: root.hasMedia && root.mpv.hasSubtitles && !root.musicMode
             icon: Icons.subtitles
             iconSize: 20
             checked: App.subtitlesOn
@@ -584,9 +586,10 @@ Rectangle {
 
         IconButton {
             anchors.verticalCenter: parent.verticalCenter
+            visible: !root.musicMode
             icon: root.fullscreen ? Icons.fullscreenExit : Icons.fullscreen
             iconSize: 22
-            enabled: root.hasMedia
+            enabled: root.hasMedia && !root.trackPlaying
             tooltip: root.fullscreen ? "Exit fullscreen (F)" : "Fullscreen (F)"
             onClicked: root.fullscreenToggled()
         }

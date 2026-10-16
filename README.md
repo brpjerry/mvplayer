@@ -661,6 +661,16 @@ the words is tried against what the judge once saw.
   instead (see above); the track's length is in the bar itself, beside the
   artist: the seek bar has the video's, and a video much shorter than its
   track is a cut of the song.
+- The pill at the left of the top bar's tools switches between the two
+  libraries: **Videos**, the music videos, and **Music**, every album under
+  the base directory as a grid of covers (the picture beside the album's
+  first file, else the one in its tags). Clicking an album plays it from its
+  first track, the rest of the album queued after it, from the music files
+  themselves; the bottom bar's controls work as for a video, and the
+  fullscreen and subtitle buttons go away. A chip on a cover of an album in
+  a video folder counts its tracks that have a video. The sidebar, the sort
+  menu (by album, by artist, chronologically) and the search box narrow the
+  albums as they do the videos; the mode is remembered.
 - The sort button in the top bar orders the grid by title, by artist,
   chronologically by the track's year ("Chronological - Audio") or by the day
   the upload was published ("Chronological - Video", the year where the day
@@ -698,6 +708,7 @@ the words is tried against what the judge once saw.
 | ← → (Shift: 30 s) | Seek 5 s |
 | ↑ ↓ | Volume |
 | M | Mute |
+| Ctrl+M | Videos / Music |
 | A | Your library's audio / YouTube's, where a video has both |
 | N / P | Next / previous |
 | F, F11, double-click | Fullscreen |

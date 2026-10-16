@@ -195,6 +195,27 @@ public:
     // The files indexed for the music player that are not looked up (A12).
     QStringList pathsNotLookedUp();
 
+    // The albums of the music library (absent files aside), for the music
+    // player's grid: one per album artist and album title.
+    struct AlbumSummary {
+        QString albumArtist;
+        QString album;
+        QString artists;     // every artist of its files, "; "-joined
+        QString genres;
+        int year = 0;        // the earliest year its files carry; 0: none
+        int tracks = 0;
+        int videos = 0;      // of its tracks, how many have a video
+        int lookedUp = 0;    // ...and how many are looked up (TrackInfo::lookup)
+        double duration = 0;
+        qint64 newest = 0;   // the newest file's mtime
+        QString firstPath;   // its first file in disc and track order (the cover's)
+    };
+    QVector<AlbumSummary> albumSummaries();
+    // The files of an album, in disc and track order.
+    QVector<TrackInfo> tracksOfAlbum(const QString &albumArtist, const QString &album);
+    // Every file of the music library, looked up or not.
+    int libraryTrackCount();
+
     // An artist's YouTube channels, by id (or by name, for videos from
     // before ids were kept): from MusicBrainz, or vouched for by the user.
     bool isArtistChannel(const QString &artist, const QString &channelId, const QString &channelName);

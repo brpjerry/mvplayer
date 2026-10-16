@@ -110,7 +110,11 @@ QDBusObjectPath MprisPlayer::trackId() const
 {
     if (!hasTrack())
         return QDBusObjectPath(QStringLiteral("/org/mpris/MediaPlayer2/TrackList/NoTrack"));
-    return QDBusObjectPath(QStringLiteral("/mvplayer/video/%1").arg(m_session->track().value(QStringLiteral("videoId")).toLongLong()));
+    const QVariantMap &t = m_session->track();
+    const qint64 videoId = t.value(QStringLiteral("videoId")).toLongLong();
+    if (videoId <= 0) // a track of the music library, played from its file
+        return QDBusObjectPath(QStringLiteral("/mvplayer/track/%1").arg(t.value(QStringLiteral("trackId")).toLongLong()));
+    return QDBusObjectPath(QStringLiteral("/mvplayer/video/%1").arg(videoId));
 }
 
 QVariantMap MprisPlayer::metadata() const

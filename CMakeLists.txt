@@ -62,6 +62,15 @@ if(BUILD_TESTING)
     qt_add_executable(mvplayer-foldertree-test tests/FolderTreeTest.cpp src/ui/FolderTreeModel.h src/ui/FolderTreeModel.cpp)
     target_link_libraries(mvplayer-foldertree-test PRIVATE mvcore Qt6::Test)
     add_test(NAME foldertree COMMAND mvplayer-foldertree-test)
+    qt_add_executable(mvplayer-albummodel-test tests/AlbumModelTest.cpp src/ui/AlbumModel.h src/ui/AlbumModel.cpp)
+    target_link_libraries(mvplayer-albummodel-test PRIVATE mvcore Qt6::Test)
+    add_test(NAME albummodel COMMAND mvplayer-albummodel-test)
+    find_package(Qt6 COMPONENTS Gui)
+    if(TARGET Qt6::Gui)
+        qt_add_executable(mvplayer-covers-test tests/CoverCacheTest.cpp src/ui/CoverCache.h src/ui/CoverCache.cpp)
+        target_link_libraries(mvplayer-covers-test PRIVATE mvcore Qt6::Gui Qt6::Test)
+        add_test(NAME covers COMMAND mvplayer-covers-test)
+    endif()
 endif()
 
 option(MV_BUILD_GUI "Build the graphical player" ON)
@@ -93,6 +102,8 @@ qt_add_executable(mvplayer
     src/ui/AccentColor.h src/ui/AccentColor.cpp
     src/ui/SystemTheme.h src/ui/SystemTheme.cpp
     src/ui/VideoModel.h src/ui/VideoModel.cpp
+    src/ui/AlbumModel.h src/ui/AlbumModel.cpp
+    src/ui/CoverCache.h src/ui/CoverCache.cpp
     src/ui/FolderTreeModel.h src/ui/FolderTreeModel.cpp
     src/ui/AppController.h src/ui/AppController.cpp
     src/ui/FrameStats.h src/ui/FrameStats.cpp
@@ -120,6 +131,9 @@ set(MV_QML_FILES
     qml/SearchBox.qml
     qml/VideoGrid.qml
     qml/VideoCard.qml
+    qml/AlbumGrid.qml
+    qml/AlbumCard.qml
+    qml/ModePill.qml
     qml/PlayerView.qml
     qml/ControlBar.qml
     qml/SeekBar.qml

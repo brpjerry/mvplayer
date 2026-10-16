@@ -29,7 +29,7 @@ TEST_LOG="$WORK/unit-tests.txt"
 TEST_LOG_ARG="$TEST_LOG"
 if [[ -n "$EXE" ]]; then TEST_LOG_ARG=$(cygpath -m "$TEST_LOG"); fi
 TEST_RESULT=0
-for t in chatgpt foldertree; do
+for t in chatgpt foldertree albummodel covers; do
     "$BUILD/mvplayer-$t-test$EXE" -o "$TEST_LOG_ARG,txt" || TEST_RESULT=$?
     cat "$TEST_LOG"
     if [[ "$TEST_RESULT" -ne 0 ]]; then exit "$TEST_RESULT"; fi
@@ -1616,6 +1616,16 @@ echo "$OUT" | grep -E "^\[import\] paused|^done:" | cut -c1-110
 rm -f "$WORK/judge-answers.json.asked"
 OUT=$(MVPLAYER_YTDLP="$SITE" MVPLAYER_CLAUDE_API="http://127.0.0.1:$JUDGE_PORT" timeout 120 "$BUILD/mvplayer-import" --allow-still-images --music-dir "$WORK/lib5" --mv-dir "$WORK/mvlib-j8" --jobs 1 2>&1)
 [[ ! -e "$WORK/judge-answers.json.asked" ]]
+
+echo "== an album cover from a file's tags"
+# CoverCache reads the picture embedded in a music file (the unit test skips
+# this without a file to read; ffmpeg makes one here).
+ffmpeg -v error -y -f lavfi -i "color=c=orange:s=640x640:d=1" -frames:v 1 "$WORK/cover.png"
+ffmpeg -v error -y -f lavfi -i "$(song 262 31)" -i "$WORK/cover.png" -map 0:a -map 1:v -c:a flac -c:v png -disposition:v:0 attached_pic -metadata title="Art" -metadata artist=Hal "$WORK/art.flac"
+MVPLAYER_COVER_FILE="$WORK/art.flac" "$BUILD/mvplayer-covers-test$EXE" embedded -o "$TEST_LOG_ARG,txt" || TEST_RESULT=$?
+grep -E "^(PASS|FAIL|SKIP) .*embedded" "$TEST_LOG"
+if [[ "$TEST_RESULT" -ne 0 ]]; then cat "$TEST_LOG"; exit "$TEST_RESULT"; fi
+grep -q "PASS   : CoverCacheTest::embedded()" "$TEST_LOG"
 
 echo "== binaries start"
 "$BUILD/mvplayer-import" --help >/dev/null
