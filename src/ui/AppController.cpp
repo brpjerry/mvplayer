@@ -190,6 +190,27 @@ AppController::AppController(const AppOptions &options, QObject *parent)
     m_thumbColumns = qBound(kThumbColumnsMin, m_settings->value(QStringLiteral("ui/thumbColumns"), m_thumbColumns).toInt(), kThumbColumnsMax);
     m_coverColumns = qBound(kCoverColumnsMin, m_settings->value(QStringLiteral("ui/coverColumns"), m_coverColumns).toInt(), kCoverColumnsMax);
     m_musicPanel = m_settings->value(QStringLiteral("ui/musicPanel"), m_musicPanel).toBool();
+    // Each library's sort, as it was left (ui/videoSort, ui/albumSort and
+    // their directions); a mode that is not one of the menu's is ignored.
+    const auto restoreSort = [this](auto *model, const QStringList &modes, const QString &modeKey, const QString &dirKey) {
+        const QString mode = m_settings->value(modeKey).toString();
+        if (modes.contains(mode)) {
+            model->setSortMode(mode);
+            if (m_settings->contains(dirKey))
+                model->setSortDescending(m_settings->value(dirKey).toBool());
+        }
+        connect(model, &std::remove_pointer_t<decltype(model)>::sortModeChanged, this, [this, model, modeKey, dirKey] {
+            m_settings->setValue(modeKey, model->sortMode());
+            m_settings->setValue(dirKey, model->sortDescending());
+        });
+        connect(model, &std::remove_pointer_t<decltype(model)>::sortDescendingChanged, this, [this, model, dirKey] {
+            m_settings->setValue(dirKey, model->sortDescending());
+        });
+    };
+    restoreSort(m_filter, {QStringLiteral("title"), QStringLiteral("artist"), QStringLiteral("year"), QStringLiteral("published"), QStringLiteral("added")},
+                QStringLiteral("ui/videoSort"), QStringLiteral("ui/videoSortDescending"));
+    restoreSort(m_albums, {QStringLiteral("title"), QStringLiteral("artist"), QStringLiteral("year"), QStringLiteral("modified")},
+                QStringLiteral("ui/albumSort"), QStringLiteral("ui/albumSortDescending"));
     // The sliders were a card width in pixels for a day; those keys are gone.
     m_settings->remove(QStringLiteral("ui/thumbSize"));
     m_settings->remove(QStringLiteral("ui/coverSize"));
