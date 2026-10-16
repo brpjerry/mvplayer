@@ -83,10 +83,19 @@ oldest first beyond 2 GB; "Retry tracks without a video" searches afresh.
 The import log's `requests` counts what each lookup asked for, `fromCache`
 how much of that needed no request.
 
-## Changing the music folders
+## Choosing the music folders
+
+Settings → Library starts from a **base directory** (the folder that holds
+your music) and shows the folders under it as a tree with a check box each.
+Only the music in the ticked folders is read, everything under a ticked
+folder included; a part-filled box means some folders inside are ticked.
+Nothing is read until a folder is ticked. Unticking a folder inside a ticked
+one keeps the rest of that one ticked. Choosing another base directory drops
+the ticked folders that lie outside it (their videos stay, as below).
+Headless, `--music-dir` names the ticked folders directly.
 
 A track whose file is in none of the music folders any more — its folder was
-removed in Settings, or the file deleted — is not forgotten: it is kept as
+unticked in Settings, or the file deleted — is not forgotten: it is kept as
 absent, out of every count and never looked up. When the file is in a music
 folder again, by the same path (a parent folder added in place of its
 subfolders) or recognised by its sound at another, the track is back with
@@ -460,7 +469,7 @@ numbers (`--tsv` for a spreadsheet).
 
 Importing can be interrupted at any point — closing the window, logging out,
 Ctrl+C. Unfinished tracks stay queued and are picked up on the next start;
-partial downloads are discarded. Removing a folder in Settings drops its tracks but
+partial downloads are discarded. Unticking a folder in Settings drops its tracks but
 keeps their videos.
 
 Each library lives in its MV folder: videos and thumbnails under
@@ -658,8 +667,8 @@ the words is tried against what the judge once saw.
   between colours, so cuts do not make the interface flicker. Black, white
   and grey frames give a neutral accent (light grey to white on dark, dark
   grey to black on light).
-- Settings has a tab for each of: the library folders (with re-import and
-  the untracked videos), appearance, playback (subtitles), import behaviour
+- Settings has a tab for each of: the library (the base directory and its
+  folder tree, re-import and the untracked videos), appearance, playback (subtitles), import behaviour
   (with YouTube Premium), the channels you allowed and denied, and the
   judge. Settings → Judge offers Claude API keys and ChatGPT account sign-in
   for advice on review cards or judging lookups, as described above.
@@ -688,7 +697,8 @@ the words is tried against what the judge once saw.
 ## Options
 
 `mvplayer --help` lists them. `--music-dir` (repeatable) / `--mv-dir` override
-the saved folders for one run, `--mute` silences a run, `--fps` shows the frame counter,
+the saved folders for one run (the base directory is then the folder that
+holds every `--music-dir`), `--mute` silences a run, `--fps` shows the frame counter,
 `--ipc <socket>` opens a line-based control socket for UI automation (see
 `ipc()` in `qml/Main.qml`).
 

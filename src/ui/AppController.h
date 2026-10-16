@@ -5,6 +5,7 @@
 #include "core/ChatGptAuth.h"
 #include "ui/SystemTheme.h"
 #include "ui/VideoModel.h"
+#include "ui/FolderTreeModel.h"
 
 #include <QAbstractListModel>
 #include <QSettings>
@@ -54,7 +55,11 @@ class AppController : public QObject
     // Library videos whose tracks are gone, for the user to keep or delete.
     Q_PROPERTY(int orphanCount READ orphanCount NOTIFY facetsChanged)
 
+    // The music library: a base directory, and the folders ticked under it
+    // (musicDirs, the ones that are read). The tree shows the base's folders.
+    Q_PROPERTY(QString baseDir READ baseDir WRITE setBaseDir NOTIFY settingsChanged)
     Q_PROPERTY(QStringList musicDirs READ musicDirs NOTIFY settingsChanged)
+    Q_PROPERTY(FolderTreeModel *folderTree READ folderTree CONSTANT)
     Q_PROPERTY(QString mvDir READ mvDir WRITE setMvDir NOTIFY settingsChanged)
     Q_PROPERTY(bool configured READ configured NOTIFY settingsChanged)
     Q_PROPERTY(bool replaceAudio READ replaceAudio WRITE setReplaceAudio NOTIFY settingsChanged)
@@ -202,7 +207,12 @@ public:
     // False while the music folders are being read.
     Q_INVOKABLE bool deleteOrphan(qint64 videoId);
 
+    QString baseDir() const { return m_baseDir; }
+    void setBaseDir(const QString &dir);
     QStringList musicDirs() const { return m_cfg.musicDirs; }
+    FolderTreeModel *folderTree() { return &m_folderTree; }
+    // Ticks or unticks a folder of the tree (FolderTreeModel::withChecked).
+    Q_INVOKABLE void setFolderChecked(const QString &path, bool on);
     Q_INVOKABLE void addMusicDir(const QString &dir);
     Q_INVOKABLE void removeMusicDir(const QString &dir);
     QString mvDir() const { return m_cfg.mvDir; }
@@ -390,6 +400,12 @@ private:
     AppOptions m_options;
     std::unique_ptr<QSettings> m_settings;
     ImportSettings m_cfg;
+    QString m_baseDir;
+    FolderTreeModel m_folderTree;
+    void applyMusicDirs(QStringList dirs);
+    // Keeps the ticked folders inside the base: outside ones go, an ancestor
+    // of the base becomes the base itself.
+    void fitDirsToBase();
     bool m_checkingCookies = false;
     int m_cookiesCheck = 0; // counts checks, so that a late answer about replaced cookies is dropped
     QString m_cookiesState, m_cookiesStatus;

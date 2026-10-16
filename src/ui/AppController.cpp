@@ -189,9 +189,21 @@ AppController::AppController(const AppOptions &options, QObject *parent)
         m_cfg.musicDirs.clear();
         for (const QString &d : options.musicDirs)
             m_cfg.musicDirs << QDir(d).absolutePath();
+        // Folders given on the command line set the base for the run.
+        m_baseDir = FolderTreeModel::commonAncestor(m_cfg.musicDirs);
+    } else {
+        m_baseDir = m_settings->value(QStringLiteral("library/baseDir")).toString();
+        // Settings from before there was a base: the folder that holds every music folder.
+        if (m_baseDir.isEmpty() && !m_cfg.musicDirs.isEmpty()) {
+            m_baseDir = FolderTreeModel::commonAncestor(m_cfg.musicDirs);
+            m_settings->setValue(QStringLiteral("library/baseDir"), m_baseDir);
+        }
+        fitDirsToBase();
     }
     if (!options.mvDir.isEmpty())
         m_cfg.mvDir = QDir(options.mvDir).absolutePath();
+    m_folderTree.setChecked(m_cfg.musicDirs);
+    m_folderTree.setRoot(m_baseDir);
 
     m_facetTimer.setSingleShot(true);
     m_facetTimer.setInterval(150);
@@ -444,8 +456,10 @@ void AppController::rebuildFacets()
 void AppController::saveSettings()
 {
     // Folders given on the command line are for that run only.
-    if (m_options.musicDirs.isEmpty())
+    if (m_options.musicDirs.isEmpty()) {
+        m_settings->setValue(QStringLiteral("library/baseDir"), m_baseDir);
         m_settings->setValue(QStringLiteral("library/musicDirs"), m_cfg.musicDirs);
+    }
     if (m_options.mvDir.isEmpty())
         m_settings->setValue(QStringLiteral("library/mvDir"), m_cfg.mvDir);
     m_settings->setValue(QStringLiteral("import/replaceAudio"), m_cfg.replaceAudio);
@@ -471,18 +485,30 @@ void AppController::saveSettings()
     m_settings->setValue(QStringLiteral("player/autoExpand"), m_autoExpand);
 }
 
-void AppController::addMusicDir(const QString &dir)
+void AppController::fitDirsToBase()
 {
-    if (dir.isEmpty())
-        return;
-    const QString d = QDir(dir).absolutePath();
-    if (m_cfg.musicDirs.contains(d, pathCase))
-        return;
-    m_cfg.musicDirs << d;
+    QStringList kept;
+    for (const QString &d : std::as_const(m_cfg.musicDirs)) {
+        if (FolderTreeModel::isWithin(d, m_baseDir))
+            kept << d;
+        else if (FolderTreeModel::isWithin(m_baseDir, d))
+            kept << m_baseDir; // the base was inside a ticked folder: all of it stays
+    }
+    kept.removeDuplicates();
+    m_cfg.musicDirs = kept;
+}
+
+void AppController::applyMusicDirs(QStringList dirs)
+{
+    dirs.removeDuplicates();
+    const bool wasOpen = m_manager && !m_manager->settings().musicDirs.isEmpty();
+    m_cfg.musicDirs = dirs;
     m_options.musicDirs.clear();
     saveSettings();
-    if (m_manager && m_manager->settings().musicDirs.size() > 0) {
-        // The library is already open: just scan the new folder in.
+    m_folderTree.setChecked(m_cfg.musicDirs);
+    if (wasOpen) {
+        // The library is already open: a rescan takes the folders in, and
+        // drops the tracks of those that went.
         m_manager->setSettings(m_cfg);
         m_manager->rescan();
     } else {
@@ -491,17 +517,62 @@ void AppController::addMusicDir(const QString &dir)
     emit settingsChanged();
 }
 
+void AppController::setBaseDir(const QString &dir)
+{
+    if (dir.isEmpty())
+        return;
+    const QString d = QDir(dir).absolutePath();
+    if (d.compare(m_baseDir, pathCase) == 0)
+        return;
+    m_baseDir = d;
+    const QStringList before = m_cfg.musicDirs;
+    fitDirsToBase();
+    m_folderTree.setRoot(m_baseDir);
+    if (m_cfg.musicDirs != before) {
+        applyMusicDirs(m_cfg.musicDirs);
+    } else {
+        m_options.musicDirs.clear();
+        saveSettings();
+        emit settingsChanged();
+    }
+}
+
+void AppController::setFolderChecked(const QString &path, bool on)
+{
+    if (path.isEmpty())
+        return;
+    const QString p = QDir(path).absolutePath();
+    if (!FolderTreeModel::isWithin(p, m_baseDir))
+        return;
+    const QStringList next = FolderTreeModel::withChecked(m_cfg.musicDirs, p, on);
+    if (next != m_cfg.musicDirs)
+        applyMusicDirs(next);
+}
+
+void AppController::addMusicDir(const QString &dir)
+{
+    if (dir.isEmpty())
+        return;
+    const QString d = QDir(dir).absolutePath();
+    if (FolderTreeModel::stateOf(d, m_cfg.musicDirs) == FolderTreeModel::Checked)
+        return;
+    // A folder outside the base widens it to the folder that holds both.
+    if (!FolderTreeModel::isWithin(d, m_baseDir)) {
+        QStringList both{d};
+        if (!m_baseDir.isEmpty())
+            both << m_baseDir;
+        m_baseDir = FolderTreeModel::commonAncestor(both);
+        m_folderTree.setRoot(m_baseDir);
+    }
+    applyMusicDirs(FolderTreeModel::withChecked(m_cfg.musicDirs, d, true));
+}
+
 void AppController::removeMusicDir(const QString &dir)
 {
-    if (!m_cfg.musicDirs.removeAll(dir))
+    const QString d = QDir(dir).absolutePath();
+    if (FolderTreeModel::stateOf(d, m_cfg.musicDirs) == FolderTreeModel::Unchecked)
         return;
-    m_options.musicDirs.clear();
-    saveSettings();
-    if (m_manager) {
-        m_manager->setSettings(m_cfg);
-        m_manager->rescan(); // drops that folder's tracks
-    }
-    emit settingsChanged();
+    applyMusicDirs(FolderTreeModel::withChecked(m_cfg.musicDirs, d, false));
 }
 
 void AppController::setMvDir(const QString &dir)

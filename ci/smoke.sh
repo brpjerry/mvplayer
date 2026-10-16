@@ -21,16 +21,19 @@ trap 'rm -rf "$WORK"' EXIT
 export XDG_CONFIG_HOME="$WORK/config"
 export XDG_CACHE_HOME="$WORK/cache"
 export XDG_DATA_HOME="$WORK/data"
-# Authentication and provider tests use a local stand-in and temporary settings.
+# The unit tests (ChatGPT authentication and provider against a local stand-in,
+# the folder tree) use temporary settings.
 # QtTest's default Windows logger may use the debugger instead of stdout.
 # Always capture a text report and print it even when a test fails.
-TEST_LOG="$WORK/chatgpt-tests.txt"
+TEST_LOG="$WORK/unit-tests.txt"
 TEST_LOG_ARG="$TEST_LOG"
 if [[ -n "$EXE" ]]; then TEST_LOG_ARG=$(cygpath -m "$TEST_LOG"); fi
 TEST_RESULT=0
-"$BUILD/mvplayer-chatgpt-test$EXE" -o "$TEST_LOG_ARG,txt" || TEST_RESULT=$?
-cat "$TEST_LOG"
-if [[ "$TEST_RESULT" -ne 0 ]]; then exit "$TEST_RESULT"; fi
+for t in chatgpt foldertree; do
+    "$BUILD/mvplayer-$t-test$EXE" -o "$TEST_LOG_ARG,txt" || TEST_RESULT=$?
+    cat "$TEST_LOG"
+    if [[ "$TEST_RESULT" -ne 0 ]]; then exit "$TEST_RESULT"; fi
+done
 
 # A 50 s "song": a slow sequence of chords, so fingerprints have structure.
 ffmpeg -v error -y -f lavfi -i "aevalsrc=0.3*sin(2*PI*t*(220+30*mod(floor(t/1.5)\,7)))+0.2*sin(2*PI*t*(330+45*mod(floor(t/2)\,5)))+0.1*sin(2*PI*t*880*(1+0.5*mod(floor(t*4)\,2))):s=48000:d=50" \

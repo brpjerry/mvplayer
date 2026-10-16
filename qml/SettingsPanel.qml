@@ -69,9 +69,9 @@ Popup {
 
     FolderDialog {
         id: musicDialog
-        title: "Add a music folder"
-        currentFolder: App.pathToUrl(App.musicDirs.length > 0 ? App.musicDirs[App.musicDirs.length - 1] : "")
-        onAccepted: App.addMusicDir(App.urlToPath(selectedFolder))
+        title: "Select the base directory of your music"
+        currentFolder: App.pathToUrl(App.baseDir)
+        onAccepted: App.baseDir = App.urlToPath(selectedFolder)
     }
     FolderDialog {
         id: mvDialog
@@ -100,6 +100,7 @@ Popup {
     }
     property string cookiesError: ""
     property string keyError: ""
+    onOpened: App.folderTree.refresh()
     // For automation: how far down the settings are shown.
     function scrollTo(y) { flick.contentY = Math.max(0, Math.min(y, flick.contentHeight - flick.height)) }
 
@@ -472,10 +473,10 @@ Popup {
                     width: parent.width - 2 * body.padding
                     visible: root.tab === "library"
 
-                    // Music library: any number of folders
+                    // Music library: a base directory, and the folders ticked under it.
                     Item {
                         width: parent.width
-                        height: 44
+                        height: 64
                         Icon {
                             id: musicIcon
                             anchors.verticalCenter: parent.verticalCenter
@@ -483,75 +484,53 @@ Popup {
                             size: 20
                             color: Theme.textDim
                         }
-                        Text {
+                        Column {
                             anchors.left: musicIcon.right
                             anchors.leftMargin: 14
+                            anchors.right: baseButton.left
+                            anchors.rightMargin: 16
                             anchors.verticalCenter: parent.verticalCenter
-                            text: "Music library"
-                            color: Theme.text
-                            font.pixelSize: 14
-                            font.weight: Font.DemiBold
-                        }
-                        FlatButton {
-                            anchors.right: parent.right
-                            anchors.verticalCenter: parent.verticalCenter
-                            text: "Add folder"
-                            icon: Icons.add
-                            primary: App.musicDirs.length === 0
-                            onClicked: musicDialog.open()
-                        }
-                    }
-                    Text {
-                        visible: App.musicDirs.length === 0
-                        x: 34
-                        height: 30
-                        verticalAlignment: Text.AlignVCenter
-                        text: "No folders yet"
-                        color: Theme.textFaint
-                        font.pixelSize: 12
-                    }
-                    Repeater {
-                        model: App.musicDirs
-                        Item {
-                            id: folder
-                            required property string modelData
-                            width: parent.width
-                            height: 32
-                            Rectangle {
-                                anchors.fill: parent
-                                anchors.leftMargin: 26
-                                anchors.rightMargin: -8
-                                radius: Theme.radiusSmall
-                                color: Theme.hover
-                                opacity: folderHover.hovered ? 1 : 0
-                                Behavior on opacity { NumberAnimation { duration: Theme.fast } }
-                            }
-                            HoverHandler { id: folderHover }
+                            spacing: 3
                             Text {
-                                anchors.left: parent.left
-                                anchors.leftMargin: 34
-                                anchors.right: removeButton.left
-                                anchors.rightMargin: 8
-                                anchors.verticalCenter: parent.verticalCenter
-                                text: App.displayPath(folder.modelData)
-                                color: Theme.textDim
+                                text: "Music library"
+                                color: Theme.text
+                                font.pixelSize: 14
+                                font.weight: Font.DemiBold
+                            }
+                            Text {
+                                width: parent.width
+                                text: App.baseDir.length > 0 ? App.displayPath(App.baseDir) : "No base directory yet"
+                                color: App.baseDir.length > 0 ? Theme.textDim : Theme.textFaint
                                 font.pixelSize: 12
                                 elide: Text.ElideMiddle
                             }
-                            IconButton {
-                                id: removeButton
-                                anchors.right: parent.right
-                                anchors.rightMargin: -4
-                                anchors.verticalCenter: parent.verticalCenter
-                                size: 26
-                                iconSize: 15
-                                icon: Icons.close
-                                opacity: folderHover.hovered || hovered ? 1 : 0.4
-                                tooltip: "Remove folder (its videos are kept)"
-                                onClicked: App.removeMusicDir(folder.modelData)
-                                Behavior on opacity { NumberAnimation { duration: Theme.fast } }
-                            }
                         }
+                        FlatButton {
+                            id: baseButton
+                            anchors.right: parent.right
+                            anchors.verticalCenter: parent.verticalCenter
+                            text: "Select base directory"
+                            icon: Icons.folder
+                            primary: App.baseDir.length === 0
+                            onClicked: musicDialog.open()
+                        }
+                    }
+                    FolderTree {
+                        visible: App.baseDir.length > 0
+                        width: parent.width
+                        maxHeight: 320
+                    }
+                    Text {
+                        visible: App.baseDir.length > 0
+                        width: parent.width
+                        topPadding: 8
+                        wrapMode: Text.WordWrap
+                        lineHeight: 1.3
+                        text: App.musicDirs.length === 0
+                              ? "Tick the folders whose music is read. Nothing is read until one is ticked."
+                              : "The music in the ticked folders is read, everything under each included. A folder ticked off keeps its videos."
+                        color: Theme.textFaint
+                        font.pixelSize: 12
                     }
                     Item { width: 1; height: 10 }
                     FolderRow {

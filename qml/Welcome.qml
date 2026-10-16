@@ -8,9 +8,11 @@ Item {
 
     FolderDialog {
         id: dialog
-        title: "Choose your music library"
-        onAccepted: App.addMusicDir(App.urlToPath(selectedFolder))
+        title: "Select the base directory of your music"
+        currentFolder: App.pathToUrl(App.baseDir)
+        onAccepted: App.baseDir = App.urlToPath(selectedFolder)
     }
+    readonly property bool hasBase: App.baseDir.length > 0
 
     Column {
         anchors.centerIn: parent
@@ -34,7 +36,7 @@ Item {
         Item { width: 1; height: 2 }
         Text {
             anchors.horizontalCenter: parent.horizontalCenter
-            text: "Add your music library"
+            text: root.hasBase ? "Tick the folders to read" : "Add your music library"
             color: Theme.text
             font.pixelSize: 22
             font.weight: Font.DemiBold
@@ -45,7 +47,8 @@ Item {
             horizontalAlignment: Text.AlignHCenter
             wrapMode: Text.WordWrap
             lineHeight: 1.35
-            text: "MV Player finds the music video for each track, downloads it at the best quality available and pairs it with your own audio. Your music folders are only read, never changed; more can be added in Settings."
+            text: root.hasBase ? "Only the music in the folders you tick is read, everything under each included. Your music folders are only read, never changed; the choice can be changed in Settings."
+                               : "MV Player finds the music video for each track, downloads it at the best quality available and pairs it with your own audio. Your music folders are only read, never changed; which of them are read is chosen next."
             color: Theme.textDim
             font.pixelSize: 14
         }
@@ -53,10 +56,26 @@ Item {
         FlatButton {
             anchors.horizontalCenter: parent.horizontalCenter
             implicitHeight: 40
-            text: "Choose music folder"
+            text: "Select base directory"
             icon: Icons.folder
-            primary: true
+            primary: !root.hasBase
             onClicked: dialog.open()
+        }
+        Rectangle {
+            visible: root.hasBase
+            width: parent.width
+            height: tree.height + 16
+            radius: Theme.radius
+            color: Theme.surface
+            border.width: 1
+            border.color: Theme.line
+            FolderTree {
+                id: tree
+                x: 12
+                y: 8
+                width: parent.width - 24
+                maxHeight: Math.max(120, root.height - 420)
+            }
         }
         Text {
             anchors.horizontalCenter: parent.horizontalCenter
