@@ -54,14 +54,59 @@ Item {
 
     GridView {
         id: grid
-        anchors.fill: parent
-        anchors.leftMargin: 18
-        anchors.rightMargin: 18
+        // Hidden, the view keeps its width and so its layout; the width
+        // it has when shown again is taken then, in one step, with the
+        // rows kept (below). Any change while hidden would make it flow
+        // its cards again around the first one on show, and the rows
+        // would drift.
+        readonly property int fitWidth: parent.width - 36
+        property int shownWidth: fitWidth
+        onFitWidthChanged: if (visible) shownWidth = fitWidth
+        x: 18
+        y: 0
+        width: shownWidth
+        height: parent.height
 
         // As many across as chosen (Settings → Appearance).
         readonly property int columns: Math.max(1, App.thumbColumns)
         cellWidth: Math.floor(width / columns)
         cellHeight: Math.round((cellWidth - 20) * 9 / 16) + 74
+
+        // The scroll offset kept in rows: the cards grow or shrink with the
+        // width (a panel coming or going, a resize, the grid shown again
+        // at another width), and the rows on show stay where they are
+        // instead of drifting by part of a row. While the view lays its
+        // cards out again it moves the offset on its own, to keep the
+        // first card it had on show; those moves are not the user's and
+        // are not kept, and the rows are put back once it has settled.
+        property real rowOffset: 0
+        property bool settling: false
+        Timer {
+            id: settled
+            interval: 60
+            onTriggered: {
+                grid.keepRows()
+                grid.settling = false
+            }
+        }
+        function relayout() {
+            settling = true
+            settled.restart()
+            keepRows()
+        }
+        function keepRows() {
+            if (visible && cellHeight > 0)
+                contentY = originY - topMargin + rowOffset * cellHeight
+        }
+        onContentYChanged: if (visible && !settling && cellHeight > 0) rowOffset = (contentY - originY + topMargin) / cellHeight
+        onCellHeightChanged: relayout()
+        onWidthChanged: relayout()
+        onVisibleChanged: {
+            if (!visible)
+                return
+            shownWidth = fitWidth
+            relayout()
+        }
 
         model: App.videos
         topMargin: 2

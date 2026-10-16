@@ -892,7 +892,8 @@ ApplicationWindow {
                 systemDark: App.systemDark, bg: "" + Theme.bg, baseDir: App.baseDir, musicDirs: App.musicDirs, frameColor: "" + mpv.frameColor,
                 frameColorValid: mpv.frameColorValid, sidebar: App.sidebarFacet,
                 anchor: playerView.anchorAvailable ? [Math.round(playerView.anchorRect.x), Math.round(playerView.anchorRect.y), Math.round(playerView.anchorRect.width)] : null,
-                contentY: grid.view.contentY, flicking: grid.view.flicking,
+                contentY: grid.view.contentY, flicking: grid.view.flicking, cellHeight: grid.view.cellHeight,
+                albumContentY: albumGrid.view.contentY, albumCellHeight: albumGrid.view.cellHeight,
                 expand: playerView.expand, contentHeight: grid.view.contentHeight, gridHeight: grid.view.height,
                 window: width + "x" + height, dpr: Screen.devicePixelRatio
             })
