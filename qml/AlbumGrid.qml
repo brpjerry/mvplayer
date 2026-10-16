@@ -45,7 +45,7 @@ Item {
         anchors.leftMargin: 18
         anchors.rightMargin: 18
 
-        readonly property int columns: Math.max(1, Math.floor(width / 290))
+        readonly property int columns: Math.max(1, Math.floor(width / App.coverSize))
         cellWidth: Math.floor(width / columns)
         cellHeight: (cellWidth - 20) + 74
 

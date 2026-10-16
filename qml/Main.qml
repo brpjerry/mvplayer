@@ -616,6 +616,8 @@ ApplicationWindow {
         case "order": return JSON.stringify(App.videos.snapshot().slice(0, parseInt(arg) || 20).map(v => v.title)) // order [n]: the grid's first titles
         case "mode": if (arg) App.mode = arg; return App.mode // mode [video|music]
         case "video-follows": App.videoFollows = arg !== "off"; return "ok" // video-follows on|off
+        case "thumb-size": if (arg) App.thumbSize = parseInt(arg); return "" + App.thumbSize // thumb-size [px]: the video grid's least card width
+        case "cover-size": if (arg) App.coverSize = parseInt(arg); return "" + App.coverSize // cover-size [px]: the album grid's least card width
         case "albums": return JSON.stringify(App.albums.snapshot().slice(0, parseInt(arg) || 20).map(a => a.albumArtist + " — " + a.album)) // albums [n]: the album grid's first albums
         case "album-tracks": return JSON.stringify(App.albumTracks(parseInt(arg)).map(t => t.title)) // album-tracks <row>
         case "play-album": { // play-album <row> [track]
@@ -774,6 +776,7 @@ ApplicationWindow {
                 musicPanel: nowPlaying.active, musicPanelWidth: nowPlaying.width,
                 lookupAlbums: App.lookupAlbums.length, albumMenu: albumGrid.menuOpen,
                 videoFollows: App.videoFollows, videoUp: player.videoUp,
+                thumbSize: App.thumbSize, coverSize: App.coverSize, gridColumns: grid.view.columns, albumColumns: albumGrid.view.columns,
                 playing: player.current ? player.current.title : null, index: player.index,
                 position: mpv.position, duration: mpv.duration, paused: mpv.paused, active: mpv.active, muted: mpv.muted,
                 hwdec: mpv.hwdec, videoSize: mpv.videoSize.width + "x" + mpv.videoSize.height,

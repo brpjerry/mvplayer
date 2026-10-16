@@ -161,6 +161,13 @@ class AppController : public QObject
     Q_PROPERTY(QString accent READ accent WRITE setAccent NOTIFY appearanceChanged)
     // "auto" (follow the operating system), "dark" or "light"
     Q_PROPERTY(QString themeMode READ themeMode WRITE setThemeMode NOTIFY appearanceChanged)
+    // The least width of a card in the video grid and in the album grid, in
+    // pixels; the grids fit as many columns as that allows (ui/thumbSize,
+    // ui/coverSize).
+    Q_PROPERTY(int thumbSize READ thumbSize WRITE setThumbSize NOTIFY appearanceChanged)
+    Q_PROPERTY(int coverSize READ coverSize WRITE setCoverSize NOTIFY appearanceChanged)
+    Q_PROPERTY(int minCardSize READ minCardSize CONSTANT)
+    Q_PROPERTY(int maxCardSize READ maxCardSize CONSTANT)
     Q_PROPERTY(bool systemDark READ systemDark NOTIFY systemDarkChanged)
     // Which tag the sidebar lists: albumArtist | artist | genre | album | year
     Q_PROPERTY(QString sidebarFacet READ sidebarFacet WRITE setSidebarFacet NOTIFY appearanceChanged)
@@ -350,6 +357,15 @@ public:
     void setAccent(const QString &accent);
     QString themeMode() const { return m_themeMode; }
     void setThemeMode(const QString &mode);
+    int thumbSize() const { return m_thumbSize; }
+    void setThumbSize(int px);
+    int coverSize() const { return m_coverSize; }
+    void setCoverSize(int px);
+    static constexpr int kMinCardSize = 180;
+    static constexpr int kMaxCardSize = 600;
+    static constexpr int kDefaultCardSize = 290;
+    int minCardSize() const { return kMinCardSize; }
+    int maxCardSize() const { return kMaxCardSize; }
     bool systemDark() const { return m_systemTheme.dark(); }
     QString sidebarFacet() const { return m_sidebarFacet; }
     void setSidebarFacet(const QString &key);
@@ -480,6 +496,8 @@ private:
     QString m_sidebarFacet = QStringLiteral("albumArtist");
     SystemTheme m_systemTheme;
     QString m_themeMode = QStringLiteral("auto");
+    int m_thumbSize = kDefaultCardSize;
+    int m_coverSize = kDefaultCardSize;
     double m_flickDeceleration = 4800; // px/s²: how quickly a flick glides to a stop
     double m_touchpadGain = 4.0;
     double m_wheelStep = 170;
