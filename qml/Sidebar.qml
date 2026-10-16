@@ -43,7 +43,11 @@ Rectangle {
         property int count: 0
         width: 232
         padding: 6
-        closePolicy: Popup.CloseOnEscape | Popup.CloseOnPressOutsideParent
+        // Any press outside closes it and goes no further: nothing under
+        // it is activated until it is gone.
+        modal: true
+        dim: false
+        closePolicy: Popup.CloseOnEscape | Popup.CloseOnPressOutside
         transformOrigin: Popup.TopLeft
         enter: Transition {
             ParallelAnimation {

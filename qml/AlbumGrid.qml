@@ -115,7 +115,11 @@ Item {
         readonly property int videos: album.videoCount || 0
         width: 268
         padding: 6
-        closePolicy: Popup.CloseOnEscape | Popup.CloseOnPressOutsideParent
+        // Any press outside closes it and goes no further: nothing under
+        // it is activated until it is gone.
+        modal: true
+        dim: false
+        closePolicy: Popup.CloseOnEscape | Popup.CloseOnPressOutside
         transformOrigin: Popup.TopLeft
         enter: Transition {
             ParallelAnimation {

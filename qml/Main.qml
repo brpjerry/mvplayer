@@ -70,6 +70,23 @@ ApplicationWindow {
         return grid.reveal(id)
     }
 
+    // A track's music video, asked for from the music library: the video
+    // library comes up on its card and it plays, as a click on the card
+    // would. A grid narrowed to a tag or a search that leaves it out is
+    // widened first.
+    function playVideo(id) {
+        App.mode = "video"
+        showSection("library")
+        let row = revealVideo(id)
+        if (row < 0) {
+            topBar.searchText = ""
+            sidebar.select("all", "")
+            row = revealVideo(id)
+        }
+        if (row >= 0)
+            player.playRow(row)
+    }
+
     // An accepted video leaves the review list; it stops rather than play on
     // out of sight, and its file is tidied up meanwhile. Among the orphans
     // the verdict is on an orphan, and a kept one leaves that list alike.
@@ -177,8 +194,15 @@ ApplicationWindow {
             const list = App.videos.snapshot()
             if (row < 0 || row >= list.length)
                 return
-            // The video that is already loaded: just bring it forward.
-            if (current && list[row].videoId === current.videoId) {
+            // The video that is already loaded: just bring it forward. A
+            // track whose video is up in its place (App.videoFollows) goes
+            // on as that video, in the grid's queue, without a reload.
+            if (current && list[row].videoId === current.videoId && (current.kind !== "track" || videoUp)) {
+                queue = list
+                history = []
+                index = row
+                current = list[row]
+                videoUp = false
                 window.showPlayer()
                 return
             }
@@ -433,10 +457,7 @@ ApplicationWindow {
             current: player.current
             playing: window.playingNow
             onPlayRequested: (i) => player.load(i)
-            onVideoRequested: (videoId) => {
-                App.mode = "video"
-                window.revealVideo(videoId)
-            }
+            onVideoRequested: (videoId) => window.playVideo(videoId)
         }
 
         PlayerView {
