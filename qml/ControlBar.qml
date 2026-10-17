@@ -10,7 +10,8 @@ Rectangle {
     property bool playing: false
     property bool overlay: false      // floating over fullscreen video
     property bool shuffle: false
-    property int repeatMode: 0        // 0 off, 1 all, 2 one
+    property string playMode: "autoplay"  // what follows: "autoplay", "repeat", "none"
+    property bool albumQueue: false       // an album plays (else a video)
     property bool fullscreen: false
     property bool canStep: false
     property bool musicMode: false    // the music library is on show: the panel switch in place of fullscreen
@@ -26,7 +27,7 @@ Rectangle {
     signal nextRequested()
     signal previousRequested()
     signal shuffleToggled()
-    signal repeatCycled()
+    signal playModeCycled()
     signal fullscreenToggled()
     signal nowPlayingClicked()  // the thumbnail; the title and artist open the popup below
 
@@ -407,13 +408,19 @@ Rectangle {
                 tooltip: "Next (N)"
                 onClicked: root.nextRequested()
             }
+            // What follows the album (or the video): the next one, the
+            // same again, or nothing. A click goes round the three.
             IconButton {
                 anchors.verticalCenter: parent.verticalCenter
-                icon: root.repeatMode === 2 ? Icons.repeatOne : Icons.repeat
+                readonly property string what: root.albumQueue ? "album" : "video"
+                icon: root.playMode === "repeat" ? (root.albumQueue ? Icons.repeat : Icons.repeatOne)
+                    : root.playMode === "none" ? Icons.stopAfter : Icons.autoplay
                 iconSize: 18
-                checked: root.repeatMode > 0
-                tooltip: root.repeatMode === 0 ? "Repeat" : root.repeatMode === 1 ? "Repeat all" : "Repeat one"
-                onClicked: root.repeatCycled()
+                checked: root.playMode !== "none"
+                tooltip: root.playMode === "repeat" ? "Repeat this " + what
+                       : root.playMode === "none" ? "Stop after this " + what
+                       : "Autoplay: the next " + what + " follows"
+                onClicked: root.playModeCycled()
             }
         }
 
