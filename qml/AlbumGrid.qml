@@ -164,6 +164,7 @@ Item {
         // it is activated until it is gone.
         modal: true
         dim: false
+        focus: true // Escape closes it only while it has the focus
         closePolicy: Popup.CloseOnEscape | Popup.CloseOnPressOutside
         transformOrigin: Popup.TopLeft
         enter: Transition {

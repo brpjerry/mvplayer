@@ -74,6 +74,7 @@ Popup {
     height: Math.min(content.implicitHeight + 2, (Overlay.overlay ? Overlay.overlay.height : 800) - 32)
     anchors.centerIn: Overlay.overlay
     modal: true
+    focus: true // Escape closes it only while it has the focus
     padding: 1
     closePolicy: Popup.CloseOnEscape | Popup.CloseOnPressOutside
 
