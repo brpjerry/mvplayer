@@ -100,11 +100,15 @@ ApplicationWindow {
         }
     }
 
+    // Over the music library nothing grows: a video that plays on across
+    // the mode switch stays where it is, unless it is a track's own (videoUp).
+    readonly property bool videoViewable: player.current !== null
+        && (player.current.kind !== "track" ? App.mode === "video" : player.videoUp)
     function setFullscreen(on) {
         if (on === fullscreen)
             return
         if (on) {
-            if (!player.current || (player.current.kind === "track" && !player.videoUp))
+            if (!videoViewable)
                 return
             visibilityBeforeFullscreen = visibility
             if (view !== "player")
@@ -115,7 +119,7 @@ ApplicationWindow {
         }
     }
     function showPlayer() {
-        if (!player.current || (player.current.kind === "track" && !player.videoUp))
+        if (!videoViewable)
             return
         releaseTextFocus()
         view = "player"
