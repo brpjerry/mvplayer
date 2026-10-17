@@ -215,7 +215,12 @@ ApplicationWindow {
         property int index: -1
         property var current: null
         property bool shuffle: false
-        property int repeatMode: 0  // 0 off, 1 all, 2 one
+        // What follows the queue: "autoplay" goes on (the next album of
+        // the music library, the next video of the grid), "repeat" plays
+        // the album, or the video, again, "none" stops after it.
+        property string playMode: "autoplay"
+        // The queue is an album's tracks (else the grid's videos).
+        readonly property bool albumQueue: queue.length > 0 && queue[0].kind === "track"
         property var history: []    // indices played, for "previous" while shuffling
         // A track of the music library whose music video is playing in its
         // place (App.videoFollows): the player layer is up over the albums.
@@ -226,40 +231,77 @@ ApplicationWindow {
         property int pendingNext: -1
         property int loads: 0   // how many times a file was loaded afresh (tests)
 
-        // What next(true) would choose, without choosing it.
+        // The queue's items not played yet (shuffle draws from them).
+        function unplayed() {
+            const left = []
+            for (let i = 0; i < queue.length; i++)
+                if (i !== index && history.indexOf(i) < 0)
+                    left.push(i)
+            return left
+        }
+        function randomOther() {
+            let n
+            do {
+                n = Math.floor(Math.random() * queue.length)
+            } while (n === index)
+            return n
+        }
+        // The album after the playing one in the grid's order, or -1.
+        function nextAlbumRow() {
+            if (!albumQueue || !current)
+                return -1
+            const row = App.albums.rowOfKey(current.albumKey)
+            return row >= 0 && row + 1 < App.albums.count ? row + 1 : -1
+        }
+        // What next(true) would choose, without choosing it: an index in
+        // the queue, -2 for the next album, -1 for nothing (the end).
         function upcoming() {
             if (queue.length === 0)
                 return -1
-            if (repeatMode === 2)
-                return index
-            if (shuffle && queue.length > 1) {
-                let n
-                do {
-                    n = Math.floor(Math.random() * queue.length)
-                } while (n === index)
-                return n
+            if (!albumQueue) {
+                if (playMode === "repeat")
+                    return index
+                if (playMode === "none")
+                    return -1
             }
-            const n = index + 1
-            if (n < queue.length)
-                return n
-            return repeatMode === 1 ? 0 : -1
+            if (shuffle && queue.length > 1) {
+                const left = unplayed()
+                if (left.length > 0)
+                    return left[Math.floor(Math.random() * left.length)]
+            } else if (index + 1 < queue.length) {
+                return index + 1
+            }
+            // The queue's end.
+            if (playMode === "repeat")
+                return shuffle && queue.length > 1 ? randomOther() : 0
+            if (playMode === "autoplay" && nextAlbumRow() >= 0)
+                return -2
+            return -1
         }
         // A track played from its file, as this one is.
         function fromFile(item) {
             return item && item.kind === "track" && !(App.videoFollows && item.videoId > 0 && item.videoPath)
         }
+        // The next album, when it follows gaplessly: its tracks, taken
+        // as the queue once mpv has gone on to its first.
+        property var pendingQueue: []
         function armNext() {
             const n = fromFile(current) && !videoUp ? upcoming() : -1
+            const list = n === -2 ? App.albumTracks(nextAlbumRow()) : []
             if (n >= 0 && fromFile(queue[n])) {
                 pendingNext = n
                 window.mpv.queueNext(queue[n].path)
+            } else if (n === -2 && list.length > 0 && fromFile(list[0])) {
+                pendingNext = -2
+                pendingQueue = list
+                window.mpv.queueNext(list[0].path)
             } else {
                 pendingNext = -1
                 window.mpv.clearNext()
             }
         }
         onShuffleChanged: if (current) armNext()
-        onRepeatModeChanged: if (current) armNext()
+        onPlayModeChanged: if (current) armNext()
 
         function load(i) {
             pendingNext = -1
@@ -343,24 +385,31 @@ ApplicationWindow {
             playerView.openFrom(decodeWidth)
         }
 
-        // `automatic`: called because the current video ended.
+        // `automatic`: called because the current item ended; then the
+        // play mode decides. Asked for, the next item follows whatever the
+        // mode, and at the queue's end the next album, or the first item.
         function next(automatic) {
             if (queue.length === 0)
                 return false
-            if (automatic && repeatMode === 2) {
-                load(index)
+            let n
+            if (automatic) {
+                n = upcoming()
+            } else if (shuffle && queue.length > 1) {
+                const left = unplayed()
+                n = left.length > 0 ? left[Math.floor(Math.random() * left.length)] : randomOther()
+            } else if (index + 1 < queue.length) {
+                n = index + 1
+            } else {
+                n = nextAlbumRow() >= 0 ? -2 : 0
+            }
+            if (n === -2) {
+                playAlbum(nextAlbumRow(), 0)
                 return true
             }
-            let n = index + 1
-            if (shuffle && queue.length > 1) {
-                do {
-                    n = Math.floor(Math.random() * queue.length)
-                } while (n === index)
-            } else if (n >= queue.length) {
-                if (automatic && repeatMode !== 1)
-                    return false
-                n = 0
-            }
+            if (n < 0)
+                return false
+            if (shuffle && unplayed().length === 0)
+                history = [] // around again
             history.push(index)
             load(n)
             return true
@@ -411,12 +460,24 @@ ApplicationWindow {
         // mpv went on to the track queued after the playing one.
         function onFileStarted(path) {
             const n = player.pendingNext
-            if (n < 0 || n >= player.queue.length || player.queue[n].path !== path)
-                return
-            if (n !== player.index) {
-                player.history.push(player.index)
-                player.index = n
-                player.current = player.queue[n]
+            if (n === -2) {
+                if (player.pendingQueue.length === 0 || player.pendingQueue[0].path !== path)
+                    return
+                player.queue = player.pendingQueue
+                player.pendingQueue = []
+                player.history = []
+                player.index = 0
+                player.current = player.queue[0]
+            } else {
+                if (n < 0 || n >= player.queue.length || player.queue[n].path !== path)
+                    return
+                if (n !== player.index) {
+                    if (player.shuffle && player.unplayed().length === 0)
+                        player.history = []
+                    player.history.push(player.index)
+                    player.index = n
+                    player.current = player.queue[n]
+                }
             }
             player.pendingNext = -1
             player.armNext()
@@ -444,7 +505,8 @@ ApplicationWindow {
     Binding { target: MediaSession; property: "position"; value: window.mpv.position }
     Binding { target: MediaSession; property: "volume"; value: App.volume }
     Binding { target: MediaSession; property: "shuffle"; value: player.shuffle }
-    Binding { target: MediaSession; property: "repeatMode"; value: player.repeatMode }
+    // MPRIS knows None, Playlist and Track; autoplay and none both read as None.
+    Binding { target: MediaSession; property: "repeatMode"; value: player.playMode !== "repeat" ? 0 : player.albumQueue ? 1 : 2 }
     Binding { target: MediaSession; property: "canStep"; value: player.queue.length > 1 }
     Binding { target: MediaSession; property: "fullscreen"; value: window.fullscreen }
     Connections {
@@ -458,7 +520,7 @@ ApplicationWindow {
         function onSeekRequested(seconds) { window.mpv.seek(seconds, true) }
         function onVolumeRequested(volume) { App.volume = volume }
         function onShuffleRequested(shuffle) { player.shuffle = shuffle }
-        function onRepeatModeRequested(mode) { player.repeatMode = mode }
+        function onRepeatModeRequested(mode) { player.playMode = mode > 0 ? "repeat" : "autoplay" }
         function onFullscreenRequested(fullscreen) { window.setFullscreen(fullscreen) }
         function onRaiseRequested() { window.bringUp() }
         function onQuitRequested() { App.quit() }
@@ -641,13 +703,14 @@ ApplicationWindow {
             musicMode: App.mode === "music"
             videoUp: player.videoUp
             shuffle: player.shuffle
-            repeatMode: player.repeatMode
+            playMode: player.playMode
+            albumQueue: player.albumQueue
             canStep: player.queue.length > 1
             onPlayPauseRequested: window.togglePause()
             onNextRequested: player.next(false)
             onPreviousRequested: player.previous()
             onShuffleToggled: player.shuffle = !player.shuffle
-            onRepeatCycled: player.repeatMode = (player.repeatMode + 1) % 3
+            onPlayModeCycled: player.playMode = player.playMode === "autoplay" ? "repeat" : player.playMode === "repeat" ? "none" : "autoplay"
             onFullscreenToggled: window.setFullscreen(!window.fullscreen)
             onNowPlayingClicked: {
                 if (player.current && player.current.kind === "track" && !player.videoUp) {
@@ -762,7 +825,7 @@ ApplicationWindow {
         case "previous": player.previous(); return "ok"
         case "stop": player.stop(); return "ok"
         case "seek": mpv.seek(parseFloat(arg), true); return "ok"
-        case "repeat": if (arg) player.repeatMode = parseInt(arg); return "" + player.repeatMode // repeat [0|1|2]: off, all, one
+        case "play-mode": if (arg) player.playMode = arg; return player.playMode // play-mode [autoplay|repeat|none]: what follows the album, or the video
         case "shuffle": if (arg) player.shuffle = arg !== "off"; return player.shuffle ? "on" : "off" // shuffle [on|off]
         case "audio": mpv.audioTrack = parseInt(arg); return "ok"
         case "switch-audio": controlBar.switchAudio(); return "ok" // as the key on the chip does
@@ -944,7 +1007,7 @@ ApplicationWindow {
                 mode: App.mode, albumCount: App.albumCount, albumsShown: App.albums.count, libraryTracks: App.libraryTrackCount,
                 albumSort: App.albums.sortMode, albumDescending: App.albums.sortDescending, albumFacet: App.albums.facetType,
                 queueLength: player.queue.length, queueKind: player.current ? (player.current.kind || "video") : null,
-                pendingNext: player.pendingNext, loads: player.loads, trackAccent: window.trackAccent,
+                pendingNext: player.pendingNext, loads: player.loads, playMode: player.playMode, albumQueue: player.albumQueue, shuffle: player.shuffle, trackAccent: window.trackAccent,
                 musicPanel: nowPlaying.active, musicPanelWidth: nowPlaying.width, musicPanelOn: App.musicPanel,
                 lookupAlbums: App.lookupAlbums.length, albumMenu: albumGrid.menuOpen,
                 videoFollows: App.videoFollows, videoUp: player.videoUp,

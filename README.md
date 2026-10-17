@@ -726,6 +726,13 @@ the words is tried against what the judge once saw.
   (with YouTube Premium), the channels you allowed and denied, and the
   judge. Settings → Judge offers Claude API keys and ChatGPT account sign-in
   for advice on review cards or judging lookups, as described above.
+- The right-hand transport button says what follows the album that plays
+  (in the music library) or the video (in the video library): **Autoplay**
+  goes on to the next album in the grid's order, or the next video;
+  **Repeat** plays the album, or the video, again; **Stop after** ends
+  playback after it. Shuffle draws the album's tracks, or the grid's
+  videos, in a random order, each once. An album that follows another
+  starts without a gap.
 - On Linux the playing video is offered to the desktop's media controls
   (MPRIS): media keys, `playerctl`, panel and lock-screen widgets show it and
   can play, pause, skip, seek and change the volume, shuffle and repeat. The
