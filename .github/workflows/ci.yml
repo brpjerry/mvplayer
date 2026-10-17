@@ -15,7 +15,7 @@ jobs:
         run: |
           pacman -Sy --noconfirm archlinux-keyring
           pacman -Syu --noconfirm git cmake ninja qt6-base qt6-declarative qt6-shadertools \
-            openssl mpv taglib chromaprint ffmpeg yt-dlp python
+            openssl mpv libpulse taglib chromaprint ffmpeg yt-dlp python
       - uses: actions/checkout@v7
       - name: Configure and build
         run: |
@@ -33,7 +33,7 @@ jobs:
         run: |
           pacman -Sy --noconfirm archlinux-keyring
           pacman -Syu --noconfirm git cmake ninja qt6-base qt6-declarative qt6-shadertools \
-            openssl mpv taglib chromaprint ffmpeg yt-dlp
+            openssl mpv libpulse taglib chromaprint ffmpeg yt-dlp
       - uses: actions/checkout@v7
       - name: Build the pacman package from this tree
         run: ci/makepkg.sh

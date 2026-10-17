@@ -1055,6 +1055,14 @@ Popup {
                         checked: App.videoFollows
                         onToggled: (c) => App.videoFollows = c
                     }
+                    SwitchRow {
+                        label: "The volume bar sets the system volume"
+                        hint: App.systemVolume && !App.systemVolumeAvailable
+                            ? "No output device could be followed; the bar keeps to the app's own volume."
+                            : "The bar shows and moves the output device's level, as the desktop's own volume keys do; the app itself plays at full level."
+                        checked: App.systemVolume
+                        onToggled: (c) => App.systemVolume = c
+                    }
 
                     Divider {}
 

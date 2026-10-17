@@ -8,6 +8,7 @@
 #include "ui/AlbumModel.h"
 #include "ui/CoverCache.h"
 #include "ui/FolderTreeModel.h"
+#include "ui/SystemVolume.h"
 
 #include <QAbstractListModel>
 #include <QSettings>
@@ -182,8 +183,15 @@ class AppController : public QObject
     Q_PROPERTY(double touchpadGain READ touchpadGain CONSTANT)
     Q_PROPERTY(double wheelStep READ wheelStep CONSTANT)
 
+    // The volume bar: the player's own volume, or, with systemVolume on and
+    // an output device to follow, the operating system's. The player then
+    // plays at full level, unmuted, so the bar is the one level in the way.
     Q_PROPERTY(double volume READ volume WRITE setVolume NOTIFY volumeChanged)
     Q_PROPERTY(bool muted READ muted WRITE setMuted NOTIFY volumeChanged)
+    Q_PROPERTY(bool systemVolume READ systemVolume WRITE setSystemVolume NOTIFY settingsChanged)
+    Q_PROPERTY(bool systemVolumeAvailable READ systemVolumeAvailable NOTIFY volumeChanged)
+    Q_PROPERTY(double playerVolume READ playerVolume NOTIFY volumeChanged)
+    Q_PROPERTY(bool playerMuted READ playerMuted NOTIFY volumeChanged)
 
 public:
     explicit AppController(const AppOptions &options, QObject *parent = nullptr);
@@ -386,10 +394,15 @@ public:
     double touchpadGain() const { return m_touchpadGain; }
     double wheelStep() const { return m_wheelStep; }
 
-    double volume() const { return m_volume; }
+    double volume() const;
     void setVolume(double v);
-    bool muted() const { return m_muted || m_options.mute; }
+    bool muted() const;
     void setMuted(bool m);
+    bool systemVolume() const { return m_systemVolume; }
+    void setSystemVolume(bool on);
+    bool systemVolumeAvailable() const { return m_system->available(); }
+    double playerVolume() const { return systemVolumeOn() ? 1.0 : m_volume; }
+    bool playerMuted() const { return m_options.mute || (!systemVolumeOn() && m_muted); }
 
     Q_INVOKABLE void rescan();
     Q_INVOKABLE void retryUnmatched();
@@ -516,6 +529,9 @@ private:
     double m_wheelStep = 170;
     double m_volume = 1.0;
     bool m_muted = false;
+    bool m_systemVolume = false;
+    SystemVolume *m_system = nullptr;
+    bool systemVolumeOn() const { return m_systemVolume && m_system->available(); }
     bool m_subtitlesOn = true;
     double m_subtitleOutline = 2.2;
     double m_subtitleShadow = 0;
