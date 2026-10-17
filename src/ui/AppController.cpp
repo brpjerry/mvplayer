@@ -1524,7 +1524,9 @@ double AppController::volume() const
 
 bool AppController::muted() const
 {
-    return m_options.mute || (systemVolumeOn() ? m_system->muted() : m_muted);
+    // The bar's state is the user's; --mute (test runs) silences the player
+    // underneath (playerMuted) without pinning the bar.
+    return systemVolumeOn() ? m_system->muted() : m_muted;
 }
 
 void AppController::setVolume(double v)

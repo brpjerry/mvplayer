@@ -148,7 +148,8 @@ int main(int argc, char **argv)
                 // button pressed and released. What hovering brings up
                 // cannot be tried otherwise without a pointer of the desk's.
                 const bool click = line.startsWith(QLatin1String("click "));
-                if (click || line.startsWith(QLatin1String("pointer "))) {
+                const bool rclick = line.startsWith(QLatin1String("rclick "));
+                if (click || rclick || line.startsWith(QLatin1String("pointer "))) {
                     auto *window = qobject_cast<QQuickWindow *>(root);
                     const QStringList at = line.section(QLatin1Char(' '), 1).split(QLatin1Char(' '), Qt::SkipEmptyParts);
                     if (!window || at.size() != 2)
@@ -163,6 +164,9 @@ int main(int argc, char **argv)
                     if (click) {
                         send(QEvent::MouseButtonPress, Qt::LeftButton, Qt::LeftButton);
                         send(QEvent::MouseButtonRelease, Qt::LeftButton, Qt::NoButton);
+                    } else if (rclick) { // rclick <x> <y>: the right button, for the menus
+                        send(QEvent::MouseButtonPress, Qt::RightButton, Qt::RightButton);
+                        send(QEvent::MouseButtonRelease, Qt::RightButton, Qt::NoButton);
                     }
                     return QStringLiteral("ok");
                 }
