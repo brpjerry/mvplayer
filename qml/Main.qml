@@ -511,7 +511,7 @@ ApplicationWindow {
     Binding { target: MediaSession; property: "shuffle"; value: player.shuffle }
     // MPRIS knows None, Playlist and Track; autoplay and none both read as None.
     Binding { target: MediaSession; property: "repeatMode"; value: player.playMode !== "repeat" ? 0 : player.albumQueue ? 1 : 2 }
-    Binding { target: MediaSession; property: "canStep"; value: player.queue.length > 1 }
+    Binding { target: MediaSession; property: "canStep"; value: player.queue.length > 1 || player.nextAlbumRow() >= 0 }
     Binding { target: MediaSession; property: "fullscreen"; value: window.fullscreen }
     Connections {
         target: MediaSession
@@ -709,7 +709,7 @@ ApplicationWindow {
             shuffle: player.shuffle
             playMode: player.playMode
             albumQueue: player.albumQueue
-            canStep: player.queue.length > 1
+            canStep: player.queue.length > 1 || player.nextAlbumRow() >= 0
             onPlayPauseRequested: window.togglePause()
             onNextRequested: player.next(false)
             onPreviousRequested: player.previous()
