@@ -42,7 +42,7 @@ Or build the package yourself from `packaging/PKGBUILD` with `makepkg -si`.
 ## Build from source
 
 Dependencies (Arch package names): `qt6-base qt6-declarative qt6-shadertools
-openssl mpv taglib chromaprint cmake ninja`, plus `yt-dlp` and `ffmpeg` at run time.
+openssl mpv libpulse taglib chromaprint cmake ninja`, plus `yt-dlp` and `ffmpeg` at run time.
 
 ```sh
 cmake -S . -B build -G Ninja
@@ -698,6 +698,12 @@ the words is tried against what the judge once saw.
   art size**: how many cards go across the video grid (2 to 6, 4 by default)
   and the album grid (2 to 8, 3 by default). The cards share the width
   evenly, so each step is one column.
+- Settings → Playback → **The volume bar sets the system volume**: the bar
+  shows and moves the output device's level (the default sink through
+  PulseAudio or PipeWire on Linux, the default playback device on Windows),
+  as the desktop's own volume keys do, and follows it when it is changed
+  elsewhere; the app itself then plays at full level. Off, the bar is the
+  app's own volume, as before.
 - Settings → Accent colour: a fixed colour (presets or the hue strip) or
   **Auto**, which takes the colour from the playing video, or from the
   album's cover for a track played from its file. Auto looks at one

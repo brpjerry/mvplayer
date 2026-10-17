@@ -22,7 +22,7 @@ jobs:
         run: |
           pacman -Sy --noconfirm archlinux-keyring
           pacman -Syu --noconfirm git cmake ninja qt6-base qt6-declarative qt6-shadertools \
-            openssl mpv taglib chromaprint ffmpeg yt-dlp github-cli
+            openssl mpv libpulse taglib chromaprint ffmpeg yt-dlp github-cli
       - uses: actions/checkout@v7
       - name: Build the pacman package
         # A tag sets the version; a manual run builds the PKGBUILD's own.

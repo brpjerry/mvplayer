@@ -90,6 +90,11 @@ if(NOT WIN32)
     find_package(Qt6 QUIET OPTIONAL_COMPONENTS DBus)
 endif()
 pkg_check_modules(MPV REQUIRED IMPORTED_TARGET mpv)
+# The system volume: the PulseAudio client library on Linux (PipeWire serves
+# it too); Windows has Core Audio. Without either the setting does nothing.
+if(NOT WIN32)
+    pkg_check_modules(PULSE IMPORTED_TARGET libpulse)
+endif()
 if(WIN32)
     # One of mpv's dependencies in MSYS2 names the prefix by its Unix path
     # ("/ucrt64/include"), which is not a directory Windows knows; the
@@ -116,6 +121,7 @@ qt_add_executable(mvplayer
     src/ui/YtDlpUpdater.h src/ui/YtDlpUpdater.cpp
     src/ui/WindowFrame.h src/ui/WindowFrame.cpp
     src/ui/PointerPacer.h src/ui/PointerPacer.cpp
+    src/ui/SystemVolume.h src/ui/SystemVolume.cpp
     ${MV_WINDOWS_RC}
 )
 # No console window on Windows.
@@ -187,7 +193,11 @@ target_link_libraries(mvplayer PRIVATE
     PkgConfig::MPV
 )
 if(WIN32)
-    target_link_libraries(mvplayer PRIVATE dwmapi)
+    target_link_libraries(mvplayer PRIVATE dwmapi ole32 uuid)
+endif()
+if(PULSE_FOUND)
+    target_link_libraries(mvplayer PRIVATE PkgConfig::PULSE)
+    target_compile_definitions(mvplayer PRIVATE MV_HAVE_PULSE)
 endif()
 if(Qt6DBus_FOUND)
     target_sources(mvplayer PRIVATE src/ui/Mpris.h src/ui/Mpris.cpp)

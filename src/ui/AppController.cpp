@@ -220,6 +220,11 @@ AppController::AppController(const AppOptions &options, QObject *parent)
     m_wheelStep = qBound(20.0, m_settings->value(QStringLiteral("ui/wheelStep"), m_wheelStep).toDouble(), 1000.0);
     m_volume = m_settings->value(QStringLiteral("player/volume"), 1.0).toDouble();
     m_muted = m_settings->value(QStringLiteral("player/muted"), false).toBool();
+    m_systemVolume = m_settings->value(QStringLiteral("player/systemVolume"), false).toBool();
+    m_system = new SystemVolume(this);
+    connect(m_system, &SystemVolume::availableChanged, this, &AppController::volumeChanged);
+    connect(m_system, &SystemVolume::changed, this, &AppController::volumeChanged);
+    m_system->follow(m_systemVolume);
 
     if (!options.musicDirs.isEmpty()) {
         m_cfg.musicDirs.clear();
@@ -675,6 +680,7 @@ void AppController::saveSettings()
     m_settings->setValue(QStringLiteral("import/keepEverything"), m_keepEverything);
     m_settings->setValue(QStringLiteral("player/volume"), m_volume);
     m_settings->setValue(QStringLiteral("player/muted"), m_muted);
+    m_settings->setValue(QStringLiteral("player/systemVolume"), m_systemVolume);
     m_settings->setValue(QStringLiteral("import/subtitleLangs"), m_cfg.subtitleLangs);
     m_settings->setValue(QStringLiteral("player/subtitles"), m_subtitlesOn);
     m_settings->setValue(QStringLiteral("player/subtitleOutline"), m_subtitleOutline);
@@ -1248,6 +1254,17 @@ void AppController::setSubtitleShadow(double v)
     emit settingsChanged();
 }
 
+void AppController::setSystemVolume(bool on)
+{
+    if (on == m_systemVolume)
+        return;
+    m_systemVolume = on;
+    saveSettings();
+    m_system->follow(on);
+    emit settingsChanged();
+    emit volumeChanged();
+}
+
 void AppController::setVideoFollows(bool v)
 {
     if (v == m_videoFollows)
@@ -1429,9 +1446,23 @@ void AppController::setSidebarFacet(const QString &key)
     emit appearanceChanged();
 }
 
+double AppController::volume() const
+{
+    return systemVolumeOn() ? m_system->volume() : m_volume;
+}
+
+bool AppController::muted() const
+{
+    return m_options.mute || (systemVolumeOn() ? m_system->muted() : m_muted);
+}
+
 void AppController::setVolume(double v)
 {
     v = qBound(0.0, v, 1.0);
+    if (systemVolumeOn()) {
+        m_system->setVolume(v);
+        return;
+    }
     if (qFuzzyCompare(v + 1.0, m_volume + 1.0))
         return;
     m_volume = v;
@@ -1441,6 +1472,10 @@ void AppController::setVolume(double v)
 
 void AppController::setMuted(bool m)
 {
+    if (systemVolumeOn()) {
+        m_system->setMuted(m);
+        return;
+    }
     if (m == m_muted)
         return;
     m_muted = m;
