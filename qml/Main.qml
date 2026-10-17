@@ -155,6 +155,8 @@ ApplicationWindow {
     // would. A grid narrowed to a tag or a search that leaves it out is
     // widened first.
     function playVideo(id) {
+        // The track it was asked from, to come back to if the video fails.
+        const from = player.current && player.current.kind === "track" ? { queue: player.queue, index: player.index } : null
         App.mode = "video"
         showSection("library")
         let row = revealVideo(id)
@@ -163,8 +165,10 @@ ApplicationWindow {
             sidebar.select("all", "")
             row = revealVideo(id)
         }
-        if (row >= 0)
+        if (row >= 0) {
             player.playRow(row)
+            player.fallback = from
+        }
     }
 
     // An accepted video leaves the review list; it stops rather than play on
@@ -234,6 +238,11 @@ ApplicationWindow {
         // onFileStarted then takes the queue there without a load.
         property int pendingNext: -1
         property int loads: 0   // how many times a file was loaded afresh (tests)
+        // Where to go back to when a video asked for from a track fails
+        // ({queue, index}), and how many loads failed in a row: a broken
+        // file is skipped, a run of them stops rather than walk the grid.
+        property var fallback: null
+        property int failures: 0
 
         // The queue's items not played yet (shuffle draws from them).
         function unplayed() {
@@ -356,6 +365,8 @@ ApplicationWindow {
             const list = App.albumTracks(row)
             if (list.length === 0)
                 return
+            fallback = null
+            failures = 0
             queue = list
             history = []
             const i = trackIndex < 0 ? list.length - 1 : Math.min(trackIndex || 0, list.length - 1)
@@ -367,6 +378,8 @@ ApplicationWindow {
             const list = App.videos.snapshot()
             if (row < 0 || row >= list.length)
                 return
+            fallback = null
+            failures = 0
             // The video that is already loaded: just bring it forward. A
             // track whose video is up in its place (App.videoFollows) goes
             // on as that video, in the grid's queue, without a reload.
@@ -403,6 +416,9 @@ ApplicationWindow {
         function next(automatic) {
             if (queue.length === 0)
                 return false
+            fallback = null
+            if (!automatic)
+                failures = 0
             let n
             if (automatic) {
                 n = upcoming()
@@ -509,7 +525,18 @@ ApplicationWindow {
         }
         function onLoadFailed(reason) {
             console.warn("playback failed:", reason)
-            if (!player.next(true))
+            if (player.fallback) {
+                // The track's video would not play: back to the track.
+                const from = player.fallback
+                player.fallback = null
+                App.mode = "music"
+                player.queue = from.queue
+                player.history = []
+                player.load(from.index)
+                return
+            }
+            player.failures += 1
+            if (player.failures >= 3 || !player.next(true))
                 player.stop()
         }
         function onSeeked() { MediaSession.seeked() }
