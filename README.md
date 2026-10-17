@@ -698,6 +698,14 @@ the words is tried against what the judge once saw.
   art size**: how many cards go across the video grid (2 to 6, 4 by default)
   and the album grid (2 to 8, 3 by default). The cards share the width
   evenly, so each step is one column.
+- **Closing the window keeps the music playing.** With Settings → Playback →
+  **Keep playing when the window is closed** on (it is by default) and a tray
+  on the desktop, a close puts the app in the tray instead: its icon there
+  shows the window again on a click, and its menu has play/pause, next,
+  previous and quit. Starting MV Player again while it runs brings up the
+  running window (out of the tray if it is there) rather than a second copy,
+  as does the desktop's "raise" through MPRIS. Without a tray, a close quits
+  as before. Ctrl+Q, or Quit in the tray menu, ends the run.
 - Settings → Playback → **The volume bar sets the system volume**: the bar
   shows and moves the output device's level (the default sink through
   PulseAudio or PipeWire on Linux, the default playback device on Windows),

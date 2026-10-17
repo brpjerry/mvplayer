@@ -55,7 +55,7 @@ void MprisRoot::Raise()
 
 void MprisRoot::Quit()
 {
-    QCoreApplication::quit();
+    emit m_session->quitRequested();
 }
 
 // ---- org.mpris.MediaPlayer2.Player -----------------------------------------

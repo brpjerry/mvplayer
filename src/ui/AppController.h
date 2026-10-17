@@ -100,6 +100,16 @@ class AppController : public QObject
     // Music mode: a track that has its music video plays the video, grown
     // over the albums; the next track without one goes back to the music.
     Q_PROPERTY(bool videoFollows READ videoFollows WRITE setVideoFollows NOTIFY settingsChanged)
+    // Closing the window keeps the app playing in the tray; the tray icon
+    // or a second start brings the window back.
+    Q_PROPERTY(bool background READ background WRITE setBackground NOTIFY settingsChanged)
+    // Whether this desktop has a tray to sit in at all (a status notifier
+    // host on Linux; Windows always), known before one is asked for.
+    Q_PROPERTY(bool trayHost READ trayHost CONSTANT)
+    // Set by quit(): the run is ending, so a close of the window is one,
+    // not a trip to the tray. Qt's quit asks every window to close first
+    // and gives up if one refuses.
+    Q_PROPERTY(bool quitting READ quitting NOTIFY quittingChanged)
     // Videos that no track in the music folders has.
     Q_PROPERTY(int untrackedCount READ untrackedCount NOTIFY activityChanged)
     // A YouTube Premium account's cookies.txt, kept beside the settings.
@@ -294,6 +304,12 @@ public:
     void setAutoExpand(bool v);
     bool videoFollows() const { return m_videoFollows; }
     void setVideoFollows(bool v);
+    bool background() const { return m_background; }
+    static bool trayHost();
+    bool quitting() const { return m_quitting; }
+    // The one way to end the run: Ctrl+Q, the tray's Quit, MPRIS, a signal.
+    Q_INVOKABLE void quit();
+    void setBackground(bool v);
     int untrackedCount() const { return m_untrackedCount; }
     Q_INVOKABLE int deleteUntracked();
     void setSkipStillImages(bool v);
@@ -450,6 +466,7 @@ signals:
     void modeChanged();
     void lookupAlbumsChanged();
     void settingsChanged();
+    void quittingChanged();
     void activityChanged();
     void cookiesCheckChanged();
     void volumeChanged();
@@ -537,6 +554,8 @@ private:
     double m_subtitleShadow = 0;
     bool m_autoExpand = true;
     bool m_videoFollows = false;
+    bool m_background = true;
+    bool m_quitting = false;
     int m_untrackedCount = 0;
     QString m_replaceStage;
     qint64 m_replaceVideoId = 0;

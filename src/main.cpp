@@ -5,6 +5,7 @@
 #include "ui/MediaSession.h"
 #include "ui/MpvItem.h"
 #include "ui/PointerPacer.h"
+#include "ui/SingleInstance.h"
 #include "ui/WindowFrame.h"
 #include "ui/YtDlpUpdater.h"
 
@@ -54,6 +55,12 @@ int main(int argc, char **argv)
         {QStringLiteral("ipc"), QStringLiteral("Listen for automation commands on this local socket."), QStringLiteral("name")},
     });
     parser.process(app);
+
+    // Started again for the same library: the running instance shows its
+    // window instead, and this one is done.
+    const QString instanceName = SingleInstance::nameFor(parser.value(QStringLiteral("config")), parser.value(QStringLiteral("mv-dir")));
+    if (SingleInstance::handOver(instanceName))
+        return 0;
 
     // Prefer a clean UI face when one is installed; CJK falls back via the
     // platform's font matching.
@@ -113,6 +120,15 @@ int main(int argc, char **argv)
             pointerPacer.attach(window);
         }
 
+        SingleInstance instance(instanceName);
+        QObject::connect(&instance, &SingleInstance::raiseRequested, root, [root](const QString &token) {
+            // The token lets the window take focus on Wayland; Qt's
+            // requestActivate() spends it from the environment.
+            if (!token.isEmpty())
+                qputenv("XDG_ACTIVATION_TOKEN", token.toUtf8());
+            QMetaObject::invokeMethod(root, "bringUp");
+        });
+
         std::unique_ptr<IpcServer> ipc;
         if (parser.isSet(QStringLiteral("ipc"))) {
             ipc = std::make_unique<IpcServer>(parser.value(QStringLiteral("ipc")), [root](const QString &line) {
@@ -154,7 +170,7 @@ int main(int argc, char **argv)
         }
 
         // Logging out or `kill` should end imports as cleanly as closing the window.
-        quitOnTerminationSignals([] { QCoreApplication::quit(); });
+        quitOnTerminationSignals([&controller] { controller.quit(); });
 
         rc = app.exec();
     }
