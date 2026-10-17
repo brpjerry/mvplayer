@@ -9,6 +9,9 @@ Item {
     property var spans: []   // [[start, end], …] in seconds: where the library audio is the track's, drawn on the track
     readonly property bool dragging: mouse.pressed
     readonly property bool engaged: mouse.containsMouse || mouse.pressed
+    // The time under the pointer while hovered (-1 when not): the clock
+    // beside the bar shows it, where a bubble would cover the transport.
+    readonly property real hoverSeconds: engaged && duration > 0 && !dragging ? fractionAt(mouse.mouseX) * duration : -1
 
     // exact=false while scrubbing (fast keyframe seeks), true on release
     signal seekRequested(real seconds, bool exact)
@@ -68,25 +71,6 @@ Item {
         color: Theme.text
         scale: root.engaged && root.duration > 0 ? (mouse.pressed ? 1.15 : 1) : 0
         Behavior on scale { NumberAnimation { duration: Theme.fast; easing.type: Easing.OutCubic } }
-    }
-
-    // Time under the pointer
-    Rectangle {
-        visible: root.engaged && root.duration > 0
-        x: Math.max(0, Math.min(root.width - width, mouse.mouseX - width / 2))
-        y: -height - 6
-        width: hoverTime.implicitWidth + 14
-        height: 22
-        radius: Theme.radiusSmall
-        color: Theme.pressed
-        Text {
-            id: hoverTime
-            anchors.centerIn: parent
-            text: Theme.formatTime(root.fractionAt(mouse.mouseX) * root.duration)
-            color: Theme.text
-            font.pixelSize: 11
-            font.features: { "tnum": 1 }
-        }
     }
 
     MouseArea {
