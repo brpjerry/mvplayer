@@ -168,8 +168,11 @@ class AppController : public QObject
     // there is no account whose cookies work).
     Q_PROPERTY(QString pauseKind READ pauseKind NOTIFY activityChanged)
 
-    // "auto" (follow the playing video) or a colour such as "#8b7dff"
+    // The accent colour, such as "#8b7dff": the interface's colour, or,
+    // with autoAccent on, its colour while nothing plays (what plays
+    // gives the colour otherwise: a frame of the video, the album's cover).
     Q_PROPERTY(QString accent READ accent WRITE setAccent NOTIFY appearanceChanged)
+    Q_PROPERTY(bool autoAccent READ autoAccent WRITE setAutoAccent NOTIFY appearanceChanged)
     // "auto" (follow the operating system), "dark" or "light"
     Q_PROPERTY(QString themeMode READ themeMode WRITE setThemeMode NOTIFY appearanceChanged)
     // How many cards across in the video grid and in the album grid
@@ -383,6 +386,8 @@ public:
 
     QString accent() const { return m_accent; }
     void setAccent(const QString &accent);
+    bool autoAccent() const { return m_autoAccent; }
+    void setAutoAccent(bool on);
     // The accent a picture gives (as a frame of the playing video does):
     // "#rrggbb", or "" when the file cannot be read.
     Q_INVOKABLE QString coverAccent(const QUrl &cover) const;
@@ -534,7 +539,8 @@ private:
     int m_reviewCount = 0;  // videos waiting for review
     int m_reviewVideos = 0;
     int m_orphanCount = 0;
-    QString m_accent = QStringLiteral("auto");
+    QString m_accent = QStringLiteral("#8b7dff");
+    bool m_autoAccent = true;
     QString m_sidebarFacet = QStringLiteral("albumArtist");
     SystemTheme m_systemTheme;
     QString m_themeMode = QStringLiteral("auto");

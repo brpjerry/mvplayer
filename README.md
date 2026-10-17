@@ -712,9 +712,11 @@ the words is tried against what the judge once saw.
   as the desktop's own volume keys do, and follows it when it is changed
   elsewhere; the app itself then plays at full level. Off, the bar is the
   app's own volume, as before.
-- Settings → Accent colour: a fixed colour (presets or the hue strip) or
-  **Auto**, which takes the colour from the playing video, or from the
-  album's cover for a track played from its file. Auto looks at one
+- Settings → Accent colour: a colour (presets or the hue strip) and the
+  **Auto** switch. Auto off, the colour is the interface's. Auto on, it
+  takes the colour from the playing video, or from the album's cover for a
+  track played from its file, and the chosen colour is the one while
+  nothing plays. Auto looks at one
   downscaled frame a second, blends it with the previous samples and fades
   between colours, so cuts do not make the interface flicker. Black, white
   and grey frames give a neutral accent (light grey to white on dark, dark

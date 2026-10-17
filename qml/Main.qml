@@ -467,7 +467,7 @@ ApplicationWindow {
     // ---- Accent colour -----------------------------------------------------
     // Either the colour chosen in Settings, or ("auto") one that follows the
     // picture of the playing video, changing slowly.
-    readonly property bool autoAccent: App.accent === "auto"
+    readonly property bool autoAccent: App.autoAccent
     Binding { target: window.mpv; property: "colorSampling"; value: window.autoAccent }
     // A track played from its file has no picture to sample: its album's
     // cover gives the colour instead.
@@ -476,9 +476,10 @@ ApplicationWindow {
     Binding {
         target: Theme
         property: "accentSource"
+        // The chosen colour; with Auto on, only until something plays.
         value: !window.autoAccent ? App.accent
              : window.trackAccent !== "" ? window.trackAccent
-             : player.current && window.mpv.frameColorValid ? window.mpv.frameColor : Theme.defaultAccent
+             : player.current && window.mpv.frameColorValid ? window.mpv.frameColor : App.accent
     }
     Binding { target: Theme; property: "accentFade"; value: window.autoAccent ? 800 : 300 }
 
@@ -897,7 +898,8 @@ ApplicationWindow {
         case "ytdlp-update": YtDlpUpdater.update(); return "ok"
         case "ytdlp": return JSON.stringify({ version: YtDlpUpdater.version, busy: YtDlpUpdater.busy, status: YtDlpUpdater.status })
         case "fps": FrameStats.visible = arg !== "off"; return "ok"
-        case "accent": App.accent = arg; return "ok"
+        case "accent": App.accent = arg; return "ok" // accent <colour>: the colour (also "auto": Auto on)
+        case "auto-accent": if (arg) App.autoAccent = arg !== "off"; return App.autoAccent ? "on" : "off" // auto-accent [on|off]
         case "theme": App.themeMode = arg; return "ok"
         case "add-music": App.addMusicDir(arg); return "ok" // ticks a folder (widening the base if it lies outside)
         case "remove-music": App.removeMusicDir(arg); return "ok" // unticks one
@@ -975,7 +977,7 @@ ApplicationWindow {
                 settingsOpen: settings.opened, settingsTab: settings.tab,
                 judgeKey: App.judgeKeySet, judgeKeyHint: App.judgeKeyHint, judgeChecking: App.judgeChecking, judgeState: App.judgeState, judgeStatus: App.judgeStatus, adviceLeft: App.adviceLeft, judgeThreads: App.judgeThreads, keepEverything: App.keepEverything,
                 replacing: App.replacing, replaceStage: App.replaceStage, replaceDialog: replaceDialog.opened, replaceOptions: replaceDialog.options.length, replaceMode: replaceDialog.mode,
-                accent: "" + Theme.accent, accentMode: App.accent, theme: App.themeMode, dark: Theme.dark,
+                accent: "" + Theme.accent, accentColour: App.accent, autoAccent: App.autoAccent, accentSource: "" + Theme.accentSource, theme: App.themeMode, dark: Theme.dark,
                 systemDark: App.systemDark, bg: "" + Theme.bg, baseDir: App.baseDir, musicDirs: App.musicDirs, frameColor: "" + mpv.frameColor,
                 frameColorValid: mpv.frameColorValid, sidebar: App.sidebarFacet,
                 anchor: playerView.anchorAvailable ? [Math.round(playerView.anchorRect.x), Math.round(playerView.anchorRect.y), Math.round(playerView.anchorRect.width)] : null,
