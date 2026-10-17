@@ -306,7 +306,7 @@ QString foldText(const QString &s)
 
 QString formatDuration(double seconds)
 {
-    const int total = qMax(0, int(seconds + 0.5));
+    const int total = qMax(0, int(seconds)); // floored, as the seek bar's clock is
     const int h = total / 3600, m = (total / 60) % 60, s = total % 60;
     if (h > 0)
         return QStringLiteral("%1:%2:%3").arg(h).arg(m, 2, 10, QLatin1Char('0')).arg(s, 2, 10, QLatin1Char('0'));

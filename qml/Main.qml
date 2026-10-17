@@ -100,11 +100,15 @@ ApplicationWindow {
         }
     }
 
+    // Over the music library nothing grows: a video that plays on across
+    // the mode switch stays where it is, unless it is a track's own (videoUp).
+    readonly property bool videoViewable: player.current !== null
+        && (player.current.kind !== "track" ? App.mode === "video" : player.videoUp)
     function setFullscreen(on) {
         if (on === fullscreen)
             return
         if (on) {
-            if (!player.current || (player.current.kind === "track" && !player.videoUp))
+            if (!videoViewable)
                 return
             visibilityBeforeFullscreen = visibility
             if (view !== "player")
@@ -115,7 +119,7 @@ ApplicationWindow {
         }
     }
     function showPlayer() {
-        if (!player.current || (player.current.kind === "track" && !player.videoUp))
+        if (!videoViewable)
             return
         releaseTextFocus()
         view = "player"
@@ -151,6 +155,8 @@ ApplicationWindow {
     // would. A grid narrowed to a tag or a search that leaves it out is
     // widened first.
     function playVideo(id) {
+        // The track it was asked from, to come back to if the video fails.
+        const from = player.current && player.current.kind === "track" ? { queue: player.queue, index: player.index } : null
         App.mode = "video"
         showSection("library")
         let row = revealVideo(id)
@@ -159,8 +165,10 @@ ApplicationWindow {
             sidebar.select("all", "")
             row = revealVideo(id)
         }
-        if (row >= 0)
+        if (row >= 0) {
             player.playRow(row)
+            player.fallback = from
+        }
     }
 
     // An accepted video leaves the review list; it stops rather than play on
@@ -230,6 +238,11 @@ ApplicationWindow {
         // onFileStarted then takes the queue there without a load.
         property int pendingNext: -1
         property int loads: 0   // how many times a file was loaded afresh (tests)
+        // Where to go back to when a video asked for from a track fails
+        // ({queue, index}), and how many loads failed in a row: a broken
+        // file is skipped, a run of them stops rather than walk the grid.
+        property var fallback: null
+        property int failures: 0
 
         // The queue's items not played yet (shuffle draws from them).
         function unplayed() {
@@ -246,12 +259,18 @@ ApplicationWindow {
             } while (n === index)
             return n
         }
-        // The album after the playing one in the grid's order, or -1.
+        // The album after (before) the playing one in the grid's order, or -1.
         function nextAlbumRow() {
             if (!albumQueue || !current)
                 return -1
             const row = App.albums.rowOfKey(current.albumKey)
             return row >= 0 && row + 1 < App.albums.count ? row + 1 : -1
+        }
+        function prevAlbumRow() {
+            if (!albumQueue || !current)
+                return -1
+            const row = App.albums.rowOfKey(current.albumKey)
+            return row > 0 ? row - 1 : -1
         }
         // What next(true) would choose, without choosing it: an index in
         // the queue, -2 for the next album, -1 for nothing (the end).
@@ -340,14 +359,18 @@ ApplicationWindow {
         }
 
         // Start playing an album of the music library from one of its
-        // tracks; the rest of the album follows, in order.
+        // tracks; the rest of the album follows, in order. A negative
+        // track index means its last.
         function playAlbum(row, trackIndex) {
             const list = App.albumTracks(row)
             if (list.length === 0)
                 return
+            fallback = null
+            failures = 0
             queue = list
             history = []
-            load(Math.max(0, Math.min(trackIndex || 0, list.length - 1)))
+            const i = trackIndex < 0 ? list.length - 1 : Math.min(trackIndex || 0, list.length - 1)
+            load(i)
         }
 
         // Start playing the grid's `row`; the video grows out of its thumbnail.
@@ -355,6 +378,8 @@ ApplicationWindow {
             const list = App.videos.snapshot()
             if (row < 0 || row >= list.length)
                 return
+            fallback = null
+            failures = 0
             // The video that is already loaded: just bring it forward. A
             // track whose video is up in its place (App.videoFollows) goes
             // on as that video, in the grid's queue, without a reload.
@@ -391,6 +416,9 @@ ApplicationWindow {
         function next(automatic) {
             if (queue.length === 0)
                 return false
+            fallback = null
+            if (!automatic)
+                failures = 0
             let n
             if (automatic) {
                 n = upcoming()
@@ -415,10 +443,13 @@ ApplicationWindow {
             return true
         }
 
+        // Back: to the start of this item after a few seconds, else to the
+        // one before it; at an album's start, to the previous album's last
+        // track; at the grid's start, round to its last video.
         function previous() {
             if (queue.length === 0)
                 return
-            if (window.mpv.position > 3 || queue.length === 1) {
+            if (window.mpv.position > 3) {
                 window.mpv.seek(0, true)
                 return
             }
@@ -426,7 +457,17 @@ ApplicationWindow {
                 load(history.pop())
                 return
             }
-            load(index > 0 ? index - 1 : queue.length - 1)
+            if (index > 0) {
+                load(index - 1)
+                return
+            }
+            const row = prevAlbumRow()
+            if (row >= 0)
+                playAlbum(row, -1)
+            else if (queue.length > 1)
+                load(queue.length - 1)
+            else
+                window.mpv.seek(0, true)
         }
 
         function stop() {
@@ -484,7 +525,18 @@ ApplicationWindow {
         }
         function onLoadFailed(reason) {
             console.warn("playback failed:", reason)
-            if (!player.next(true))
+            if (player.fallback) {
+                // The track's video would not play: back to the track.
+                const from = player.fallback
+                player.fallback = null
+                App.mode = "music"
+                player.queue = from.queue
+                player.history = []
+                player.load(from.index)
+                return
+            }
+            player.failures += 1
+            if (player.failures >= 3 || !player.next(true))
                 player.stop()
         }
         function onSeeked() { MediaSession.seeked() }
@@ -507,7 +559,7 @@ ApplicationWindow {
     Binding { target: MediaSession; property: "shuffle"; value: player.shuffle }
     // MPRIS knows None, Playlist and Track; autoplay and none both read as None.
     Binding { target: MediaSession; property: "repeatMode"; value: player.playMode !== "repeat" ? 0 : player.albumQueue ? 1 : 2 }
-    Binding { target: MediaSession; property: "canStep"; value: player.queue.length > 1 }
+    Binding { target: MediaSession; property: "canStep"; value: player.queue.length > 1 || player.nextAlbumRow() >= 0 }
     Binding { target: MediaSession; property: "fullscreen"; value: window.fullscreen }
     Connections {
         target: MediaSession
@@ -705,7 +757,7 @@ ApplicationWindow {
             shuffle: player.shuffle
             playMode: player.playMode
             albumQueue: player.albumQueue
-            canStep: player.queue.length > 1
+            canStep: player.queue.length > 1 || player.nextAlbumRow() >= 0
             onPlayPauseRequested: window.togglePause()
             onNextRequested: player.next(false)
             onPreviousRequested: player.previous()
@@ -1009,6 +1061,7 @@ ApplicationWindow {
                 queueLength: player.queue.length, queueKind: player.current ? (player.current.kind || "video") : null,
                 pendingNext: player.pendingNext, loads: player.loads, playMode: player.playMode, albumQueue: player.albumQueue, shuffle: player.shuffle, trackAccent: window.trackAccent,
                 musicPanel: nowPlaying.active, musicPanelWidth: nowPlaying.width, musicPanelOn: App.musicPanel,
+                queueViewY: nowPlaying.queueView.contentY, queueViewHeight: nowPlaying.queueView.height, queueViewIndex: nowPlaying.queueView.currentIndex, queueViewCount: nowPlaying.queueView.count,
                 lookupAlbums: App.lookupAlbums.length, albumMenu: albumGrid.menuOpen,
                 videoFollows: App.videoFollows, videoUp: player.videoUp,
                 windowVisible: window.visible, trayHost: App.trayHost, trayAvailable: window.trayAvailable, trayShown: tray.item ? tray.item.visible : false, background: App.background,

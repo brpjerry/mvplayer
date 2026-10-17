@@ -46,6 +46,7 @@ Rectangle {
         // Any press outside closes it and goes no further: nothing under
         // it is activated until it is gone.
         modal: true
+        focus: true // Escape closes it only while it has the focus
         dim: false
         closePolicy: Popup.CloseOnEscape | Popup.CloseOnPressOutside
         transformOrigin: Popup.TopLeft

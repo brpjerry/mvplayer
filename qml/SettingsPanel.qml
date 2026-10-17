@@ -14,6 +14,7 @@ Popup {
     anchors.centerIn: Overlay.overlay
     modal: true
     padding: 1
+    focus: true // Escape closes it only while it has the focus
     closePolicy: Popup.CloseOnEscape | Popup.CloseOnPressOutside
 
     Overlay.modal: Rectangle {

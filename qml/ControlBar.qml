@@ -430,8 +430,11 @@ Rectangle {
             anchors.verticalCenter: seek.verticalCenter
             width: 44
             horizontalAlignment: Text.AlignRight
-            text: Theme.formatTime(seek.dragging ? seek.dragFraction * root.mpv.duration : root.mpv.position)
-            color: Theme.textDim
+            // While the pointer is over the bar: the time it points at.
+            text: Theme.formatTime(seek.dragging ? seek.dragFraction * root.mpv.duration
+                                 : seek.hoverSeconds >= 0 ? seek.hoverSeconds : root.mpv.position)
+            color: seek.dragging || seek.hoverSeconds >= 0 ? Theme.accentHi : Theme.textDim
+            Behavior on color { ColorAnimation { duration: Theme.fast } }
             font.pixelSize: 11
             font.features: { "tnum": 1 }
         }

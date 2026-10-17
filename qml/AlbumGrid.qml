@@ -54,7 +54,9 @@ Item {
         width: shownWidth
         height: parent.height
 
-        readonly property int columns: Math.max(1, App.coverColumns)
+        // As many across as chosen, but never a cover under 150 px: a
+        // narrow window takes fewer.
+        readonly property int columns: Math.max(1, Math.min(App.coverColumns, Math.floor(width / 150)))
         cellWidth: Math.floor(width / columns)
         cellHeight: (cellWidth - 20) + 74
 
@@ -164,6 +166,7 @@ Item {
         // it is activated until it is gone.
         modal: true
         dim: false
+        focus: true // Escape closes it only while it has the focus
         closePolicy: Popup.CloseOnEscape | Popup.CloseOnPressOutside
         transformOrigin: Popup.TopLeft
         enter: Transition {

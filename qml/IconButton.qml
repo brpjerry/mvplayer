@@ -29,9 +29,13 @@ Item {
         width: root.size
         height: root.size
         radius: root.size / 2
+        // A checked one sits on a soft accent disc: an accent taken from a
+        // pale frame can be as grey as the icons, so colour alone would
+        // not say it is on.
         color: root.filled ? (mouse.containsMouse ? Theme.accentHi : Theme.accent)
-                           : (mouse.pressed ? Theme.pressed : Theme.hover)
-        opacity: root.filled ? 1 : (mouse.containsMouse ? 1 : 0)
+             : root.checked ? (mouse.pressed ? Theme.pressed : Theme.accentSoft)
+             : (mouse.pressed ? Theme.pressed : Theme.hover)
+        opacity: root.filled || root.checked ? 1 : (mouse.containsMouse ? 1 : 0)
         scale: mouse.pressed ? 0.92 : 1
 
         Behavior on opacity { NumberAnimation { duration: Theme.fast } }
