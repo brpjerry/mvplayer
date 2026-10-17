@@ -78,6 +78,7 @@ signals:
     void repeatModeRequested(int mode);
     void fullscreenRequested(bool fullscreen);
     void raiseRequested();
+    void quitRequested();
 
 private:
     void changed(const QString &property);

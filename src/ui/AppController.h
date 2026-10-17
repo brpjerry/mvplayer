@@ -106,6 +106,10 @@ class AppController : public QObject
     // Whether this desktop has a tray to sit in at all (a status notifier
     // host on Linux; Windows always), known before one is asked for.
     Q_PROPERTY(bool trayHost READ trayHost CONSTANT)
+    // Set by quit(): the run is ending, so a close of the window is one,
+    // not a trip to the tray. Qt's quit asks every window to close first
+    // and gives up if one refuses.
+    Q_PROPERTY(bool quitting READ quitting NOTIFY quittingChanged)
     // Videos that no track in the music folders has.
     Q_PROPERTY(int untrackedCount READ untrackedCount NOTIFY activityChanged)
     // A YouTube Premium account's cookies.txt, kept beside the settings.
@@ -302,6 +306,9 @@ public:
     void setVideoFollows(bool v);
     bool background() const { return m_background; }
     static bool trayHost();
+    bool quitting() const { return m_quitting; }
+    // The one way to end the run: Ctrl+Q, the tray's Quit, MPRIS, a signal.
+    Q_INVOKABLE void quit();
     void setBackground(bool v);
     int untrackedCount() const { return m_untrackedCount; }
     Q_INVOKABLE int deleteUntracked();
@@ -459,6 +466,7 @@ signals:
     void modeChanged();
     void lookupAlbumsChanged();
     void settingsChanged();
+    void quittingChanged();
     void activityChanged();
     void cookiesCheckChanged();
     void volumeChanged();
@@ -547,6 +555,7 @@ private:
     bool m_autoExpand = true;
     bool m_videoFollows = false;
     bool m_background = true;
+    bool m_quitting = false;
     int m_untrackedCount = 0;
     QString m_replaceStage;
     qint64 m_replaceVideoId = 0;

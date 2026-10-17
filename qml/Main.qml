@@ -32,7 +32,7 @@ ApplicationWindow {
     readonly property bool trayAvailable: tray.item ? tray.item.available : false
     property int shownAs: Window.Windowed
     onClosing: (close) => {
-        if (!App.background || !trayAvailable)
+        if (App.quitting || !App.background || !trayAvailable)
             return
         close.accepted = false
         stash()
@@ -94,7 +94,7 @@ ApplicationWindow {
                 Platform.MenuSeparator {}
                 Platform.MenuItem {
                     text: "Quit"
-                    onTriggered: Qt.quit()
+                    onTriggered: App.quit()
                 }
             }
         }
@@ -461,6 +461,7 @@ ApplicationWindow {
         function onRepeatModeRequested(mode) { player.repeatMode = mode }
         function onFullscreenRequested(fullscreen) { window.setFullscreen(fullscreen) }
         function onRaiseRequested() { window.bringUp() }
+        function onQuitRequested() { App.quit() }
     }
 
     // ---- Accent colour -----------------------------------------------------
@@ -738,7 +739,7 @@ ApplicationWindow {
     Shortcut { sequence: "F11"; onActivated: window.setFullscreen(!window.fullscreen) }
     Shortcut { sequence: "F12"; onActivated: FrameStats.visible = !FrameStats.visible }
     Shortcut { sequence: "Ctrl+,"; onActivated: settings.open() }
-    Shortcut { sequence: "Ctrl+Q"; onActivated: Qt.quit() }
+    Shortcut { sequence: "Ctrl+Q"; onActivated: App.quit() }
 
     // ---- Automation (--ipc) ------------------------------------------------
     NumberAnimation { id: scrollTest; target: grid.view; property: "contentY"; easing.type: Easing.InOutSine }
@@ -983,7 +984,7 @@ ApplicationWindow {
                 expand: playerView.expand, contentHeight: grid.view.contentHeight, gridHeight: grid.view.height,
                 window: width + "x" + height, dpr: Screen.devicePixelRatio
             })
-        case "quit": Qt.quit(); return "ok"
+        case "quit": App.quit(); return "ok"
         }
         return "unknown command"
     }

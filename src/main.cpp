@@ -170,7 +170,7 @@ int main(int argc, char **argv)
         }
 
         // Logging out or `kill` should end imports as cleanly as closing the window.
-        quitOnTerminationSignals([] { QCoreApplication::quit(); });
+        quitOnTerminationSignals([&controller] { controller.quit(); });
 
         rc = app.exec();
     }

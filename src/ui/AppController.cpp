@@ -1292,6 +1292,15 @@ bool AppController::trayHost()
 #endif
 }
 
+void AppController::quit()
+{
+    if (!m_quitting) {
+        m_quitting = true;
+        emit quittingChanged();
+    }
+    QCoreApplication::quit();
+}
+
 void AppController::setBackground(bool v)
 {
     if (v == m_background)
