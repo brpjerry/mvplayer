@@ -20,6 +20,9 @@
 #include <QMouseEvent>
 #include <QQuickItem>
 #include <QQuickWindow>
+#include <QQuickItemGrabResult>
+#include <QTimer>
+#include <QEventLoop>
 #include <qpa/qwindowsysteminterface.h>
 
 #include <cstdio>
@@ -135,13 +138,24 @@ int main(int argc, char **argv)
         std::unique_ptr<IpcServer> ipc;
         if (parser.isSet(QStringLiteral("ipc"))) {
             ipc = std::make_unique<IpcServer>(parser.value(QStringLiteral("ipc")), [root](const QString &line) {
-                // grab-window <file>: the whole window, popups included,
-                // which QML (it grabs items) cannot picture.
+                // grab-window <file>: the whole window, popups included
+                // (the overlay is a child of the content item). Grabbed as
+                // an item: QQuickWindow::grabWindow() on an offscreen window
+                // paints stray copies of the Shape icons over the picture.
                 static const QString grabWindow = QStringLiteral("grab-window ");
                 if (line.startsWith(grabWindow)) {
                     auto *window = qobject_cast<QQuickWindow *>(root);
-                    return window && window->grabWindow().save(line.mid(grabWindow.size())) ? QStringLiteral("ok")
-                                                                                             : QStringLiteral("failed");
+                    if (!window)
+                        return QStringLiteral("failed");
+                    const QString file = line.mid(grabWindow.size());
+                    auto result = window->contentItem()->grabToImage();
+                    if (!result)
+                        return QStringLiteral("failed");
+                    QEventLoop wait;
+                    QObject::connect(result.data(), &QQuickItemGrabResult::ready, &wait, &QEventLoop::quit);
+                    QTimer::singleShot(5000, &wait, &QEventLoop::quit);
+                    wait.exec(QEventLoop::ExcludeSocketNotifiers);
+                    return !result->image().isNull() && result->saveToFile(file) ? QStringLiteral("ok") : QStringLiteral("failed");
                 }
                 // pointer <x> <y>: the pointer is moved there, in the
                 // window's own coordinates; click <x> <y>: and the left
