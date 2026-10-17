@@ -1056,6 +1056,14 @@ Popup {
                         onToggled: (c) => App.videoFollows = c
                     }
                     SwitchRow {
+                        label: "Keep playing when the window is closed"
+                        hint: App.trayHost
+                            ? "Closing the window leaves the app playing, with an icon in the tray; the icon, or starting MV Player again, brings the window back."
+                            : "No tray on this desktop, so closing the window quits. Starting MV Player again brings up the running window."
+                        checked: App.background
+                        onToggled: (c) => App.background = c
+                    }
+                    SwitchRow {
                         label: "The volume bar sets the system volume"
                         hint: App.systemVolume && !App.systemVolumeAvailable
                             ? "No output device could be followed; the bar keeps to the app's own volume."

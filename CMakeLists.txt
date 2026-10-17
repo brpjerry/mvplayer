@@ -122,6 +122,7 @@ qt_add_executable(mvplayer
     src/ui/WindowFrame.h src/ui/WindowFrame.cpp
     src/ui/PointerPacer.h src/ui/PointerPacer.cpp
     src/ui/SystemVolume.h src/ui/SystemVolume.cpp
+    src/ui/SingleInstance.h src/ui/SingleInstance.cpp
     ${MV_WINDOWS_RC}
 )
 # No console window on Windows.
@@ -174,6 +175,9 @@ foreach(f ${MV_QML_FILES})
     set_source_files_properties(${f} PROPERTIES QT_RESOURCE_ALIAS ${fname})
 endforeach()
 set_source_files_properties(qml/Theme.qml qml/Icons.qml PROPERTIES QT_QML_SINGLETON_TYPE TRUE)
+
+# The tray icon, at every size the tray may ask for.
+qt_add_resources(mvplayer "mvplayer_icons" PREFIX "/mvplayer" BASE data FILES data/mvplayer.ico)
 
 qt_add_qml_module(mvplayer
     URI MvPlayer

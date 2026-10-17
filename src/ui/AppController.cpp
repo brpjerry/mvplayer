@@ -1,5 +1,12 @@
 #include "ui/AppController.h"
 
+#include <QGuiApplication>
+
+#ifdef MV_HAVE_DBUS
+#include <QDBusConnection>
+#include <QDBusConnectionInterface>
+#endif
+
 #include "ui/AccentColor.h"
 #include "core/Judge.h"
 #include <QDirIterator>
@@ -173,6 +180,7 @@ AppController::AppController(const AppOptions &options, QObject *parent)
     m_subtitleShadow = qBound(0.0, m_settings->value(QStringLiteral("player/subtitleShadow"), 0.0).toDouble(), 6.0);
     m_autoExpand = m_settings->value(QStringLiteral("player/autoExpand"), true).toBool();
     m_videoFollows = m_settings->value(QStringLiteral("player/videoFollows"), false).toBool();
+    m_background = m_settings->value(QStringLiteral("player/background"), true).toBool();
     m_cfg.ytdlpArgs = m_settings->value(QStringLiteral("import/ytdlpArgs")).toStringList();
     if (YtDlp::looksLikeCookies(cookiesPath()))
         m_cfg.cookiesFile = cookiesPath();
@@ -687,6 +695,7 @@ void AppController::saveSettings()
     m_settings->setValue(QStringLiteral("player/subtitleShadow"), m_subtitleShadow);
     m_settings->setValue(QStringLiteral("player/autoExpand"), m_autoExpand);
     m_settings->setValue(QStringLiteral("player/videoFollows"), m_videoFollows);
+    m_settings->setValue(QStringLiteral("player/background"), m_background);
 }
 
 void AppController::fitDirsToBase()
@@ -1263,6 +1272,33 @@ void AppController::setSystemVolume(bool on)
     m_system->follow(on);
     emit settingsChanged();
     emit volumeChanged();
+}
+
+bool AppController::trayHost()
+{
+#if defined(Q_OS_WIN)
+    return true;
+#elif defined(MV_HAVE_DBUS)
+    // Qt's tray on Linux is a status notifier over D-Bus, from the X11 and
+    // Wayland platform themes; a headless run has neither.
+    const QString platform = QGuiApplication::platformName();
+    if (platform != QLatin1String("wayland") && platform != QLatin1String("xcb"))
+        return false;
+    if (!QDBusConnection::sessionBus().isConnected())
+        return false;
+    return QDBusConnection::sessionBus().interface()->isServiceRegistered(QStringLiteral("org.kde.StatusNotifierWatcher"));
+#else
+    return false;
+#endif
+}
+
+void AppController::setBackground(bool v)
+{
+    if (v == m_background)
+        return;
+    m_background = v;
+    saveSettings();
+    emit settingsChanged();
 }
 
 void AppController::setVideoFollows(bool v)

@@ -1,6 +1,7 @@
 import QtQuick
 import QtQuick.Controls.Basic
 import QtQuick.Window
+import Qt.labs.platform as Platform
 import MvPlayer.Core
 
 ApplicationWindow {
@@ -23,6 +24,81 @@ ApplicationWindow {
     readonly property bool fullscreen: visibility === Window.FullScreen
     property int visibilityBeforeFullscreen: Window.Windowed
     readonly property MpvItem mpv: playerView.mpv
+
+    // ---- The window closed: on in the tray ---------------------------------
+    // With the setting on and a tray to sit in, a close hides the window
+    // and playback goes on; the tray icon, a second start of the app, or
+    // the desktop's "raise" bring it back as it was (maximized or not).
+    readonly property bool trayAvailable: tray.item ? tray.item.available : false
+    property int shownAs: Window.Windowed
+    onClosing: (close) => {
+        if (!App.background || !trayAvailable)
+            return
+        close.accepted = false
+        stash()
+    }
+    function stash() {
+        shownAs = fullscreen ? visibilityBeforeFullscreen : visibility
+        hide()
+    }
+    function bringUp() {
+        if (!visible) {
+            if (shownAs === Window.Maximized)
+                showMaximized()
+            else
+                showNormal()
+        }
+        raise()
+        requestActivate()
+    }
+    function toggleShown() {
+        if (visible)
+            stash()
+        else
+            bringUp()
+    }
+    // Made only where a tray can be: asked for without one, the platform
+    // module complains on the console.
+    Loader {
+        id: tray
+        active: App.trayHost
+        sourceComponent: Platform.SystemTrayIcon {
+            visible: App.background && available
+            icon.source: "qrc:/mvplayer/mvplayer.ico"
+            tooltip: window.title
+            onActivated: (reason) => {
+                if (reason !== Platform.SystemTrayIcon.Context)
+                    window.toggleShown()
+            }
+            menu: Platform.Menu {
+                Platform.MenuItem {
+                    text: window.visible ? "Hide window" : "Show window"
+                    onTriggered: window.toggleShown()
+                }
+                Platform.MenuSeparator {}
+                Platform.MenuItem {
+                    text: window.mpv.paused ? "Play" : "Pause"
+                    enabled: player.current !== null
+                    onTriggered: window.togglePause()
+                }
+                Platform.MenuItem {
+                    text: "Next"
+                    enabled: player.queue.length > 1
+                    onTriggered: player.next(false)
+                }
+                Platform.MenuItem {
+                    text: "Previous"
+                    enabled: player.queue.length > 1
+                    onTriggered: player.previous()
+                }
+                Platform.MenuSeparator {}
+                Platform.MenuItem {
+                    text: "Quit"
+                    onTriggered: Qt.quit()
+                }
+            }
+        }
+    }
 
     function setFullscreen(on) {
         if (on === fullscreen)
@@ -384,7 +460,7 @@ ApplicationWindow {
         function onShuffleRequested(shuffle) { player.shuffle = shuffle }
         function onRepeatModeRequested(mode) { player.repeatMode = mode }
         function onFullscreenRequested(fullscreen) { window.setFullscreen(fullscreen) }
-        function onRaiseRequested() { window.raise(); window.requestActivate() }
+        function onRaiseRequested() { window.bringUp() }
     }
 
     // ---- Accent colour -----------------------------------------------------
@@ -701,6 +777,10 @@ ApplicationWindow {
         case "mode": if (arg) App.mode = arg; return App.mode // mode [video|music]
         case "video-follows": App.videoFollows = arg !== "off"; return "ok" // video-follows on|off
         case "music-panel": if (arg) App.musicPanel = arg !== "off"; return App.musicPanel ? "on" : "off" // music-panel [on|off]: the panel right of the albums
+        case "close": window.close(); return "ok" // close: as the window's close button; into the tray, or the end of the run
+        case "hide": window.stash(); return "ok" // hide: the window into the tray
+        case "show": window.bringUp(); return "ok" // show: the window back
+        case "background": if (arg) App.background = arg !== "off"; return App.background ? "on" : "off" // background [on|off]: keep playing when the window is closed
         case "system-volume": if (arg) App.systemVolume = arg !== "off"; return App.systemVolume ? "on" : "off" // system-volume [on|off]: the volume bar sets the system volume
         case "volume": if (arg) App.volume = parseFloat(arg); return "" + App.volume // volume [0..1]: the volume bar
         case "mute": if (arg) App.muted = arg !== "off"; return App.muted ? "on" : "off" // mute [on|off]: the volume bar's mute
@@ -865,6 +945,7 @@ ApplicationWindow {
                 musicPanel: nowPlaying.active, musicPanelWidth: nowPlaying.width, musicPanelOn: App.musicPanel,
                 lookupAlbums: App.lookupAlbums.length, albumMenu: albumGrid.menuOpen,
                 videoFollows: App.videoFollows, videoUp: player.videoUp,
+                windowVisible: window.visible, trayHost: App.trayHost, trayAvailable: window.trayAvailable, trayShown: tray.item ? tray.item.visible : false, background: App.background,
                 volume: App.volume, barMuted: App.muted, systemVolume: App.systemVolume, systemVolumeAvailable: App.systemVolumeAvailable,
                 playerVolume: App.playerVolume, playerMuted: App.playerMuted,
                 thumbColumns: App.thumbColumns, coverColumns: App.coverColumns, gridColumns: grid.view.columns, albumColumns: albumGrid.view.columns,
