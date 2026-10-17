@@ -67,8 +67,9 @@ Item {
         width: shownWidth
         height: parent.height
 
-        // As many across as chosen (Settings → Appearance).
-        readonly property int columns: Math.max(1, App.thumbColumns)
+        // As many across as chosen (Settings → Appearance), but never a
+        // card under 200 px: a narrow window takes fewer.
+        readonly property int columns: Math.max(1, Math.min(App.thumbColumns, Math.floor(width / 200)))
         cellWidth: Math.floor(width / columns)
         cellHeight: Math.round((cellWidth - 20) * 9 / 16) + 74
 
