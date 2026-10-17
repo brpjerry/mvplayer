@@ -64,7 +64,7 @@ ApplicationWindow {
         active: App.trayHost
         sourceComponent: Platform.SystemTrayIcon {
             visible: App.background && available
-            icon.source: "qrc:/mvplayer/mvplayer-tray.ico"
+            icon.source: "qrc:/mvplayer/mvplayer-tray.png"
             tooltip: window.title
             onActivated: (reason) => {
                 if (reason !== Platform.SystemTrayIcon.Context)
