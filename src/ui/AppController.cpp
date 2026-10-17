@@ -189,7 +189,20 @@ AppController::AppController(const AppOptions &options, QObject *parent)
     m_cfg.pauseBaseSecs = m_settings->value(QStringLiteral("import/pauseSeconds"), m_cfg.pauseBaseSecs).toInt();
     if (qEnvironmentVariableIsSet("MVPLAYER_PAUSE_SECS"))
         m_cfg.pauseBaseSecs = qEnvironmentVariableIntValue("MVPLAYER_PAUSE_SECS");
-    m_accent = m_settings->value(QStringLiteral("ui/accent"), m_accent).toString();
+    // ui/accent was "auto" or a colour; now the colour and ui/autoAccent apart.
+    m_autoAccent = m_settings->value(QStringLiteral("ui/autoAccent"), m_autoAccent).toBool();
+    const QString accent = m_settings->value(QStringLiteral("ui/accent"), m_accent).toString();
+    if (accent == QLatin1String("auto")) {
+        m_autoAccent = true;
+        m_settings->setValue(QStringLiteral("ui/autoAccent"), true);
+        m_settings->setValue(QStringLiteral("ui/accent"), m_accent);
+    } else if (!accent.isEmpty()) {
+        m_accent = accent;
+        if (!m_settings->contains(QStringLiteral("ui/autoAccent"))) {
+            m_autoAccent = false; // a colour chosen before was a fixed one
+            m_settings->setValue(QStringLiteral("ui/autoAccent"), false);
+        }
+    }
     m_sidebarFacet = m_settings->value(QStringLiteral("ui/sidebarFacet"), m_sidebarFacet).toString();
     m_mode = m_settings->value(QStringLiteral("ui/mode"), m_mode).toString();
     if (m_mode != QLatin1String("music"))
@@ -1423,10 +1436,23 @@ QString AppController::statusText() const
 
 void AppController::setAccent(const QString &accent)
 {
+    if (accent == QLatin1String("auto")) { // as the setting once was spelt
+        setAutoAccent(true);
+        return;
+    }
     if (accent == m_accent || accent.isEmpty())
         return;
     m_accent = accent;
     m_settings->setValue(QStringLiteral("ui/accent"), m_accent);
+    emit appearanceChanged();
+}
+
+void AppController::setAutoAccent(bool on)
+{
+    if (on == m_autoAccent)
+        return;
+    m_autoAccent = on;
+    m_settings->setValue(QStringLiteral("ui/autoAccent"), m_autoAccent);
     emit appearanceChanged();
 }
 

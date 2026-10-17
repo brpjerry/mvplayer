@@ -65,7 +65,7 @@ Popup {
     readonly property var accentPresets: [
         "#8b7dff", "#5b9dff", "#3ec9d6", "#4fd68f", "#c5d94a", "#f5b84a", "#ff8f4d", "#ff6f91", "#f06bd8"
     ]
-    readonly property bool customAccent: App.accent !== "auto" && accentPresets.indexOf(App.accent) < 0
+    readonly property bool customAccent: accentPresets.indexOf(App.accent) < 0
 
     FolderDialog {
         id: musicDialog
@@ -869,7 +869,9 @@ Popup {
                         }
                     }
 
-                    // Accent colour: follow the video, a preset, or any colour
+                    // Accent colour: a preset or any hue, and Auto, which
+                    // lets what plays colour the interface and keeps the
+                    // chosen colour for when nothing does.
                     Item {
                         width: parent.width
                         height: 106
@@ -883,7 +885,7 @@ Popup {
                         Text {
                             anchors.right: parent.right
                             y: 10
-                            text: App.accent === "auto" ? "Follows the video that is playing"
+                            text: App.autoAccent ? "Follows what plays; this colour until then"
                                 : root.customAccent ? "Custom" : ""
                             color: Theme.textFaint
                             font.pixelSize: 12
@@ -894,7 +896,7 @@ Popup {
 
                             Item {
                                 id: autoChip
-                                readonly property bool selected: App.accent === "auto"
+                                readonly property bool selected: App.autoAccent
                                 width: autoLabel.implicitWidth + 26
                                 height: 28
                                 Rectangle {
@@ -918,7 +920,7 @@ Popup {
                                     anchors.fill: parent
                                     hoverEnabled: true
                                     cursorShape: Qt.PointingHandCursor
-                                    onClicked: App.accent = "auto"
+                                    onClicked: App.autoAccent = !App.autoAccent
                                 }
                             }
 
@@ -986,12 +988,12 @@ Popup {
                             }
                             Rectangle {
                                 visible: root.customAccent
-                                x: Math.max(0, Math.min(parent.width - width, Math.max(0, Theme.accentSource.hslHue) * parent.width - width / 2))
+                                x: Math.max(0, Math.min(parent.width - width, Math.max(0, Qt.color(App.accent).hslHue) * parent.width - width / 2))
                                 anchors.verticalCenter: parent.verticalCenter
                                 width: 14
                                 height: 14
                                 radius: 7
-                                color: Theme.accentSource
+                                color: App.accent
                                 border.width: 2
                                 border.color: Theme.text
                             }
