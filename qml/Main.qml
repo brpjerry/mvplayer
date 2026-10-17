@@ -250,12 +250,18 @@ ApplicationWindow {
             } while (n === index)
             return n
         }
-        // The album after the playing one in the grid's order, or -1.
+        // The album after (before) the playing one in the grid's order, or -1.
         function nextAlbumRow() {
             if (!albumQueue || !current)
                 return -1
             const row = App.albums.rowOfKey(current.albumKey)
             return row >= 0 && row + 1 < App.albums.count ? row + 1 : -1
+        }
+        function prevAlbumRow() {
+            if (!albumQueue || !current)
+                return -1
+            const row = App.albums.rowOfKey(current.albumKey)
+            return row > 0 ? row - 1 : -1
         }
         // What next(true) would choose, without choosing it: an index in
         // the queue, -2 for the next album, -1 for nothing (the end).
@@ -344,14 +350,16 @@ ApplicationWindow {
         }
 
         // Start playing an album of the music library from one of its
-        // tracks; the rest of the album follows, in order.
+        // tracks; the rest of the album follows, in order. A negative
+        // track index means its last.
         function playAlbum(row, trackIndex) {
             const list = App.albumTracks(row)
             if (list.length === 0)
                 return
             queue = list
             history = []
-            load(Math.max(0, Math.min(trackIndex || 0, list.length - 1)))
+            const i = trackIndex < 0 ? list.length - 1 : Math.min(trackIndex || 0, list.length - 1)
+            load(i)
         }
 
         // Start playing the grid's `row`; the video grows out of its thumbnail.
@@ -419,10 +427,13 @@ ApplicationWindow {
             return true
         }
 
+        // Back: to the start of this item after a few seconds, else to the
+        // one before it; at an album's start, to the previous album's last
+        // track; at the grid's start, round to its last video.
         function previous() {
             if (queue.length === 0)
                 return
-            if (window.mpv.position > 3 || queue.length === 1) {
+            if (window.mpv.position > 3) {
                 window.mpv.seek(0, true)
                 return
             }
@@ -430,7 +441,17 @@ ApplicationWindow {
                 load(history.pop())
                 return
             }
-            load(index > 0 ? index - 1 : queue.length - 1)
+            if (index > 0) {
+                load(index - 1)
+                return
+            }
+            const row = prevAlbumRow()
+            if (row >= 0)
+                playAlbum(row, -1)
+            else if (queue.length > 1)
+                load(queue.length - 1)
+            else
+                window.mpv.seek(0, true)
         }
 
         function stop() {
