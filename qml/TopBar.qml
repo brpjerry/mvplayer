@@ -404,6 +404,18 @@ Item {
         SearchBox {
             id: searchField
             anchors.verticalCenter: parent.verticalCenter
+            // What the other tools leave of the bar, less 150 px for the
+            // heading: a narrow window (the music panel up, the review
+            // panel up) squeezed the heading to "To Rev…" and then pushed
+            // the tools into the sidebar.
+            readonly property real others: {
+                let w = 0
+                for (const c of tools.children)
+                    if (c !== searchField && c.visible && c.width > 0)
+                        w += c.width + tools.spacing
+                return w
+            }
+            maxWidth: root.width - others - tools.anchors.rightMargin - headings.anchors.leftMargin - headings.anchors.rightMargin - 150
         }
 
         WindowControls {

@@ -7,6 +7,9 @@ Item {
     property alias text: input.text
     property string placeholder: "Search titles, artists, albums, tags"
     readonly property bool active: input.activeFocus
+    // The room the bar can spare: the box gives way down to 140 px
+    // before the heading beside it would.
+    property real maxWidth: 1e9
 
     function focusInput() {
         input.forceActiveFocus()
@@ -16,7 +19,7 @@ Item {
         input.text = ""
     }
 
-    implicitWidth: active || input.text.length > 0 ? 320 : 240
+    implicitWidth: Math.max(140, Math.min(active || input.text.length > 0 ? 320 : 240, maxWidth))
     implicitHeight: 36
 
     Behavior on implicitWidth {
