@@ -44,7 +44,8 @@ Item {
     Item {
         id: bubble
         parent: root.Overlay.overlay ? root.Overlay.overlay : root
-        x: root.origin.x
+        // Kept inside the window: one at the right edge was cut off.
+        x: parent === root ? root.origin.x : Math.max(8, Math.min(root.origin.x, parent.width - root.width - 8))
         y: root.origin.y
         z: 1000
         width: root.width
