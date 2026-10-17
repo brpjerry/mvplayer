@@ -84,7 +84,7 @@ endif()
 # ---------------------------------------------------------------------------
 # Application
 # ---------------------------------------------------------------------------
-find_package(Qt6 6.5 REQUIRED COMPONENTS Gui Qml Quick QuickControls2 Network OpenGL ShaderTools)
+find_package(Qt6 6.5 REQUIRED COMPONENTS Gui GuiPrivate Qml Quick QuickControls2 Network OpenGL ShaderTools)
 # D-Bus carries the Linux desktop integration; Windows has its own calls.
 if(NOT WIN32)
     find_package(Qt6 QUIET OPTIONAL_COMPONENTS DBus)
@@ -193,7 +193,7 @@ qt_add_shaders(mvplayer "mvplayer_shaders"
 
 target_link_libraries(mvplayer PRIVATE
     mvcore
-    Qt6::Gui Qt6::Qml Qt6::Quick Qt6::QuickControls2 Qt6::Network Qt6::OpenGL
+    Qt6::Gui Qt6::GuiPrivate Qt6::Qml Qt6::Quick Qt6::QuickControls2 Qt6::Network Qt6::OpenGL
     PkgConfig::MPV
 )
 if(WIN32)

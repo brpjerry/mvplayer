@@ -16,8 +16,11 @@
 #include <QGuiApplication>
 #include <QQmlApplicationEngine>
 #include <QQuickStyle>
+#include <QKeySequence>
 #include <QMouseEvent>
+#include <QQuickItem>
 #include <QQuickWindow>
+#include <qpa/qwindowsysteminterface.h>
 
 #include <cstdio>
 
@@ -161,6 +164,74 @@ int main(int argc, char **argv)
                         send(QEvent::MouseButtonPress, Qt::LeftButton, Qt::LeftButton);
                         send(QEvent::MouseButtonRelease, Qt::LeftButton, Qt::NoButton);
                     }
+                    return QStringLiteral("ok");
+                }
+                // key <sequence>: pressed and released as the keyboard
+                // would, shortcuts included ("Space", "Ctrl+M", "Escape",
+                // "F11"); type <text>: typed into what has the focus.
+                const bool key = line.startsWith(QLatin1String("key "));
+                if (key || line.startsWith(QLatin1String("type "))) {
+                    auto *window = qobject_cast<QQuickWindow *>(root);
+                    if (!window)
+                        return QStringLiteral("failed");
+                    const QString arg = line.section(QLatin1Char(' '), 1);
+                    // Keys go to the active window; offscreen none is until asked.
+                    if (!window->isActive())
+                        window->requestActivate();
+                    const auto press = [&](int k, Qt::KeyboardModifiers mods, const QString &text) {
+                        QWindowSystemInterface::handleKeyEvent<QWindowSystemInterface::SynchronousDelivery>(window, QEvent::KeyPress, k, mods, text);
+                        QWindowSystemInterface::handleKeyEvent<QWindowSystemInterface::SynchronousDelivery>(window, QEvent::KeyRelease, k, mods, text);
+                    };
+                    if (key) {
+                        const QKeySequence seq(arg);
+                        if (seq.isEmpty())
+                            return QStringLiteral("failed");
+                        const QKeyCombination combo = seq[0];
+                        const int k = combo.key();
+                        const QString text = k >= Qt::Key_Space && k <= Qt::Key_ydiaeresis && !(combo.keyboardModifiers() & ~Qt::ShiftModifier)
+                            ? QString(QChar(k)).toLower() : QString();
+                        press(k, combo.keyboardModifiers(), combo.keyboardModifiers() & Qt::ShiftModifier ? text.toUpper() : text);
+                        return QStringLiteral("ok key=0x") + QString::number(k, 16) + QStringLiteral(" mods=0x") + QString::number(int(combo.keyboardModifiers()), 16);
+                    } else {
+                        for (const QChar c : arg)
+                            press(0, Qt::NoModifier, QString(c));
+                    }
+                    return QStringLiteral("ok");
+                }
+                // focus: what has the keyboard focus (its type), as a key
+                // would reach it first.
+                if (line == QLatin1String("focus")) {
+                    auto *window = qobject_cast<QQuickWindow *>(root);
+                    QQuickItem *item = window ? window->activeFocusItem() : nullptr;
+                    return item ? QString::fromLatin1(item->metaObject()->className()).section(QLatin1Char('_'), 0, 0) : QStringLiteral("none");
+                }
+                // resize <w> <h>: the window, within its minimum.
+                if (line.startsWith(QLatin1String("resize "))) {
+                    auto *window = qobject_cast<QQuickWindow *>(root);
+                    const QStringList at = line.section(QLatin1Char(' '), 1).split(QLatin1Char(' '), Qt::SkipEmptyParts);
+                    if (!window || at.size() != 2)
+                        return QStringLiteral("failed");
+                    window->resize(at[0].toInt(), at[1].toInt());
+                    return QStringLiteral("ok");
+                }
+                // drag <x1> <y1> <x2> <y2>: the left button pressed at the
+                // first point, moved to the second in steps, released.
+                if (line.startsWith(QLatin1String("drag "))) {
+                    auto *window = qobject_cast<QQuickWindow *>(root);
+                    const QStringList at = line.section(QLatin1Char(' '), 1).split(QLatin1Char(' '), Qt::SkipEmptyParts);
+                    if (!window || at.size() != 4)
+                        return QStringLiteral("failed");
+                    const QPointF from(at[0].toDouble(), at[1].toDouble()), to(at[2].toDouble(), at[3].toDouble());
+                    const auto send = [&](QEvent::Type type, const QPointF &p, Qt::MouseButton button, Qt::MouseButtons held) {
+                        QMouseEvent e(type, p, p, window->mapToGlobal(p), button, held, Qt::NoModifier);
+                        QCoreApplication::sendEvent(window, &e);
+                    };
+                    send(QEvent::MouseMove, from, Qt::NoButton, Qt::NoButton);
+                    send(QEvent::MouseButtonPress, from, Qt::LeftButton, Qt::LeftButton);
+                    const int steps = 12;
+                    for (int i = 1; i <= steps; ++i)
+                        send(QEvent::MouseMove, from + (to - from) * (double(i) / steps), Qt::NoButton, Qt::LeftButton);
+                    send(QEvent::MouseButtonRelease, to, Qt::LeftButton, Qt::NoButton);
                     return QStringLiteral("ok");
                 }
                 QVariant result;
