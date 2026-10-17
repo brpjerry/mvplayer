@@ -163,6 +163,10 @@ Item {
             font.pixelSize: 14
             font.weight: Font.DemiBold
             elide: Text.ElideRight
+            // One line of the main font's height: a CJK fallback font is
+            // taller and would push the line under it down.
+            height: 18
+            verticalAlignment: Text.AlignVCenter
             Behavior on color { ColorAnimation { duration: Theme.normal } }
             Behavior on anchors.leftMargin { NumberAnimation { duration: Theme.normal; easing.type: Easing.OutCubic } }
         }

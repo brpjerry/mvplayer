@@ -166,6 +166,8 @@ Item {
             font.pixelSize: 14
             font.weight: Font.DemiBold
             elide: Text.ElideRight
+            height: 18 // one line of the main font, whatever a fallback font measures
+            verticalAlignment: Text.AlignVCenter
             Behavior on color { ColorAnimation { duration: Theme.normal } }
             Behavior on anchors.leftMargin { NumberAnimation { duration: Theme.normal; easing.type: Easing.OutCubic } }
         }
