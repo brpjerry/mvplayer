@@ -330,7 +330,8 @@ Item {
                         model: root.music ? [
                             { key: "title", label: "Album" },
                             { key: "artist", label: "Artist" },
-                            { key: "year", label: "Chronological - Audio" }
+                            { key: "year", label: "Chronological - Audio" },
+                            { key: "modified", label: "Recently modified" }
                         ] : [
                             { key: "title", label: "Title" },
                             { key: "artist", label: "Artist" },

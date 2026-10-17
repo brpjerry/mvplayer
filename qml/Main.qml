@@ -70,6 +70,23 @@ ApplicationWindow {
         return grid.reveal(id)
     }
 
+    // A track's music video, asked for from the music library: the video
+    // library comes up on its card and it plays, as a click on the card
+    // would. A grid narrowed to a tag or a search that leaves it out is
+    // widened first.
+    function playVideo(id) {
+        App.mode = "video"
+        showSection("library")
+        let row = revealVideo(id)
+        if (row < 0) {
+            topBar.searchText = ""
+            sidebar.select("all", "")
+            row = revealVideo(id)
+        }
+        if (row >= 0)
+            player.playRow(row)
+    }
+
     // An accepted video leaves the review list; it stops rather than play on
     // out of sight, and its file is tidied up meanwhile. Among the orphans
     // the verdict is on an orphan, and a kept one leaves that list alike.
@@ -127,8 +144,50 @@ ApplicationWindow {
         // A track of the music library whose music video is playing in its
         // place (App.videoFollows): the player layer is up over the albums.
         property bool videoUp: false
+        // Gapless: while a track plays from its file, the one that follows
+        // is queued in mpv (pendingNext), which goes on to it by itself;
+        // onFileStarted then takes the queue there without a load.
+        property int pendingNext: -1
+        property int loads: 0   // how many times a file was loaded afresh (tests)
+
+        // What next(true) would choose, without choosing it.
+        function upcoming() {
+            if (queue.length === 0)
+                return -1
+            if (repeatMode === 2)
+                return index
+            if (shuffle && queue.length > 1) {
+                let n
+                do {
+                    n = Math.floor(Math.random() * queue.length)
+                } while (n === index)
+                return n
+            }
+            const n = index + 1
+            if (n < queue.length)
+                return n
+            return repeatMode === 1 ? 0 : -1
+        }
+        // A track played from its file, as this one is.
+        function fromFile(item) {
+            return item && item.kind === "track" && !(App.videoFollows && item.videoId > 0 && item.videoPath)
+        }
+        function armNext() {
+            const n = fromFile(current) && !videoUp ? upcoming() : -1
+            if (n >= 0 && fromFile(queue[n])) {
+                pendingNext = n
+                window.mpv.queueNext(queue[n].path)
+            } else {
+                pendingNext = -1
+                window.mpv.clearNext()
+            }
+        }
+        onShuffleChanged: if (current) armNext()
+        onRepeatModeChanged: if (current) armNext()
 
         function load(i) {
+            pendingNext = -1
+            loads += 1
             index = i
             current = queue[i]
             if (current.kind === "track") {
@@ -153,6 +212,7 @@ ApplicationWindow {
                 window.view = "grid"
                 playerView.close()
                 window.mpv.load(current.path)
+                armNext()
                 return
             }
             videoUp = false
@@ -177,8 +237,15 @@ ApplicationWindow {
             const list = App.videos.snapshot()
             if (row < 0 || row >= list.length)
                 return
-            // The video that is already loaded: just bring it forward.
-            if (current && list[row].videoId === current.videoId) {
+            // The video that is already loaded: just bring it forward. A
+            // track whose video is up in its place (App.videoFollows) goes
+            // on as that video, in the grid's queue, without a reload.
+            if (current && list[row].videoId === current.videoId && (current.kind !== "track" || videoUp)) {
+                queue = list
+                history = []
+                index = row
+                current = list[row]
+                videoUp = false
                 window.showPlayer()
                 return
             }
@@ -265,6 +332,19 @@ ApplicationWindow {
             if (!player.next(true))
                 player.stop()
         }
+        // mpv went on to the track queued after the playing one.
+        function onFileStarted(path) {
+            const n = player.pendingNext
+            if (n < 0 || n >= player.queue.length || player.queue[n].path !== path)
+                return
+            if (n !== player.index) {
+                player.history.push(player.index)
+                player.index = n
+                player.current = player.queue[n]
+            }
+            player.pendingNext = -1
+            player.armNext()
+        }
         function onLoadFailed(reason) {
             console.warn("playback failed:", reason)
             if (!player.next(true))
@@ -312,10 +392,15 @@ ApplicationWindow {
     // picture of the playing video, changing slowly.
     readonly property bool autoAccent: App.accent === "auto"
     Binding { target: window.mpv; property: "colorSampling"; value: window.autoAccent }
+    // A track played from its file has no picture to sample: its album's
+    // cover gives the colour instead.
+    readonly property string trackAccent: autoAccent && player.current && player.current.kind === "track" && !player.videoUp
+                                          ? App.coverAccent(player.current.thumb) : ""
     Binding {
         target: Theme
         property: "accentSource"
         value: !window.autoAccent ? App.accent
+             : window.trackAccent !== "" ? window.trackAccent
              : player.current && window.mpv.frameColorValid ? window.mpv.frameColor : Theme.defaultAccent
     }
     Binding { target: Theme; property: "accentFade"; value: window.autoAccent ? 800 : 300 }
@@ -427,16 +512,13 @@ ApplicationWindow {
             anchors.right: parent.right
             anchors.top: parent.top
             anchors.bottom: controlBar.top
-            active: App.mode === "music" && !window.fullscreen
+            active: App.mode === "music" && !window.fullscreen && App.musicPanel
             queue: player.queue
             index: player.index
             current: player.current
             playing: window.playingNow
             onPlayRequested: (i) => player.load(i)
-            onVideoRequested: (videoId) => {
-                App.mode = "video"
-                window.revealVideo(videoId)
-            }
+            onVideoRequested: (videoId) => window.playVideo(videoId)
         }
 
         PlayerView {
@@ -602,6 +684,8 @@ ApplicationWindow {
         case "previous": player.previous(); return "ok"
         case "stop": player.stop(); return "ok"
         case "seek": mpv.seek(parseFloat(arg), true); return "ok"
+        case "repeat": if (arg) player.repeatMode = parseInt(arg); return "" + player.repeatMode // repeat [0|1|2]: off, all, one
+        case "shuffle": if (arg) player.shuffle = arg !== "off"; return player.shuffle ? "on" : "off" // shuffle [on|off]
         case "audio": mpv.audioTrack = parseInt(arg); return "ok"
         case "switch-audio": controlBar.switchAudio(); return "ok" // as the key on the chip does
         case "search": topBar.searchText = arg; return "ok"
@@ -616,8 +700,9 @@ ApplicationWindow {
         case "order": return JSON.stringify(App.videos.snapshot().slice(0, parseInt(arg) || 20).map(v => v.title)) // order [n]: the grid's first titles
         case "mode": if (arg) App.mode = arg; return App.mode // mode [video|music]
         case "video-follows": App.videoFollows = arg !== "off"; return "ok" // video-follows on|off
-        case "thumb-size": if (arg) App.thumbSize = parseInt(arg); return "" + App.thumbSize // thumb-size [px]: the video grid's least card width
-        case "cover-size": if (arg) App.coverSize = parseInt(arg); return "" + App.coverSize // cover-size [px]: the album grid's least card width
+        case "music-panel": if (arg) App.musicPanel = arg !== "off"; return App.musicPanel ? "on" : "off" // music-panel [on|off]: the panel right of the albums
+        case "thumb-columns": if (arg) App.thumbColumns = parseInt(arg); return "" + App.thumbColumns // thumb-columns [n]: videos across
+        case "cover-columns": if (arg) App.coverColumns = parseInt(arg); return "" + App.coverColumns // cover-columns [n]: albums across
         case "albums": return JSON.stringify(App.albums.snapshot().slice(0, parseInt(arg) || 20).map(a => a.albumArtist + " — " + a.album)) // albums [n]: the album grid's first albums
         case "album-tracks": return JSON.stringify(App.albumTracks(parseInt(arg)).map(t => t.title)) // album-tracks <row>
         case "play-album": { // play-album <row> [track]
@@ -773,10 +858,11 @@ ApplicationWindow {
                 mode: App.mode, albumCount: App.albumCount, albumsShown: App.albums.count, libraryTracks: App.libraryTrackCount,
                 albumSort: App.albums.sortMode, albumDescending: App.albums.sortDescending, albumFacet: App.albums.facetType,
                 queueLength: player.queue.length, queueKind: player.current ? (player.current.kind || "video") : null,
-                musicPanel: nowPlaying.active, musicPanelWidth: nowPlaying.width,
+                pendingNext: player.pendingNext, loads: player.loads, trackAccent: window.trackAccent,
+                musicPanel: nowPlaying.active, musicPanelWidth: nowPlaying.width, musicPanelOn: App.musicPanel,
                 lookupAlbums: App.lookupAlbums.length, albumMenu: albumGrid.menuOpen,
                 videoFollows: App.videoFollows, videoUp: player.videoUp,
-                thumbSize: App.thumbSize, coverSize: App.coverSize, gridColumns: grid.view.columns, albumColumns: albumGrid.view.columns,
+                thumbColumns: App.thumbColumns, coverColumns: App.coverColumns, gridColumns: grid.view.columns, albumColumns: albumGrid.view.columns,
                 playing: player.current ? player.current.title : null, index: player.index,
                 position: mpv.position, duration: mpv.duration, paused: mpv.paused, active: mpv.active, muted: mpv.muted,
                 hwdec: mpv.hwdec, videoSize: mpv.videoSize.width + "x" + mpv.videoSize.height,
@@ -806,7 +892,8 @@ ApplicationWindow {
                 systemDark: App.systemDark, bg: "" + Theme.bg, baseDir: App.baseDir, musicDirs: App.musicDirs, frameColor: "" + mpv.frameColor,
                 frameColorValid: mpv.frameColorValid, sidebar: App.sidebarFacet,
                 anchor: playerView.anchorAvailable ? [Math.round(playerView.anchorRect.x), Math.round(playerView.anchorRect.y), Math.round(playerView.anchorRect.width)] : null,
-                contentY: grid.view.contentY, flicking: grid.view.flicking,
+                contentY: grid.view.contentY, flicking: grid.view.flicking, cellHeight: grid.view.cellHeight,
+                albumContentY: albumGrid.view.contentY, albumCellHeight: albumGrid.view.cellHeight,
                 expand: playerView.expand, contentHeight: grid.view.contentHeight, gridHeight: grid.view.height,
                 window: width + "x" + height, dpr: Screen.devicePixelRatio
             })

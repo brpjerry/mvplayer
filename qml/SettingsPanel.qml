@@ -160,9 +160,14 @@ Popup {
         property real to: 1
         property real value: 0
         property string valueText: value.toFixed(1)
+        // > 0: the value snaps to `from`, `from` + step, ... and the track
+        // shows a mark at each.
+        property real step: 0
+        property bool showValue: true
         signal moved(real value)
         width: parent.width
         height: sliderText.implicitHeight + 28
+        readonly property int steps: step > 0 ? Math.round((to - from) / step) : 0
 
         Column {
             id: sliderText
@@ -187,7 +192,7 @@ Popup {
         Item {
             id: track
             anchors.right: valueLabel.left
-            anchors.rightMargin: 10
+            anchors.rightMargin: sliderRow.showValue ? 10 : 0
             anchors.verticalCenter: parent.verticalCenter
             width: 150
             height: 28
@@ -203,6 +208,20 @@ Popup {
                     height: parent.height
                     radius: 2
                     color: Theme.accent
+                }
+            }
+            // The points it snaps to, under the knob's path.
+            Repeater {
+                model: sliderRow.steps > 0 ? sliderRow.steps + 1 : 0
+                Rectangle {
+                    required property int index
+                    readonly property real at: index / sliderRow.steps
+                    x: 7 + (track.width - 14) * at - width / 2
+                    anchors.verticalCenter: parent.verticalCenter
+                    width: 6
+                    height: 6
+                    radius: 3
+                    color: at <= track.fraction + 0.001 ? Theme.accentHi : Theme.textFaint
                 }
             }
             Rectangle {
@@ -222,7 +241,10 @@ Popup {
                 preventStealing: true
                 function pick(mx) {
                     const f = Math.max(0, Math.min(1, (mx - 4 - 7) / (track.width - 14)))
-                    sliderRow.moved(Math.round((sliderRow.from + f * (sliderRow.to - sliderRow.from)) * 10) / 10)
+                    if (sliderRow.steps > 0)
+                        sliderRow.moved(sliderRow.from + Math.round(f * sliderRow.steps) * sliderRow.step)
+                    else
+                        sliderRow.moved(Math.round((sliderRow.from + f * (sliderRow.to - sliderRow.from)) * 10) / 10)
                 }
                 onPressed: (m) => pick(m.x)
                 onPositionChanged: (m) => { if (pressed) pick(m.x) }
@@ -232,7 +254,8 @@ Popup {
             id: valueLabel
             anchors.right: parent.right
             anchors.verticalCenter: parent.verticalCenter
-            width: Math.max(30, implicitWidth)
+            visible: sliderRow.showValue
+            width: sliderRow.showValue ? Math.max(30, implicitWidth) : 0
             horizontalAlignment: Text.AlignRight
             text: sliderRow.valueText
             color: Theme.textDim
@@ -991,25 +1014,26 @@ Popup {
 
                     Divider {}
 
-                    // How big the cards are: the grids fit as many columns
-                    // as the chosen width allows.
+                    // How big the cards are: how many go across.
                     SliderRow {
                         label: "Thumbnail size"
-                        hint: "How wide a video's card is at least. The video grid fits as many columns as that allows."
-                        from: App.minCardSize
-                        to: App.maxCardSize
-                        value: App.thumbSize
-                        valueText: App.thumbSize + " px"
-                        onMoved: (v) => App.thumbSize = Math.round(v / 10) * 10
+                        hint: "How many videos across in the video grid; fewer means bigger thumbnails."
+                        from: App.thumbColumnsMin
+                        to: App.thumbColumnsMax
+                        step: 1
+                        value: App.thumbColumns
+                        valueText: App.thumbColumns + " across"
+                        onMoved: (v) => App.thumbColumns = v
                     }
                     SliderRow {
                         label: "Cover art size"
-                        hint: "How wide an album's card is at least, in the music library."
-                        from: App.minCardSize
-                        to: App.maxCardSize
-                        value: App.coverSize
-                        valueText: App.coverSize + " px"
-                        onMoved: (v) => App.coverSize = Math.round(v / 10) * 10
+                        hint: "How many albums across in the music library; fewer means bigger covers."
+                        from: App.coverColumnsMin
+                        to: App.coverColumnsMax
+                        step: 1
+                        value: App.coverColumns
+                        valueText: App.coverColumns + " across"
+                        onMoved: (v) => App.coverColumns = v
                     }
                     Item { width: 1; height: 8 }
                 }

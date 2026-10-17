@@ -1,6 +1,9 @@
 #include "ui/AppController.h"
+
+#include "ui/AccentColor.h"
 #include "core/Judge.h"
 #include <QDirIterator>
+#include <QImage>
 #include <QDesktopServices>
 #include <functional>
 
@@ -184,8 +187,33 @@ AppController::AppController(const AppOptions &options, QObject *parent)
     if (m_mode != QLatin1String("music"))
         m_mode = QStringLiteral("video");
     m_themeMode = m_settings->value(QStringLiteral("ui/theme"), m_themeMode).toString();
-    m_thumbSize = qBound(kMinCardSize, m_settings->value(QStringLiteral("ui/thumbSize"), m_thumbSize).toInt(), kMaxCardSize);
-    m_coverSize = qBound(kMinCardSize, m_settings->value(QStringLiteral("ui/coverSize"), m_coverSize).toInt(), kMaxCardSize);
+    m_thumbColumns = qBound(kThumbColumnsMin, m_settings->value(QStringLiteral("ui/thumbColumns"), m_thumbColumns).toInt(), kThumbColumnsMax);
+    m_coverColumns = qBound(kCoverColumnsMin, m_settings->value(QStringLiteral("ui/coverColumns"), m_coverColumns).toInt(), kCoverColumnsMax);
+    m_musicPanel = m_settings->value(QStringLiteral("ui/musicPanel"), m_musicPanel).toBool();
+    // Each library's sort, as it was left (ui/videoSort, ui/albumSort and
+    // their directions); a mode that is not one of the menu's is ignored.
+    const auto restoreSort = [this](auto *model, const QStringList &modes, const QString &modeKey, const QString &dirKey) {
+        const QString mode = m_settings->value(modeKey).toString();
+        if (modes.contains(mode)) {
+            model->setSortMode(mode);
+            if (m_settings->contains(dirKey))
+                model->setSortDescending(m_settings->value(dirKey).toBool());
+        }
+        connect(model, &std::remove_pointer_t<decltype(model)>::sortModeChanged, this, [this, model, modeKey, dirKey] {
+            m_settings->setValue(modeKey, model->sortMode());
+            m_settings->setValue(dirKey, model->sortDescending());
+        });
+        connect(model, &std::remove_pointer_t<decltype(model)>::sortDescendingChanged, this, [this, model, dirKey] {
+            m_settings->setValue(dirKey, model->sortDescending());
+        });
+    };
+    restoreSort(m_filter, {QStringLiteral("title"), QStringLiteral("artist"), QStringLiteral("year"), QStringLiteral("published"), QStringLiteral("added")},
+                QStringLiteral("ui/videoSort"), QStringLiteral("ui/videoSortDescending"));
+    restoreSort(m_albums, {QStringLiteral("title"), QStringLiteral("artist"), QStringLiteral("year"), QStringLiteral("modified")},
+                QStringLiteral("ui/albumSort"), QStringLiteral("ui/albumSortDescending"));
+    // The sliders were a card width in pixels for a day; those keys are gone.
+    m_settings->remove(QStringLiteral("ui/thumbSize"));
+    m_settings->remove(QStringLiteral("ui/coverSize"));
     m_flickDeceleration = qBound(200.0, m_settings->value(QStringLiteral("ui/flickDeceleration"), m_flickDeceleration).toDouble(), 50000.0);
     connect(&m_systemTheme, &SystemTheme::darkChanged, this, &AppController::systemDarkChanged);
     m_touchpadGain = qBound(0.5, m_settings->value(QStringLiteral("ui/touchpadGain"), m_touchpadGain).toDouble(), 20.0);
@@ -1340,6 +1368,20 @@ void AppController::setAccent(const QString &accent)
     emit appearanceChanged();
 }
 
+QString AppController::coverAccent(const QUrl &cover) const
+{
+    const QString file = cover.isLocalFile() ? cover.toLocalFile() : cover.toString();
+    if (file.isEmpty())
+        return {};
+    QImage img(file);
+    if (img.isNull())
+        return {};
+    // The same tiny picture the video's sampler works from.
+    img = img.scaled(16, 16, Qt::IgnoreAspectRatio, Qt::SmoothTransformation).convertToFormat(QImage::Format_RGBA8888);
+    const QByteArray rgba(reinterpret_cast<const char *>(img.constBits()), qsizetype(img.sizeInBytes()));
+    return AccentColor::fromFrame(rgba).name();
+}
+
 void AppController::setThemeMode(const QString &mode)
 {
     if (mode == m_themeMode || mode.isEmpty())
@@ -1349,23 +1391,32 @@ void AppController::setThemeMode(const QString &mode)
     emit appearanceChanged();
 }
 
-void AppController::setThumbSize(int px)
+void AppController::setThumbColumns(int n)
 {
-    px = qBound(kMinCardSize, px, kMaxCardSize);
-    if (px == m_thumbSize)
+    n = qBound(kThumbColumnsMin, n, kThumbColumnsMax);
+    if (n == m_thumbColumns)
         return;
-    m_thumbSize = px;
-    m_settings->setValue(QStringLiteral("ui/thumbSize"), m_thumbSize);
+    m_thumbColumns = n;
+    m_settings->setValue(QStringLiteral("ui/thumbColumns"), m_thumbColumns);
     emit appearanceChanged();
 }
 
-void AppController::setCoverSize(int px)
+void AppController::setMusicPanel(bool on)
 {
-    px = qBound(kMinCardSize, px, kMaxCardSize);
-    if (px == m_coverSize)
+    if (on == m_musicPanel)
         return;
-    m_coverSize = px;
-    m_settings->setValue(QStringLiteral("ui/coverSize"), m_coverSize);
+    m_musicPanel = on;
+    m_settings->setValue(QStringLiteral("ui/musicPanel"), m_musicPanel);
+    emit appearanceChanged();
+}
+
+void AppController::setCoverColumns(int n)
+{
+    n = qBound(kCoverColumnsMin, n, kCoverColumnsMax);
+    if (n == m_coverColumns)
+        return;
+    m_coverColumns = n;
+    m_settings->setValue(QStringLiteral("ui/coverColumns"), m_coverColumns);
     emit appearanceChanged();
 }
 

@@ -161,13 +161,17 @@ class AppController : public QObject
     Q_PROPERTY(QString accent READ accent WRITE setAccent NOTIFY appearanceChanged)
     // "auto" (follow the operating system), "dark" or "light"
     Q_PROPERTY(QString themeMode READ themeMode WRITE setThemeMode NOTIFY appearanceChanged)
-    // The least width of a card in the video grid and in the album grid, in
-    // pixels; the grids fit as many columns as that allows (ui/thumbSize,
-    // ui/coverSize).
-    Q_PROPERTY(int thumbSize READ thumbSize WRITE setThumbSize NOTIFY appearanceChanged)
-    Q_PROPERTY(int coverSize READ coverSize WRITE setCoverSize NOTIFY appearanceChanged)
-    Q_PROPERTY(int minCardSize READ minCardSize CONSTANT)
-    Q_PROPERTY(int maxCardSize READ maxCardSize CONSTANT)
+    // How many cards across in the video grid and in the album grid
+    // (ui/thumbColumns, ui/coverColumns), within each one's range.
+    Q_PROPERTY(int thumbColumns READ thumbColumns WRITE setThumbColumns NOTIFY appearanceChanged)
+    Q_PROPERTY(int coverColumns READ coverColumns WRITE setCoverColumns NOTIFY appearanceChanged)
+    // The panel right of the album grid (queue, track, cover) is on show;
+    // off until it is asked for again (ui/musicPanel).
+    Q_PROPERTY(bool musicPanel READ musicPanel WRITE setMusicPanel NOTIFY appearanceChanged)
+    Q_PROPERTY(int thumbColumnsMin READ thumbColumnsMin CONSTANT)
+    Q_PROPERTY(int thumbColumnsMax READ thumbColumnsMax CONSTANT)
+    Q_PROPERTY(int coverColumnsMin READ coverColumnsMin CONSTANT)
+    Q_PROPERTY(int coverColumnsMax READ coverColumnsMax CONSTANT)
     Q_PROPERTY(bool systemDark READ systemDark NOTIFY systemDarkChanged)
     // Which tag the sidebar lists: albumArtist | artist | genre | album | year
     Q_PROPERTY(QString sidebarFacet READ sidebarFacet WRITE setSidebarFacet NOTIFY appearanceChanged)
@@ -355,17 +359,25 @@ public:
 
     QString accent() const { return m_accent; }
     void setAccent(const QString &accent);
+    // The accent a picture gives (as a frame of the playing video does):
+    // "#rrggbb", or "" when the file cannot be read.
+    Q_INVOKABLE QString coverAccent(const QUrl &cover) const;
     QString themeMode() const { return m_themeMode; }
     void setThemeMode(const QString &mode);
-    int thumbSize() const { return m_thumbSize; }
-    void setThumbSize(int px);
-    int coverSize() const { return m_coverSize; }
-    void setCoverSize(int px);
-    static constexpr int kMinCardSize = 180;
-    static constexpr int kMaxCardSize = 600;
-    static constexpr int kDefaultCardSize = 290;
-    int minCardSize() const { return kMinCardSize; }
-    int maxCardSize() const { return kMaxCardSize; }
+    int thumbColumns() const { return m_thumbColumns; }
+    void setThumbColumns(int n);
+    int coverColumns() const { return m_coverColumns; }
+    void setCoverColumns(int n);
+    bool musicPanel() const { return m_musicPanel; }
+    void setMusicPanel(bool on);
+    static constexpr int kThumbColumnsMin = 2;
+    static constexpr int kThumbColumnsMax = 6;
+    static constexpr int kCoverColumnsMin = 2;
+    static constexpr int kCoverColumnsMax = 8;
+    int thumbColumnsMin() const { return kThumbColumnsMin; }
+    int thumbColumnsMax() const { return kThumbColumnsMax; }
+    int coverColumnsMin() const { return kCoverColumnsMin; }
+    int coverColumnsMax() const { return kCoverColumnsMax; }
     bool systemDark() const { return m_systemTheme.dark(); }
     QString sidebarFacet() const { return m_sidebarFacet; }
     void setSidebarFacet(const QString &key);
@@ -496,8 +508,9 @@ private:
     QString m_sidebarFacet = QStringLiteral("albumArtist");
     SystemTheme m_systemTheme;
     QString m_themeMode = QStringLiteral("auto");
-    int m_thumbSize = kDefaultCardSize;
-    int m_coverSize = kDefaultCardSize;
+    int m_thumbColumns = 4;
+    int m_coverColumns = 3;
+    bool m_musicPanel = true;
     double m_flickDeceleration = 4800; // px/s²: how quickly a flick glides to a stop
     double m_touchpadGain = 4.0;
     double m_wheelStep = 170;

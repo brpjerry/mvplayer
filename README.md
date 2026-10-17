@@ -666,10 +666,15 @@ the words is tried against what the judge once saw.
   the base directory as a grid of covers (the picture beside the album's
   first file, else the one in its tags). Clicking an album plays it from its
   first track, the rest of the album queued after it, from the music files
-  themselves; the bottom bar's controls work as for a video, and the
-  fullscreen and subtitle buttons go away. A chip on a cover of an album in
+  themselves and without a gap between them; the bottom bar's controls work
+  as for a video, and in place of
+  the fullscreen button a switch hides the panel right of the albums (the
+  queue, the playing track and its cover) until it is pressed again. A chip
+  on a cover of an album in
   a video folder counts its tracks that have a video. The sidebar, the sort
-  menu (by album, by artist, chronologically) and the search box narrow the
+  menu (by album, by artist, chronologically, by the files' modification
+  date; each library keeps its own sort across restarts) and the search box
+  narrow the
   albums as they do the videos; the mode is remembered. A right click on
   an album offers **Find videos for this album**, which looks its tracks up
   wherever their files are (Settings → Library lists such albums, each with
@@ -690,11 +695,12 @@ the words is tried against what the judge once saw.
 - Settings → Appearance: dark, light, or **Auto**, which follows the operating
   system's preference and switches with it while the app is running.
 - Settings → Appearance also has two sliders, **Thumbnail size** and **Cover
-  art size**: the least width of a card in the video grid and in the album
-  grid (180 to 600 pixels, 290 by default). Each grid fits as many columns as
-  that allows.
+  art size**: how many cards go across the video grid (2 to 6, 4 by default)
+  and the album grid (2 to 8, 3 by default). The cards share the width
+  evenly, so each step is one column.
 - Settings → Accent colour: a fixed colour (presets or the hue strip) or
-  **Auto**, which takes the colour from the playing video. Auto looks at one
+  **Auto**, which takes the colour from the playing video, or from the
+  album's cover for a track played from its file. Auto looks at one
   downscaled frame a second, blends it with the previous samples and fades
   between colours, so cuts do not make the interface flicker. Black, white
   and grey frames give a neutral accent (light grey to white on dark, dark

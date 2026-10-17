@@ -81,6 +81,14 @@ private slots:
         QCOMPARE(titles(p), (QStringList{QStringLiteral("THE BOOK"), QStringLiteral("Abbey Road"), QStringLiteral("Help!"), QString()}));
         p.setSortDescending(false);
         QCOMPARE(titles(p), (QStringList{QString(), QStringLiteral("Help!"), QStringLiteral("Abbey Road"), QStringLiteral("THE BOOK")}));
+        // Modified: the album whose files changed last first, by default.
+        p.setSortMode(QStringLiteral("modified"));
+        QVERIFY(p.sortDescending());
+        QCOMPARE(titles(p), (QStringList{QString(), QStringLiteral("Abbey Road"), QStringLiteral("THE BOOK"), QStringLiteral("Help!")}));
+        p.setSortDescending(false);
+        QCOMPARE(titles(p), (QStringList{QStringLiteral("Help!"), QStringLiteral("THE BOOK"), QStringLiteral("Abbey Road"), QString()}));
+        p.setSortMode(QStringLiteral("year"));
+        p.setSortDescending(false);
         // Recently added: the newest files first, whatever the sort order.
         p.setFacet(QStringLiteral("recent"));
         QCOMPARE(titles(p), (QStringList{QString(), QStringLiteral("Abbey Road"), QStringLiteral("THE BOOK"), QStringLiteral("Help!")}));

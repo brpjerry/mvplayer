@@ -92,14 +92,15 @@ public:
     QString facetType() const { return m_facetType; }
     QString facetValue() const { return m_facetValue; }
     // sortMode: title (the album's) | artist (the album artist, then the
-    // year) | year (Chronological - Audio). Choosing a mode puts its
-    // direction the natural way round (names A to Z, years newest first);
+    // year) | year (Chronological - Audio) | modified (the album's newest
+    // file by its modification time). Choosing a mode puts its direction
+    // the natural way round (names A to Z, years and files newest first);
     // sortDescending then flips the mode's own key.
     QString sortMode() const { return m_sortMode; }
     void setSortMode(const QString &mode);
     bool sortDescending() const { return m_descending; }
     void setSortDescending(bool descending);
-    static bool defaultDescending(const QString &mode) { return mode == QLatin1String("year"); }
+    static bool defaultDescending(const QString &mode) { return mode == QLatin1String("year") || mode == QLatin1String("modified"); }
     int count() const { return rowCount(); }
 
     // type: all | recent (newest files first) | albumArtist | artist | genre | year
