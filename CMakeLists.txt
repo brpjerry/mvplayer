@@ -176,8 +176,8 @@ foreach(f ${MV_QML_FILES})
 endforeach()
 set_source_files_properties(qml/Theme.qml qml/Icons.qml PROPERTIES QT_QML_SINGLETON_TYPE TRUE)
 
-# The tray icon, at every size the tray may ask for.
-qt_add_resources(mvplayer "mvplayer_icons" PREFIX "/mvplayer" BASE data FILES data/mvplayer.ico)
+# The tray icon: the app icon's shape in white, at every size a tray may ask for.
+qt_add_resources(mvplayer "mvplayer_icons" PREFIX "/mvplayer" BASE data FILES data/mvplayer-tray.ico)
 
 qt_add_qml_module(mvplayer
     URI MvPlayer
