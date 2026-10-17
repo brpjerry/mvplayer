@@ -28,6 +28,8 @@ Rectangle {
     readonly property bool hasItem: current !== null
     readonly property bool hasTrack: hasItem && current.kind === "track"
     readonly property var track: hasItem ? current : null
+    readonly property alias queueView: list
+    onIndexChanged: list.currentIndex = index
 
     function formatLine(t) {
         let s = (t.codec || "").toUpperCase()
@@ -110,9 +112,24 @@ Rectangle {
             width: parent.width
             clip: true
             model: root.hasItem ? root.queue : []
-            currentIndex: root.index
+            // Set, not bound: the view writes currentIndex itself when a
+            // model arrives (to 0), which would break a binding.
+            Component.onCompleted: currentIndex = root.index
             boundsBehavior: Flickable.StopAtBounds
             onCurrentIndexChanged: if (currentIndex >= 0) positionViewAtIndex(currentIndex, ListView.Contain)
+            // A queue that arrives with its index already set (a video
+            // playing on across the mode switch) scrolls to it as well.
+            onCountChanged: { currentIndex = root.index; keepCurrentShown() }
+            // The panel slides in, so the list has its size only at the
+            // end: the row is brought into view once the size has settled.
+            onWidthChanged: keepCurrentShown()
+            onHeightChanged: keepCurrentShown()
+            function keepCurrentShown() { settle.restart() }
+            Timer {
+                id: settle
+                interval: 450
+                onTriggered: if (list.currentIndex >= 0 && list.currentIndex < list.count) list.positionViewAtIndex(list.currentIndex, ListView.Contain)
+            }
 
             delegate: Item {
                 id: row

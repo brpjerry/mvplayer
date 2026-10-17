@@ -1061,6 +1061,7 @@ ApplicationWindow {
                 queueLength: player.queue.length, queueKind: player.current ? (player.current.kind || "video") : null,
                 pendingNext: player.pendingNext, loads: player.loads, playMode: player.playMode, albumQueue: player.albumQueue, shuffle: player.shuffle, trackAccent: window.trackAccent,
                 musicPanel: nowPlaying.active, musicPanelWidth: nowPlaying.width, musicPanelOn: App.musicPanel,
+                queueViewY: nowPlaying.queueView.contentY, queueViewHeight: nowPlaying.queueView.height, queueViewIndex: nowPlaying.queueView.currentIndex, queueViewCount: nowPlaying.queueView.count,
                 lookupAlbums: App.lookupAlbums.length, albumMenu: albumGrid.menuOpen,
                 videoFollows: App.videoFollows, videoUp: player.videoUp,
                 windowVisible: window.visible, trayHost: App.trayHost, trayAvailable: window.trayAvailable, trayShown: tray.item ? tray.item.visible : false, background: App.background,
