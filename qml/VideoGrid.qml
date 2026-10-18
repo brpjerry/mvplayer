@@ -234,7 +234,9 @@ Item {
         visible: opacity > 0
         Behavior on opacity { NumberAnimation { duration: Theme.normal } }
 
-        readonly property bool filtering: root.searchText.trim().length > 0 || App.videos.facetType !== "all" || App.videos.section !== "library"
+        readonly property bool filtering: root.searchText.trim().length > 0 || App.videos.facetType !== "all"
+        // Review and Orphans empty are not a failed search.
+        readonly property string sectionEmpty: !filtering && App.videos.section !== "library" ? App.videos.section : ""
 
         Item {
             anchors.horizontalCenter: parent.horizontalCenter
@@ -243,12 +245,12 @@ Item {
             Spinner {
                 anchors.centerIn: parent
                 size: 30
-                visible: !parent.parent.filtering && App.busy
+                visible: !parent.parent.filtering && parent.parent.sectionEmpty === "" && App.busy
             }
             Icon {
                 anchors.centerIn: parent
-                visible: parent.parent.filtering || !App.busy
-                path: parent.parent.filtering ? Icons.search : Icons.movie
+                visible: parent.parent.filtering || parent.parent.sectionEmpty !== "" || !App.busy
+                path: parent.parent.filtering ? Icons.search : parent.parent.sectionEmpty === "review" ? Icons.review : Icons.movie
                 size: 40
                 color: Theme.textFaint
             }
@@ -256,6 +258,8 @@ Item {
         Text {
             anchors.horizontalCenter: parent.horizontalCenter
             text: parent.filtering ? "No videos match"
+                : parent.sectionEmpty === "review" ? "Nothing to review"
+                : parent.sectionEmpty === "orphans" ? "No orphaned videos"
                 : App.busy ? "Looking for music videos…"
                 : "No music videos yet"
             color: Theme.text
@@ -269,6 +273,8 @@ Item {
             wrapMode: Text.WordWrap
             lineHeight: 1.3
             text: parent.filtering ? (root.searchText.trim().length > 0 ? "Nothing in this view matches “" + root.searchText.trim() + "”." : "Nothing here yet.")
+                : parent.sectionEmpty === "review" ? "Videos that wait for your verdict appear here."
+                : parent.sectionEmpty === "orphans" ? "Videos whose tracks are gone from the music folders appear here."
                 : App.busy ? "Videos appear here as soon as each one is found, checked against your track and downloaded."
                 : "None of the tracks in your music folders has a music video that could be found."
             color: Theme.textDim
