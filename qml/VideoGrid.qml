@@ -45,6 +45,12 @@ Item {
         const row = App.videos.rowOfVideo(videoId)
         if (row >= 0)
             grid.positionViewAtIndex(row, GridView.Center)
+            // Kept as the rows on show even while a relayout settles (the
+            // grid just shown, the panel sliding): the settle would have
+            // put the old rows back.
+            grid.settled.stop()
+            grid.settling = false
+            grid.rowOffset = (grid.contentY - grid.originY + grid.topMargin) / grid.cellHeight
         return row
     }
     function thumbDecodeWidth(row) {
@@ -82,6 +88,7 @@ Item {
         // are not kept, and the rows are put back once it has settled.
         property real rowOffset: 0
         property bool settling: false
+        readonly property alias settled: settled
         Timer {
             id: settled
             interval: 60
