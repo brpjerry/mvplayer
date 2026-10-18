@@ -426,7 +426,8 @@ ApplicationWindow {
                 n = upcoming()
             } else if (shuffle && queue.length > 1) {
                 const left = unplayed()
-                n = left.length > 0 ? left[Math.floor(Math.random() * left.length)] : randomOther()
+                n = left.length > 0 ? left[Math.floor(Math.random() * left.length)]
+                  : nextAlbumRow() >= 0 ? -2 : randomOther()
             } else if (index + 1 < queue.length) {
                 n = index + 1
             } else {
@@ -436,7 +437,7 @@ ApplicationWindow {
                 playAlbum(nextAlbumRow(), 0)
                 return true
             }
-            if (n < 0)
+            if (n < 0 || n === index)
                 return false
             if (shuffle && unplayed().length === 0)
                 history = [] // around again
