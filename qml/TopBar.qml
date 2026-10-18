@@ -390,10 +390,14 @@ Item {
         IconButton {
             id: directionButton
             anchors.verticalCenter: parent.verticalCenter
-            icon: root.shownModel.sortDescending ? Icons.arrowDown : Icons.arrowUp
+            // Recently Added is newest first whatever the stored direction.
+            readonly property bool recent: root.shownModel.facetType === "recent"
+            icon: root.shownModel.sortDescending || recent ? Icons.arrowDown : Icons.arrowUp
             enabled: sortButton.enabled
             tooltipBelow: true
             tooltip: {
+                if (recent)
+                    return "Newest first"
                 const names = root.shownModel.sortMode === "title" || root.shownModel.sortMode === "artist"
                 if (names)
                     return root.shownModel.sortDescending ? "Z to A" : "A to Z"
