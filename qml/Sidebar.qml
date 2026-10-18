@@ -117,9 +117,16 @@ Rectangle {
 
     // The tag whose values are listed. Follows App.sidebarFacet, but only
     // switches in the middle of the cross-fade below.
-    property string shownKey: App.sidebarFacet
+    // Set once, not bound: as bindings they already held the new value when
+    // the change was looked for, so the swap (with the filter cleared and
+    // the list scrolled to the top) never ran.
+    property string shownKey
     // Likewise the section of the grid whose values are listed.
-    property string shownSection: App.mode === "music" ? "library" : App.videos.section
+    property string shownSection
+    Component.onCompleted: {
+        shownKey = App.sidebarFacet
+        shownSection = App.mode === "music" ? "library" : App.videos.section
+    }
     readonly property var facet: {
         const all = App.facets
         for (let i = 0; i < all.length; ++i) {
