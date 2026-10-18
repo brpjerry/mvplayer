@@ -82,8 +82,9 @@ Item {
             Behavior on opacity { NumberAnimation { duration: Theme.normal } }
             Behavior on scale { NumberAnimation { duration: Theme.slow; easing.type: Easing.OutBack; easing.overshoot: 1.4 } }
             Icon {
+                // The glyph's own box already sits right of the icon's
+                // centre (x 8..19 of 24), as on the control bar's button.
                 anchors.centerIn: parent
-                anchors.horizontalCenterOffset: 2
                 path: Icons.play
                 size: 28
                 color: Theme.accentInk

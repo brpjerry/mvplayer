@@ -694,6 +694,7 @@ ApplicationWindow {
                 VideoGrid {
                     id: grid
                     anchors.fill: parent
+                    room: frame.gridRoom
                     // Recedes as the player grows over it.
                     opacity: 1 - playerView.cover
                     scale: 1 - 0.03 * playerView.cover
@@ -710,6 +711,7 @@ ApplicationWindow {
                 AlbumGrid {
                     id: albumGrid
                     anchors.fill: parent
+                    room: frame.gridRoom
                     visible: App.mode === "music" && App.configured
                     searchText: topBar.searchText
                     currentKey: player.current && player.current.kind === "track" ? player.current.albumKey : ""
@@ -726,6 +728,11 @@ ApplicationWindow {
 
         // In music mode, right of the grid: the queue, the playing track
         // and its cover.
+        // The main area's width once the panels have slid in or out: the
+        // grids lay out for the end of a slide at once.
+        readonly property real gridRoom: frame.width - sidebar.width
+                                         - (reviewPanel.active ? reviewPanel.panelWidth : 0)
+                                         - (nowPlaying.active ? nowPlaying.panelWidth : 0)
         NowPlayingPanel {
             id: nowPlaying
             anchors.right: parent.right
@@ -738,6 +745,7 @@ ApplicationWindow {
             playing: window.playingNow
             onPlayRequested: (i) => player.load(i)
             onVideoRequested: (videoId) => window.playVideo(videoId)
+            onCoverDoubleClicked: coverOverlay.show()
         }
 
         PlayerView {
@@ -807,6 +815,15 @@ ApplicationWindow {
         }
     }
 
+    // The cover, large (a double click on the panel's cover)
+    CoverOverlay {
+        id: coverOverlay
+        // A track's cover at its own size, not the grid's scaled copy.
+        source: !player.current ? ""
+              : player.current.kind === "track" && player.current.thumb != "" ? "image://cover/" + encodeURIComponent(player.current.path)
+              : player.current.thumb
+    }
+
     SettingsPanel { id: settings }
     ReplaceDialog { id: replaceDialog }
     ChannelDialog {
@@ -861,7 +878,11 @@ ApplicationWindow {
     Shortcut { sequence: "Up"; enabled: !window.typing; onActivated: { App.volume = Math.min(1, App.volume + 0.05); App.muted = false } }
     Shortcut { sequence: "Down"; enabled: !window.typing; onActivated: { App.volume = Math.max(0, App.volume - 0.05); if (App.volume > 0) App.muted = false } }
     Shortcut { sequence: "M"; enabled: !window.typing; onActivated: App.muted = !App.muted }
-    Shortcut { sequence: "Ctrl+M"; onActivated: App.mode = App.mode === "music" ? "video" : "music" }
+    // Shift+Tab reaches the app as Backtab, so that spelling is listed too.
+    Shortcut {
+        sequences: ["Ctrl+M", "Ctrl+Tab", "Ctrl+Shift+Tab", "Ctrl+Backtab", "Ctrl+Shift+Backtab"]
+        onActivated: App.mode = App.mode === "music" ? "video" : "music"
+    }
     Shortcut { sequence: controlBar.audioKey; enabled: !window.typing; onActivated: controlBar.switchAudio() }
     Shortcut { sequence: "F"; enabled: !window.typing; onActivated: window.setFullscreen(!window.fullscreen) }
     Shortcut { sequence: "N"; enabled: !window.typing; onActivated: player.next(false) }
@@ -873,7 +894,9 @@ ApplicationWindow {
         sequence: "Escape"
         enabled: !window.typing
         onActivated: {
-            if (window.fullscreen)
+            if (coverOverlay.open)
+                coverOverlay.hide()
+            else if (window.fullscreen)
                 window.setFullscreen(false)
             else if (window.view === "player")
                 window.showGrid()
@@ -952,6 +975,7 @@ ApplicationWindow {
         }
         case "fullscreen": setFullscreen(arg !== "off"); return "ok"
         case "sources": controlBar.toggleSources(); return "ok"
+        case "cover-overlay": if (arg === "on") coverOverlay.show(); else if (arg === "off") coverOverlay.hide(); return coverOverlay.open ? "on" : "off" // cover-overlay [on|off]: the playing item's cover, large
         case "imports": { // imports on|off: the import panel; answers how long opening or closing took, in ms
             const t0 = Date.now()
             arg === "off" ? topBar.importPanel.close() : topBar.importPanel.open()
@@ -1069,6 +1093,7 @@ ApplicationWindow {
             grid.wheel.scroll(parseFloat(w[0]), parseFloat(w[1]), parseInt(w[2]))
             return "" + grid.view.contentY
         }
+        case "album-scroll": albumGrid.view.contentY = parseFloat(arg); return "" + albumGrid.view.contentY // album-scroll <y>: the album grid, at once
         case "scroll": {
             const parts = arg.split(" ")
             scrollTest.stop()
@@ -1118,7 +1143,7 @@ ApplicationWindow {
                 panelCandidates: reviewPanel.candidates.length, panelCandidate: reviewPanel.shown, panelTitle: reviewPanel.title,
                 panelFile: reviewPanel.file ? reviewPanel.file.path : null, panelYt: reviewPanel.ytTitle,
                 undo: App.undoAvailable, undoLabel: App.undoLabel,
-                settingsOpen: settings.opened, settingsTab: settings.tab, loading: playerView.loading, width: window.width, height: window.height, windowActive: window.active,
+                settingsOpen: settings.opened, settingsTab: settings.tab, coverOverlay: coverOverlay.open, loading: playerView.loading, width: window.width, height: window.height, windowActive: window.active,
                 judgeKey: App.judgeKeySet, judgeKeyHint: App.judgeKeyHint, judgeChecking: App.judgeChecking, judgeState: App.judgeState, judgeStatus: App.judgeStatus, adviceLeft: App.adviceLeft, judgeThreads: App.judgeThreads, keepEverything: App.keepEverything,
                 replacing: App.replacing, replaceStage: App.replaceStage, replaceDialog: replaceDialog.opened, replaceOptions: replaceDialog.options.length, replaceMode: replaceDialog.mode,
                 accent: "" + Theme.accent, accentColour: App.accent, autoAccent: App.autoAccent, accentSource: "" + Theme.accentSource, theme: App.themeMode, dark: Theme.dark,

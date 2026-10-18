@@ -8,6 +8,11 @@ Item {
     property var currentVideoId: -1
     property bool currentPlaying: false
     property string searchText
+    // The width the grid has once the panels beside it have slid in or
+    // out: set from outside, so that it is taken in one step and not
+    // frame by frame with a slide (which laid the cards out afresh at
+    // every width, twice a frame as the anchors caught up).
+    property real room: width
 
     // row in App.videos
     signal activated(int row)
@@ -89,7 +94,7 @@ Item {
         // rows kept (below). Any change while hidden would make it flow
         // its cards again around the first one on show, and the rows
         // would drift.
-        readonly property int fitWidth: parent.width - 36
+        readonly property int fitWidth: root.room - 36
         property int shownWidth: fitWidth
         onFitWidthChanged: if (visible) shownWidth = fitWidth
         x: 18

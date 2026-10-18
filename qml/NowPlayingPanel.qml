@@ -16,6 +16,7 @@ Rectangle {
 
     signal playRequested(int index)
     signal videoRequested(var videoId)
+    signal coverDoubleClicked()     // the cover, to see it large
 
     width: active ? panelWidth : 0
     Behavior on width { NumberAnimation { duration: Theme.slow; easing.type: Easing.BezierSpline; easing.bezierCurve: Theme.emphasized } }
@@ -312,6 +313,14 @@ Rectangle {
             anchors.bottomMargin: 16
             source: root.track ? root.track.thumb : ""
             placeholder: "transparent"
+            zoom: coverMouse.containsMouse ? 1.03 : 1
+            Behavior on zoom { NumberAnimation { duration: Theme.normal; easing.type: Easing.OutCubic } }
+            MouseArea {
+                id: coverMouse
+                anchors.fill: parent
+                hoverEnabled: true
+                onDoubleClicked: root.coverDoubleClicked()
+            }
         }
     }
 }
