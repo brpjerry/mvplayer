@@ -127,6 +127,7 @@ private:
 
     std::shared_ptr<MpvCore> m_core;
     double m_position = 0;
+    double m_pendingSeek = -1; // asked for before the file was loaded; taken at its start
     double m_duration = 0;
     bool m_paused = false;
     bool m_active = false;
