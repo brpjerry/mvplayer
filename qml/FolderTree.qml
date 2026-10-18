@@ -12,7 +12,7 @@ ListView {
     property real rowHeight: 30
 
     model: App.folderTree
-    implicitHeight: Math.min(contentHeight, maxHeight)
+    implicitHeight: Math.min(contentHeight, Math.floor(maxHeight / rowHeight) * rowHeight) // whole rows: none cut through its box
     height: implicitHeight
     clip: true
     interactive: contentHeight > height + 1

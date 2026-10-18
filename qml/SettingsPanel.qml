@@ -272,9 +272,10 @@ Popup {
         property bool checked
         signal toggled(bool checked)
         width: parent.width
-        height: 58
+        height: Math.max(58, words.implicitHeight + 24) // a hint of two lines gets its room
 
         Column {
+            id: words
             anchors.left: parent.left
             anchors.right: toggle.left
             anchors.rightMargin: 20
@@ -533,7 +534,7 @@ Popup {
                             id: baseButton
                             anchors.right: parent.right
                             anchors.verticalCenter: parent.verticalCenter
-                            text: "Select base directory"
+                            text: App.baseDir.length === 0 ? "Select base directory" : "Change base directory"
                             icon: Icons.folder
                             primary: App.baseDir.length === 0
                             onClicked: musicDialog.open()
@@ -542,7 +543,8 @@ Popup {
                     FolderTree {
                         visible: App.baseDir.length > 0
                         width: parent.width
-                        maxHeight: 320
+                        // More rows in a tall window.
+                        maxHeight: Math.max(320, (Overlay.overlay ? Overlay.overlay.height : 800) - 620)
                     }
                     Text {
                         visible: App.baseDir.length > 0
