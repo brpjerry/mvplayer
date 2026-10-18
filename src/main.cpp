@@ -24,6 +24,9 @@
 #include <QQuickItemGrabResult>
 #include <QTimer>
 #include <QEventLoop>
+#include "ui/CoverProvider.h"
+#include <QDateTime>
+#include <qpa/qwindowsysteminterface.h>
 #include <qpa/qwindowsysteminterface.h>
 
 #include <cstdio>
@@ -114,6 +117,7 @@ int main(int argc, char **argv)
     int rc = 1;
     {
         QQmlApplicationEngine engine;
+        engine.addImageProvider(QStringLiteral("cover"), new CoverProvider); // the engine owns it
         QObject::connect(&engine, &QQmlApplicationEngine::objectCreationFailed, &app,
                          [] { QCoreApplication::exit(1); }, Qt::QueuedConnection);
         engine.loadFromModule("MvPlayer", "Main");
@@ -191,11 +195,13 @@ int main(int argc, char **argv)
                 }
                 // pointer <x> <y>: the pointer is moved there, in the
                 // window's own coordinates; click <x> <y>: and the left
-                // button pressed and released. What hovering brings up
-                // cannot be tried otherwise without a pointer of the desk's.
+                // button pressed and released; dblclick <x> <y>: twice, as
+                // a double click arrives. What hovering brings up cannot
+                // be tried otherwise without a pointer of the desk's.
                 const bool click = line.startsWith(QLatin1String("click "));
                 const bool rclick = line.startsWith(QLatin1String("rclick "));
-                if (click || rclick || line.startsWith(QLatin1String("pointer "))) {
+                const bool dblclick = line.startsWith(QLatin1String("dblclick "));
+                if (click || rclick || dblclick || line.startsWith(QLatin1String("pointer "))) {
                     auto *window = qobject_cast<QQuickWindow *>(root);
                     const QStringList at = line.section(QLatin1Char(' '), 1).split(QLatin1Char(' '), Qt::SkipEmptyParts);
                     if (!window || at.size() != 2)
@@ -213,6 +219,22 @@ int main(int argc, char **argv)
                     } else if (rclick) { // rclick <x> <y>: the right button, for the menus
                         send(QEvent::MouseButtonPress, Qt::RightButton, Qt::RightButton);
                         send(QEvent::MouseButtonRelease, Qt::RightButton, Qt::NoButton);
+                    } else if (dblclick) {
+                        // Through the window-system layer, which makes the
+                        // second press a double click as it does for a real
+                        // one; a double click handed to the window directly
+                        // is taken for a plain press.
+                        const ulong now = ulong(QDateTime::currentMSecsSinceEpoch());
+                        const auto press = [&](ulong when, QEvent::Type type, Qt::MouseButtons held) {
+                            QWindowSystemInterface::handleMouseEvent<QWindowSystemInterface::SynchronousDelivery>(
+                                window, when, local, global, held, Qt::LeftButton, type);
+                        };
+                        // The second press a little later: at the same
+                        // instant it would not count as a double click.
+                        for (int i = 0; i < 2; ++i) {
+                            press(now + ulong(i) * 50, QEvent::MouseButtonPress, Qt::LeftButton);
+                            press(now + ulong(i) * 50, QEvent::MouseButtonRelease, Qt::NoButton);
+                        }
                     }
                     return QStringLiteral("ok");
                 }

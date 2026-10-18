@@ -747,7 +747,7 @@ the words is tried against what the judge once saw.
 | ← → (Shift: 30 s) | Seek 5 s |
 | ↑ ↓ | Volume |
 | M | Mute |
-| Ctrl+M | Videos / Music |
+| Ctrl+M, Ctrl+Tab, Ctrl+Shift+Tab | Videos / Music |
 | A | Your library's audio / YouTube's, where a video has both |
 | N / P | Next / previous |
 | F, F11, double-click | Fullscreen |

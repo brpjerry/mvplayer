@@ -1,6 +1,6 @@
 # UX run 1 findings — 2026-10-17
 
-Ten Opus agents, one instance each (six offscreen, four under cage), about 80 commands and up to 20 pictures apiece, on main 3bde5ab. No crashes. Every item was then checked by hand (2026-10-17, later the same day); the status after each title is the outcome. Agents are given in brackets; _confirmed_ means reproduced by hand afterwards, _confirmed by code_ means the cause is plain in the source, _reported_ means the agent's evidence only. Pictures and the agents' write-ups are under `scratchpad/uxtest/agent-<n>/` (tmpfs).
+Ten Opus agents, one instance each (six offscreen, four under cage), about 80 commands and up to 20 pictures apiece, on main 3bde5ab. No crashes. Every item was then checked by hand (2026-10-17, later the same day); the status after each title is the outcome. **Fixed in PR #67** (one commit each, re-checked with the harness): items 1–15, 18–22 and 24–30. Left as they were: 16 and 17 (not reproduced), the "by design or IPC-only" items, and the uneven top-of-tab spacing in 26. Agents are given in brackets; _confirmed_ means reproduced by hand afterwards, _confirmed by code_ means the cause is plain in the source, _reported_ means the agent's evidence only. Pictures and the agents' write-ups are under `scratchpad/uxtest/agent-<n>/` (tmpfs).
 
 ## Wrong behaviour
 

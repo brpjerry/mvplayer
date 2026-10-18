@@ -112,6 +112,7 @@ qt_add_executable(mvplayer
     src/ui/VideoModel.h src/ui/VideoModel.cpp
     src/ui/AlbumModel.h src/ui/AlbumModel.cpp
     src/ui/CoverCache.h src/ui/CoverCache.cpp
+    src/ui/CoverProvider.h src/ui/CoverProvider.cpp
     src/ui/FolderTreeModel.h src/ui/FolderTreeModel.cpp
     src/ui/AppController.h src/ui/AppController.cpp
     src/ui/FrameStats.h src/ui/FrameStats.cpp
@@ -145,6 +146,7 @@ set(MV_QML_FILES
     qml/AlbumCard.qml
     qml/ModePill.qml
     qml/NowPlayingPanel.qml
+    qml/CoverOverlay.qml
     qml/PlayerView.qml
     qml/ControlBar.qml
     qml/SeekBar.qml

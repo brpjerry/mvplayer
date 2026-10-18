@@ -11,7 +11,8 @@ Item {
     property color color: Theme.textDim
     property color hoverColor: Theme.text
     property bool filled: false        // solid accent disc (primary action)
-    property bool checked: false       // accent-coloured icon
+    property bool checked: false       // accent-coloured icon on a small accent disc
+    property real checkedSize: size - 8
     property string tooltip
     property bool tooltipBelow: false
     readonly property bool hovered: mouse.containsMouse
@@ -29,14 +30,28 @@ Item {
         width: root.size
         height: root.size
         radius: root.size / 2
-        // A checked one sits on a soft accent disc: an accent taken from a
-        // pale frame can be as grey as the icons, so colour alone would
-        // not say it is on.
         color: root.filled ? (mouse.containsMouse ? Theme.accentHi : Theme.accent)
-             : root.checked ? (mouse.pressed ? Theme.pressed : Theme.accentSoft)
              : (mouse.pressed ? Theme.pressed : Theme.hover)
-        opacity: root.filled || root.checked ? 1 : (mouse.containsMouse ? 1 : 0)
+        opacity: root.filled ? 1 : (mouse.containsMouse ? 1 : 0)
         scale: mouse.pressed ? 0.92 : 1
+
+        Behavior on opacity { NumberAnimation { duration: Theme.fast } }
+        Behavior on color { ColorAnimation { duration: Theme.fast } }
+        Behavior on scale { NumberAnimation { duration: Theme.fast; easing.type: Easing.OutCubic } }
+    }
+
+    // A checked one sits on a smaller soft accent disc, inside the hover
+    // disc: an accent taken from a pale frame can be as grey as the
+    // icons, so colour alone would not say it is on.
+    Rectangle {
+        anchors.centerIn: parent
+        width: root.checkedSize
+        height: root.checkedSize
+        radius: root.checkedSize / 2
+        color: Theme.accentSoft
+        opacity: root.checked && !root.filled ? 1 : 0
+        visible: opacity > 0
+        scale: (root.checked ? 1 : 0.7) * (mouse.pressed ? 0.92 : 1)
 
         Behavior on opacity { NumberAnimation { duration: Theme.fast } }
         Behavior on color { ColorAnimation { duration: Theme.fast } }
