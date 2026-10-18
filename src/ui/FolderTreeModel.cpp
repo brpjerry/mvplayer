@@ -159,9 +159,10 @@ bool FolderTreeModel::hasSubfolders(const QString &path)
     return false;
 }
 
-QStringList FolderTreeModel::withChecked(const QStringList &dirs, const QString &rawPath, bool on)
+QStringList FolderTreeModel::withChecked(const QStringList &dirs, const QString &rawPath, bool on, const QString &rawRoot)
 {
     const QString path = clean(rawPath);
+    const QString root = rawRoot.isEmpty() ? QString() : clean(rawRoot);
     QStringList out;
     QString ancestor;
     for (const QString &d : dirs) {
@@ -174,6 +175,23 @@ QStringList FolderTreeModel::withChecked(const QStringList &dirs, const QString 
     if (on) {
         if (ancestor.isEmpty())
             out << path;
+        // Every sub-folder of the parent ticked: the parent stands for them
+        // (else the base stayed part-ticked, and a folder added under it
+        // later was not looked up).
+        for (QString cur = path; !root.isEmpty() && !samePath(cur, root) && isWithin(cur, root);) {
+            const QString parent = parentOf(cur);
+            if (parent.isEmpty() || samePath(parent, cur))
+                break;
+            const QStringList sibs = subfolders(parent);
+            const bool all = !sibs.isEmpty() && std::all_of(sibs.begin(), sibs.end(), [&](const QString &sib) {
+                return std::any_of(out.begin(), out.end(), [&](const QString &d) { return samePath(d, sib); });
+            });
+            if (!all)
+                break;
+            out.erase(std::remove_if(out.begin(), out.end(), [&](const QString &d) { return isWithin(d, parent); }), out.end());
+            out << parent;
+            cur = parent;
+        }
     } else if (!ancestor.isEmpty()) {
         // The ancestor goes; what it held apart from `path` stays ticked.
         out.removeAll(ancestor);

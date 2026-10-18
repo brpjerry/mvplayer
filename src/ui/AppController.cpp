@@ -776,7 +776,7 @@ void AppController::setFolderChecked(const QString &path, bool on)
     const QString p = QDir(path).absolutePath();
     if (!FolderTreeModel::isWithin(p, m_baseDir))
         return;
-    const QStringList next = FolderTreeModel::withChecked(m_cfg.musicDirs, p, on);
+    const QStringList next = FolderTreeModel::withChecked(m_cfg.musicDirs, p, on, m_baseDir);
     if (next != m_cfg.musicDirs)
         applyMusicDirs(next);
 }
