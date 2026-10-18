@@ -852,8 +852,10 @@ ApplicationWindow {
     Shortcut { sequence: "Right"; enabled: !window.typing; onActivated: window.mpv.seekRelative(5) }
     Shortcut { sequence: "Shift+Left"; enabled: !window.typing; onActivated: window.mpv.seekRelative(-30) }
     Shortcut { sequence: "Shift+Right"; enabled: !window.typing; onActivated: window.mpv.seekRelative(30) }
-    Shortcut { sequence: "Up"; enabled: !window.typing; onActivated: App.volume = Math.min(1, App.volume + 0.05) }
-    Shortcut { sequence: "Down"; enabled: !window.typing; onActivated: App.volume = Math.max(0, App.volume - 0.05) }
+    // A change of level unmutes, as a drag of the bar does: a muted bar
+    // moved by the keys showed nothing.
+    Shortcut { sequence: "Up"; enabled: !window.typing; onActivated: { App.volume = Math.min(1, App.volume + 0.05); App.muted = false } }
+    Shortcut { sequence: "Down"; enabled: !window.typing; onActivated: { App.volume = Math.max(0, App.volume - 0.05); if (App.volume > 0) App.muted = false } }
     Shortcut { sequence: "M"; enabled: !window.typing; onActivated: App.muted = !App.muted }
     Shortcut { sequence: "Ctrl+M"; onActivated: App.mode = App.mode === "music" ? "video" : "music" }
     Shortcut { sequence: controlBar.audioKey; enabled: !window.typing; onActivated: controlBar.switchAudio() }
