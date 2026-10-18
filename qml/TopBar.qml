@@ -311,6 +311,7 @@ Item {
                 width: 210
                 padding: 6
                 closePolicy: Popup.CloseOnEscape | Popup.CloseOnPressOutsideParent
+                focus: true // Escape closes it only while it has the focus
                 transformOrigin: Popup.TopRight
                 enter: Transition {
                     ParallelAnimation {

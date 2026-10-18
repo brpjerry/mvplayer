@@ -296,6 +296,7 @@ Rectangle {
                 width: selector.width - 24
                 padding: 6
                 closePolicy: Popup.CloseOnEscape | Popup.CloseOnPressOutsideParent
+                focus: true // Escape closes it only while it has the focus
                 transformOrigin: Popup.Top
                 enter: Transition {
                     ParallelAnimation {
