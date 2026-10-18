@@ -185,6 +185,7 @@ ApplicationWindow {
     function approveVideo(id) {
         if (player.current && player.current.videoId === id)
             player.stop()
+        player.dropVideo(id)
         if (App.videos.section === "orphans")
             App.keepOrphan(id)
         else
@@ -199,6 +200,7 @@ ApplicationWindow {
             return
         if (player.current && player.current.videoId === id)
             player.stop()
+        player.dropVideo(id)
         if (orphan)
             App.deleteOrphan(id)
         else
@@ -446,6 +448,20 @@ ApplicationWindow {
         // Back: to the start of this item after a few seconds, else to the
         // one before it; at an album's start, to the previous album's last
         // track; at the grid's start, round to its last video.
+        // A video that got its verdict leaves the queue: Next loaded the
+        // deleted file, and Autoplay played a kept one that was in no grid.
+        function dropVideo(id) {
+            const i = queue.findIndex((v) => v.videoId === id)
+            if (i < 0)
+                return
+            queue = queue.filter((v, k) => k !== i)
+            if (i < index)
+                index -= 1
+            history = history.filter((h) => h !== i).map((h) => h > i ? h - 1 : h)
+            if (current)
+                armNext()
+        }
+
         function previous() {
             if (queue.length === 0)
                 return
