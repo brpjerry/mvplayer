@@ -19,9 +19,16 @@ Rectangle {
     readonly property var shownModel: App.mode === "music" ? App.albums : App.videos
     readonly property bool music: App.mode === "music"
 
+    // Both libraries take the facet; one that has nothing under it shows
+    // everything instead (a video-only artist left the albums at "0 albums"
+    // with nothing to click).
     function select(type, value) {
         App.videos.setFacet(type, value)
         App.albums.setFacet(type, value)
+        if (value !== "" && App.albums.count === 0)
+            App.albums.setFacet("all", "")
+        if (value !== "" && App.videos.count === 0)
+            App.videos.setFacet("all", "")
         root.navigated()
     }
 
