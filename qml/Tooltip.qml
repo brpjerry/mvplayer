@@ -40,6 +40,9 @@ Item {
     // bar reaches down over the video, which is a later sibling of the bar.
     property point origin: Qt.point(0, 0)
     onShownChanged: if (shown) origin = root.mapToItem(bubble.parent, 0, 0)
+    // A click that changes the text (the play mode, mute) changes the width
+    // and so the centred position: taken again, not kept from the old text.
+    onWidthChanged: if (shown) origin = root.mapToItem(bubble.parent, 0, 0)
 
     Item {
         id: bubble
