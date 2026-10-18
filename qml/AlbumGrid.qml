@@ -96,10 +96,30 @@ Item {
         Timer {
             id: relaid
             interval: Theme.slow + 80
-            onTriggered: {
-                grid.forceLayout()
-                grid.keepRows()
+            onTriggered: grid.unstick()
+        }
+        // Cards a cut-off transition left in the old layout's places are
+        // not moved by a later layout (the view believes them placed):
+        // found by their column, the view is filled afresh, quietly.
+        function unstick() {
+            const first = indexAt(cellWidth / 2, contentY + cellHeight / 2)
+            if (first < 0)
+                return
+            let stuck = false
+            for (let i = first; i < Math.min(count, first + columns * 6) && !stuck; i++) {
+                const it = itemAtIndex(i)
+                if (it && Math.abs(it.x - (i % columns) * cellWidth) > 1)
+                    stuck = true
             }
+            if (!stuck)
+                return
+            const m = model
+            const appear = populate
+            populate = null
+            model = null
+            model = m
+            keepRows()
+            Qt.callLater(() => { populate = appear })
         }
         // Within the content: a narrower filter and a mode round trip
         // put the kept rows past the end, and the grid showed nothing.

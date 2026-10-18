@@ -1095,6 +1095,7 @@ ApplicationWindow {
                 volume: App.volume, barMuted: App.muted, systemVolume: App.systemVolume, systemVolumeAvailable: App.systemVolumeAvailable,
                 playerVolume: App.playerVolume, playerMuted: App.playerMuted,
                 thumbColumns: App.thumbColumns, coverColumns: App.coverColumns, gridColumns: grid.view.columns, albumColumns: albumGrid.view.columns,
+                originY: grid.view.originY, contentHeight: grid.view.contentHeight, albumOriginY: albumGrid.view.originY, albumContentHeight: albumGrid.view.contentHeight,
                 playing: player.current ? player.current.title : null, index: player.index,
                 position: mpv.position, duration: mpv.duration, paused: mpv.paused, active: mpv.active, muted: mpv.muted,
                 hwdec: mpv.hwdec, videoSize: mpv.videoSize.width + "x" + mpv.videoSize.height,
