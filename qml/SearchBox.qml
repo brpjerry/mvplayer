@@ -19,7 +19,7 @@ Item {
         input.text = ""
     }
 
-    implicitWidth: Math.max(140, Math.min(active || input.text.length > 0 ? 320 : 240, maxWidth))
+    implicitWidth: Math.max(140, Math.min(active || input.text.trim().length > 0 ? 320 : 240, maxWidth))
     implicitHeight: 36
 
     Behavior on implicitWidth {
@@ -72,7 +72,7 @@ Item {
 
         Text {
             anchors.verticalCenter: parent.verticalCenter
-            visible: input.text.length === 0
+            visible: input.text.trim().length === 0
             text: root.placeholder
             color: Theme.textFaint
             font.pixelSize: 13
@@ -89,7 +89,7 @@ Item {
         size: 28
         iconSize: 15
         icon: Icons.close
-        opacity: input.text.length > 0 ? 1 : 0
+        opacity: input.text.trim().length > 0 ? 1 : 0
         visible: opacity > 0
         onClicked: {
             input.text = ""
