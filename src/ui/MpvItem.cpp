@@ -350,6 +350,7 @@ QQuickFramebufferObject::Renderer *MpvItem::createRenderer() const
 void MpvItem::load(const QString &path)
 {
     m_pendingSeek = -1;
+    m_loaded = false;
     if (!m_core->mpv)
         return;
     const QByteArray p = path.toUtf8();
@@ -412,7 +413,9 @@ void MpvItem::seek(double seconds, bool exact)
 {
     if (!m_core->mpv)
         return;
-    if (!m_active) {
+    if (!m_active)
+        return;
+    if (!m_loaded) {
         // Sent right after a load (a track taken back where it was, a seek
         // on the heels of a play): kept for the file's start, not lost.
         m_pendingSeek = qMax(0.0, seconds);
@@ -710,6 +713,7 @@ void MpvItem::drainEvents()
         }
         case MPV_EVENT_FILE_LOADED:
             refreshTracks();
+            m_loaded = true;
             if (m_pendingSeek >= 0) {
                 const QByteArray t = QByteArray::number(m_pendingSeek, 'f', 3);
                 const char *cmd[] = {"seek", t.constData(), "absolute+exact", nullptr};
