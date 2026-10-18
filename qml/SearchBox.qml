@@ -19,7 +19,10 @@ Item {
         input.text = ""
     }
 
-    implicitWidth: Math.max(140, Math.min(active || input.text.trim().length > 0 ? 320 : 240, maxWidth))
+    // No room at all (a narrow window with a panel up): the box folds to
+    // its icon until it is focused, then takes the heading's room.
+    implicitWidth: active ? Math.max(140, Math.min(320, maxWidth + 150))
+                 : Math.max(36, Math.min(input.text.trim().length > 0 ? 320 : 240, maxWidth))
     implicitHeight: 36
 
     Behavior on implicitWidth {
@@ -72,7 +75,7 @@ Item {
 
         Text {
             anchors.verticalCenter: parent.verticalCenter
-            visible: input.text.trim().length === 0
+            visible: input.text.trim().length === 0 && root.width >= 120
             text: root.placeholder
             color: Theme.textFaint
             font.pixelSize: 13
