@@ -87,11 +87,28 @@ Item {
         function relayout() {
             settling = true
             settled.restart()
+            relaid.restart()
             keepRows()
         }
+        // A cell size changed while cards were still moving (a sort's
+        // displaced transition, 340 ms) left them where the old layout
+        // sent them: once the transition is over the layout is forced.
+        Timer {
+            id: relaid
+            interval: Theme.slow + 80
+            onTriggered: {
+                grid.forceLayout()
+                grid.keepRows()
+            }
+        }
+        // Within the content: a narrower filter and a mode round trip
+        // put the kept rows past the end, and the grid showed nothing.
         function keepRows() {
-            if (visible && cellHeight > 0)
-                contentY = originY - topMargin + rowOffset * cellHeight
+            if (!(visible && cellHeight > 0))
+                return
+            const top = originY - topMargin
+            const bottom = Math.max(top, originY + contentHeight + bottomMargin - height)
+            contentY = Math.max(top, Math.min(bottom, top + rowOffset * cellHeight))
         }
         onContentYChanged: if (visible && !settling && cellHeight > 0) rowOffset = (contentY - originY + topMargin) / cellHeight
         onCellHeightChanged: relayout()
