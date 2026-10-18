@@ -264,15 +264,15 @@ Rectangle {
             Item { width: 1; height: 6 }
             // Its music video, where it has one; else why not.
             FlatButton {
-                visible: root.hasTrack && root.track.videoId > 0
+                visible: root.hasTrack && root.track !== null && root.track.videoId > 0
                 icon: Icons.movie
                 text: "Music video"
                 onClicked: root.videoRequested(root.track.videoId)
             }
             Text {
-                visible: root.hasTrack && !(root.track.videoId > 0)
+                visible: root.hasTrack && root.track !== null && !(root.track.videoId > 0)
                 width: parent.width
-                text: root.hasTrack ? root.stateLine(root.track) : ""
+                text: root.hasTrack && root.track !== null ? root.stateLine(root.track) : ""
                 color: Theme.textFaint
                 font.pixelSize: 12
                 wrapMode: Text.WordWrap
