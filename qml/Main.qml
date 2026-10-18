@@ -470,6 +470,9 @@ ApplicationWindow {
                 window.mpv.seek(0, true)
         }
 
+        // The end of playback: the queue goes too, so Next and Previous
+        // have nothing to start (they restarted the album, or a video with
+        // its player closed, or loaded index -1 and left the sound on).
         function stop() {
             videoUp = false
             window.mpv.stop()
@@ -479,6 +482,11 @@ ApplicationWindow {
             window.view = "grid"
             current = null
             index = -1
+            queue = []
+            history = []
+            pendingQueue = []
+            pendingNext = -1
+            fallback = null
         }
     }
 
