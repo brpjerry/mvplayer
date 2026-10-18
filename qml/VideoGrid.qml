@@ -21,6 +21,20 @@ Item {
     readonly property alias view: grid
     readonly property alias wheel: wheel
 
+    // After a verdict the cards close up and the next card's button lands
+    // under the pointer: a second click would be a second verdict, so the
+    // buttons sleep for a moment.
+    property bool verdictCooldown: false
+    Timer {
+        id: cooldown
+        interval: 500
+        onTriggered: root.verdictCooldown = false
+    }
+    function verdictGiven() {
+        root.verdictCooldown = true
+        cooldown.restart()
+    }
+
     // The card of the video that is loaded in the player, while that card
     // exists (it is on screen or close to it), and where its thumbnail is in
     // this item's coordinates. The player draws the video right there.
@@ -45,11 +59,27 @@ Item {
         const row = App.videos.rowOfVideo(videoId)
         if (row >= 0)
             grid.positionViewAtIndex(row, GridView.Center)
+            // Kept as the rows on show even while a relayout settles (the
+            // grid just shown, the panel sliding): the settle would have
+            // put the old rows back.
+            grid.settled.stop()
+            grid.settling = false
+            grid.rowOffset = (grid.contentY - grid.originY + grid.topMargin) / grid.cellHeight
         return row
     }
     function thumbDecodeWidth(row) {
         const item = grid.itemAtIndex(row)
         return item ? item.thumbnail.decodeWidth : 0
+    }
+
+    // Another section is another list: it starts at the top rather than
+    // at the rows the last one was scrolled to.
+    Connections {
+        target: App.videos
+        function onSectionChanged() {
+            grid.rowOffset = 0
+            grid.keepRows()
+        }
     }
 
     GridView {
@@ -82,6 +112,7 @@ Item {
         // are not kept, and the rows are put back once it has settled.
         property real rowOffset: 0
         property bool settling: false
+        readonly property alias settled: settled
         Timer {
             id: settled
             interval: 60
@@ -93,11 +124,48 @@ Item {
         function relayout() {
             settling = true
             settled.restart()
+            relaid.restart()
             keepRows()
         }
+        // A cell size changed while cards were still moving (a sort's
+        // displaced transition, 340 ms) left them where the old layout
+        // sent them: once the transition is over the layout is forced.
+        Timer {
+            id: relaid
+            interval: Theme.slow + 80
+            onTriggered: grid.unstick()
+        }
+        // Cards a cut-off transition left in the old layout's places are
+        // not moved by a later layout (the view believes them placed):
+        // found by their column, the view is filled afresh, quietly.
+        function unstick() {
+            const first = indexAt(cellWidth / 2, contentY + cellHeight / 2)
+            if (first < 0)
+                return
+            let stuck = false
+            for (let i = first; i < Math.min(count, first + columns * 6) && !stuck; i++) {
+                const it = itemAtIndex(i)
+                if (it && Math.abs(it.x - (i % columns) * cellWidth) > 1)
+                    stuck = true
+            }
+            if (!stuck)
+                return
+            const m = model
+            const appear = populate
+            populate = null
+            model = null
+            model = m
+            keepRows()
+            Qt.callLater(() => { populate = appear })
+        }
+        // Within the content: a narrower filter and a mode round trip
+        // put the kept rows past the end, and the grid showed nothing.
         function keepRows() {
-            if (visible && cellHeight > 0)
-                contentY = originY - topMargin + rowOffset * cellHeight
+            if (!(visible && cellHeight > 0))
+                return
+            const top = originY - topMargin
+            const bottom = Math.max(top, originY + contentHeight + bottomMargin - height)
+            contentY = Math.max(top, Math.min(bottom, top + rowOffset * cellHeight))
         }
         onContentYChanged: if (visible && !settling && cellHeight > 0) rowOffset = (contentY - originY + topMargin) / cellHeight
         onCellHeightChanged: relayout()
@@ -128,8 +196,9 @@ Item {
             judgeOn: App.judgeMode !== "off"
             canDelete: !App.scanning
             onActivated: root.activated(index)
-            onApproved: root.approved(videoId)
-            onRejected: root.rejected(videoId)
+            verdictsEnabled: !root.verdictCooldown
+            onApproved: { root.verdictGiven(); root.approved(videoId) }
+            onRejected: { root.verdictGiven(); root.rejected(videoId) }
             onAllowChannelRequested: root.channelRequested(videoId, true)
             onDenyChannelRequested: root.channelRequested(videoId, false)
             onCurrentChanged: current ? root.claimCurrent(card) : root.releaseCurrent(card)
@@ -200,7 +269,9 @@ Item {
         visible: opacity > 0
         Behavior on opacity { NumberAnimation { duration: Theme.normal } }
 
-        readonly property bool filtering: root.searchText.trim().length > 0 || App.videos.facetType !== "all" || App.videos.section !== "library"
+        readonly property bool filtering: root.searchText.trim().length > 0 || App.videos.facetType !== "all"
+        // Review and Orphans empty are not a failed search.
+        readonly property string sectionEmpty: !filtering && App.videos.section !== "library" ? App.videos.section : ""
 
         Item {
             anchors.horizontalCenter: parent.horizontalCenter
@@ -209,12 +280,12 @@ Item {
             Spinner {
                 anchors.centerIn: parent
                 size: 30
-                visible: !parent.parent.filtering && App.busy
+                visible: !parent.parent.filtering && parent.parent.sectionEmpty === "" && App.busy
             }
             Icon {
                 anchors.centerIn: parent
-                visible: parent.parent.filtering || !App.busy
-                path: parent.parent.filtering ? Icons.search : Icons.movie
+                visible: parent.parent.filtering || parent.parent.sectionEmpty !== "" || !App.busy
+                path: parent.parent.filtering ? Icons.search : parent.parent.sectionEmpty === "review" ? Icons.review : Icons.movie
                 size: 40
                 color: Theme.textFaint
             }
@@ -222,6 +293,8 @@ Item {
         Text {
             anchors.horizontalCenter: parent.horizontalCenter
             text: parent.filtering ? "No videos match"
+                : parent.sectionEmpty === "review" ? "Nothing to review"
+                : parent.sectionEmpty === "orphans" ? "No orphaned videos"
                 : App.busy ? "Looking for music videos…"
                 : "No music videos yet"
             color: Theme.text
@@ -235,6 +308,8 @@ Item {
             wrapMode: Text.WordWrap
             lineHeight: 1.3
             text: parent.filtering ? (root.searchText.trim().length > 0 ? "Nothing in this view matches “" + root.searchText.trim() + "”." : "Nothing here yet.")
+                : parent.sectionEmpty === "review" ? "Videos that wait for your verdict appear here."
+                : parent.sectionEmpty === "orphans" ? "Videos whose tracks are gone from the music folders appear here."
                 : App.busy ? "Videos appear here as soon as each one is found, checked against your track and downloaded."
                 : "None of the tracks in your music folders has a music video that could be found."
             color: Theme.textDim

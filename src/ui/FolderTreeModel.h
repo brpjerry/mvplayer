@@ -46,7 +46,9 @@ public:
     // folder takes the place of every folder under it; unticking one under a
     // ticked ancestor replaces the ancestor by its other branches, read from
     // disk, so that only `path` goes.
-    static QStringList withChecked(const QStringList &dirs, const QString &path, bool on);
+    // `root`: the base directory; sub-folders all ticked again fold back
+    // into their parent, up to it.
+    static QStringList withChecked(const QStringList &dirs, const QString &path, bool on, const QString &root = QString());
     // The deepest folder that holds every one of `dirs` (a folder holds itself).
     static QString commonAncestor(const QStringList &dirs);
     static bool isWithin(const QString &path, const QString &ancestor); // or the same

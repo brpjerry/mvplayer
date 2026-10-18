@@ -156,7 +156,8 @@ ApplicationWindow {
     // widened first.
     function playVideo(id) {
         // The track it was asked from, to come back to if the video fails.
-        const from = player.current && player.current.kind === "track" ? { queue: player.queue, index: player.index } : null
+        const from = player.current && player.current.kind === "track"
+                   ? { queue: player.queue, index: player.index, position: window.mpv.position } : null
         App.mode = "video"
         showSection("library")
         let row = revealVideo(id)
@@ -185,6 +186,7 @@ ApplicationWindow {
     function approveVideo(id) {
         if (player.current && player.current.videoId === id)
             player.stop()
+        player.dropVideo(id)
         if (App.videos.section === "orphans")
             App.keepOrphan(id)
         else
@@ -199,6 +201,7 @@ ApplicationWindow {
             return
         if (player.current && player.current.videoId === id)
             player.stop()
+        player.dropVideo(id)
         if (orphan)
             App.deleteOrphan(id)
         else
@@ -210,7 +213,7 @@ ApplicationWindow {
     function showSection(section) {
         if (section === App.videos.section)
             return
-        if (player.current)
+        if (player.current && player.current.kind !== "track")
             player.stop()
         App.videos.showSection(section)
     }
@@ -424,7 +427,8 @@ ApplicationWindow {
                 n = upcoming()
             } else if (shuffle && queue.length > 1) {
                 const left = unplayed()
-                n = left.length > 0 ? left[Math.floor(Math.random() * left.length)] : randomOther()
+                n = left.length > 0 ? left[Math.floor(Math.random() * left.length)]
+                  : nextAlbumRow() >= 0 ? -2 : randomOther()
             } else if (index + 1 < queue.length) {
                 n = index + 1
             } else {
@@ -434,7 +438,7 @@ ApplicationWindow {
                 playAlbum(nextAlbumRow(), 0)
                 return true
             }
-            if (n < 0)
+            if (n < 0 || n === index)
                 return false
             if (shuffle && unplayed().length === 0)
                 history = [] // around again
@@ -446,6 +450,20 @@ ApplicationWindow {
         // Back: to the start of this item after a few seconds, else to the
         // one before it; at an album's start, to the previous album's last
         // track; at the grid's start, round to its last video.
+        // A video that got its verdict leaves the queue: Next loaded the
+        // deleted file, and Autoplay played a kept one that was in no grid.
+        function dropVideo(id) {
+            const i = queue.findIndex((v) => v.videoId === id)
+            if (i < 0)
+                return
+            queue = queue.filter((v, k) => k !== i)
+            if (i < index)
+                index -= 1
+            history = history.filter((h) => h !== i).map((h) => h > i ? h - 1 : h)
+            if (current)
+                armNext()
+        }
+
         function previous() {
             if (queue.length === 0)
                 return
@@ -470,6 +488,9 @@ ApplicationWindow {
                 window.mpv.seek(0, true)
         }
 
+        // The end of playback: the queue goes too, so Next and Previous
+        // have nothing to start (they restarted the album, or a video with
+        // its player closed, or loaded index -1 and left the sound on).
         function stop() {
             videoUp = false
             window.mpv.stop()
@@ -479,6 +500,11 @@ ApplicationWindow {
             window.view = "grid"
             current = null
             index = -1
+            queue = []
+            history = []
+            pendingQueue = []
+            pendingNext = -1
+            fallback = null
         }
     }
 
@@ -533,6 +559,7 @@ ApplicationWindow {
                 player.queue = from.queue
                 player.history = []
                 player.load(from.index)
+                window.mpv.seek(from.position, true) // taken once the file is loaded
                 return
             }
             player.failures += 1
@@ -769,6 +796,10 @@ ApplicationWindow {
                     // The album of the playing track, in the music library.
                     App.mode = "music"
                     albumGrid.reveal(player.current.albumKey)
+                } else if (App.mode === "music" && player.current && player.current.kind !== "track") {
+                    // A video playing on under the albums: back to its library, grown.
+                    App.mode = "video"
+                    window.showPlayer()
                 } else {
                     window.view === "player" ? window.showGrid() : window.showPlayer()
                 }
@@ -810,20 +841,12 @@ ApplicationWindow {
     // Pressing anywhere outside a text field takes keyboard focus away from
     // it, so the single-key shortcuts below work again.
     readonly property bool typing: activeFocusItem instanceof TextInput
+    // (A press outside the field is caught in C++, before any item takes
+    // it: a PointHandler here never saw presses the MouseAreas accepted.)
     function releaseTextFocus() {
-        if (window.typing)
-            window.contentItem.forceActiveFocus()
-    }
-    PointHandler {
-        parent: window.contentItem
-        onActiveChanged: {
-            if (!active || !window.typing)
-                return
-            const field = window.activeFocusItem
-            const p = field.mapFromItem(null, point.scenePressPosition.x, point.scenePressPosition.y)
-            if (!field.contains(p))
-                window.releaseTextFocus()
-        }
+        const field = window.activeFocusItem
+        if (window.typing && field)
+            field.focus = false // forcing focus onto the root scope handed it straight back
     }
 
     // ---- Keyboard ----------------------------------------------------------
@@ -833,15 +856,19 @@ ApplicationWindow {
     Shortcut { sequence: "Right"; enabled: !window.typing; onActivated: window.mpv.seekRelative(5) }
     Shortcut { sequence: "Shift+Left"; enabled: !window.typing; onActivated: window.mpv.seekRelative(-30) }
     Shortcut { sequence: "Shift+Right"; enabled: !window.typing; onActivated: window.mpv.seekRelative(30) }
-    Shortcut { sequence: "Up"; enabled: !window.typing; onActivated: App.volume = Math.min(1, App.volume + 0.05) }
-    Shortcut { sequence: "Down"; enabled: !window.typing; onActivated: App.volume = Math.max(0, App.volume - 0.05) }
+    // A change of level unmutes, as a drag of the bar does: a muted bar
+    // moved by the keys showed nothing.
+    Shortcut { sequence: "Up"; enabled: !window.typing; onActivated: { App.volume = Math.min(1, App.volume + 0.05); App.muted = false } }
+    Shortcut { sequence: "Down"; enabled: !window.typing; onActivated: { App.volume = Math.max(0, App.volume - 0.05); if (App.volume > 0) App.muted = false } }
     Shortcut { sequence: "M"; enabled: !window.typing; onActivated: App.muted = !App.muted }
-    Shortcut { sequence: "Ctrl+M"; enabled: !window.typing; onActivated: App.mode = App.mode === "music" ? "video" : "music" }
+    Shortcut { sequence: "Ctrl+M"; onActivated: App.mode = App.mode === "music" ? "video" : "music" }
     Shortcut { sequence: controlBar.audioKey; enabled: !window.typing; onActivated: controlBar.switchAudio() }
     Shortcut { sequence: "F"; enabled: !window.typing; onActivated: window.setFullscreen(!window.fullscreen) }
     Shortcut { sequence: "N"; enabled: !window.typing; onActivated: player.next(false) }
     Shortcut { sequence: "P"; enabled: !window.typing; onActivated: player.previous() }
-    Shortcut { sequences: ["Ctrl+F", "/"]; enabled: !window.typing; onActivated: { if (window.view === "player") window.showGrid(); topBar.focusSearch() } }
+    // Ctrl+F from anywhere, "/" only when not typing (it is a character).
+    Shortcut { sequence: "Ctrl+F"; onActivated: { if (window.view === "player") window.showGrid(); topBar.focusSearch() } }
+    Shortcut { sequence: "/"; enabled: !window.typing; onActivated: { if (window.view === "player") window.showGrid(); topBar.focusSearch() } }
     Shortcut {
         sequence: "Escape"
         enabled: !window.typing
@@ -1068,6 +1095,7 @@ ApplicationWindow {
                 volume: App.volume, barMuted: App.muted, systemVolume: App.systemVolume, systemVolumeAvailable: App.systemVolumeAvailable,
                 playerVolume: App.playerVolume, playerMuted: App.playerMuted,
                 thumbColumns: App.thumbColumns, coverColumns: App.coverColumns, gridColumns: grid.view.columns, albumColumns: albumGrid.view.columns,
+                originY: grid.view.originY, contentHeight: grid.view.contentHeight, albumOriginY: albumGrid.view.originY, albumContentHeight: albumGrid.view.contentHeight,
                 playing: player.current ? player.current.title : null, index: player.index,
                 position: mpv.position, duration: mpv.duration, paused: mpv.paused, active: mpv.active, muted: mpv.muted,
                 hwdec: mpv.hwdec, videoSize: mpv.videoSize.width + "x" + mpv.videoSize.height,

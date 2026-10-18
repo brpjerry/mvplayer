@@ -19,6 +19,7 @@
 #include <QKeySequence>
 #include <QMouseEvent>
 #include <QQuickItem>
+#include <QPainter>
 #include <QQuickWindow>
 #include <QQuickItemGrabResult>
 #include <QTimer>
@@ -126,6 +127,28 @@ int main(int argc, char **argv)
             pointerPacer.attach(window);
         }
 
+        // A press outside the text field that has the keyboard takes the
+        // keyboard away from it, before any item gets the press: with the
+        // search box focused, Space typed a space and the shortcuts were
+        // dead until the box was clicked away by chance.
+        struct FocusRelease : QObject {
+            bool eventFilter(QObject *o, QEvent *e) override
+            {
+                if (e->type() != QEvent::MouseButtonPress)
+                    return false;
+                auto *window = qobject_cast<QQuickWindow *>(o);
+                QQuickItem *field = window ? window->activeFocusItem() : nullptr;
+                if (!field || !(field->inherits("QQuickTextInput") || field->inherits("QQuickTextEdit")))
+                    return false;
+                const QPointF local = field->mapFromScene(static_cast<QMouseEvent *>(e)->scenePosition());
+                if (!field->contains(local))
+                    field->setFocus(false);
+                return false;
+            }
+        } focusRelease;
+        if (auto *window = qobject_cast<QQuickWindow *>(root))
+            window->installEventFilter(&focusRelease);
+
         SingleInstance instance(instanceName);
         QObject::connect(&instance, &SingleInstance::raiseRequested, root, [root](const QString &token) {
             // The token lets the window take focus on Wayland; Qt's
@@ -155,7 +178,16 @@ int main(int argc, char **argv)
                     QObject::connect(result.data(), &QQuickItemGrabResult::ready, &wait, &QEventLoop::quit);
                     QTimer::singleShot(5000, &wait, &QEventLoop::quit);
                     wait.exec(QEventLoop::ExcludeSocketNotifiers);
-                    return !result->image().isNull() && result->saveToFile(file) ? QStringLiteral("ok") : QStringLiteral("failed");
+                    if (result->image().isNull())
+                        return QStringLiteral("failed");
+                    // On the window's own colour: the content item alone
+                    // leaves the background clear wherever nothing is drawn.
+                    QImage flat(result->image().size(), QImage::Format_ARGB32_Premultiplied);
+                    flat.fill(window->color());
+                    QPainter painter(&flat);
+                    painter.drawImage(0, 0, result->image());
+                    painter.end();
+                    return flat.save(file) ? QStringLiteral("ok") : QStringLiteral("failed");
                 }
                 // pointer <x> <y>: the pointer is moved there, in the
                 // window's own coordinates; click <x> <y>: and the left

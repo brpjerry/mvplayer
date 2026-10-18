@@ -234,6 +234,8 @@ Rectangle {
                 text: root.track ? root.track.title : ""
                 color: Theme.text
                 font.pixelSize: 15
+                lineHeightMode: Text.FixedHeight
+                lineHeight: 20 // a CJK fallback font is taller; the lines keep their places
                 font.weight: Font.DemiBold
                 elide: Text.ElideRight
                 wrapMode: Text.Wrap
@@ -244,6 +246,8 @@ Rectangle {
                 text: root.track ? root.track.artist.replace(/; /g, ", ") : ""
                 color: Theme.textDim
                 font.pixelSize: 13
+                lineHeightMode: Text.FixedHeight
+                lineHeight: 18
                 elide: Text.ElideRight
             }
             Text {
@@ -252,6 +256,8 @@ Rectangle {
                 visible: text.length > 0
                 color: Theme.textDim
                 font.pixelSize: 12
+                lineHeightMode: Text.FixedHeight
+                lineHeight: 17
                 elide: Text.ElideRight
             }
             Text {
@@ -259,20 +265,22 @@ Rectangle {
                 text: root.track ? (root.hasTrack ? root.formatLine(root.track) : root.videoLine(root.track)) : ""
                 color: Theme.textFaint
                 font.pixelSize: 11
+                lineHeightMode: Text.FixedHeight
+                lineHeight: 15
                 elide: Text.ElideRight
             }
             Item { width: 1; height: 6 }
             // Its music video, where it has one; else why not.
             FlatButton {
-                visible: root.hasTrack && root.track.videoId > 0
+                visible: root.hasTrack && root.track !== null && root.track.videoId > 0
                 icon: Icons.movie
                 text: "Music video"
                 onClicked: root.videoRequested(root.track.videoId)
             }
             Text {
-                visible: root.hasTrack && !(root.track.videoId > 0)
+                visible: root.hasTrack && root.track !== null && !(root.track.videoId > 0)
                 width: parent.width
-                text: root.hasTrack ? root.stateLine(root.track) : ""
+                text: root.hasTrack && root.track !== null ? root.stateLine(root.track) : ""
                 color: Theme.textFaint
                 font.pixelSize: 12
                 wrapMode: Text.WordWrap

@@ -19,9 +19,16 @@ Rectangle {
     readonly property var shownModel: App.mode === "music" ? App.albums : App.videos
     readonly property bool music: App.mode === "music"
 
+    // Both libraries take the facet; one that has nothing under it shows
+    // everything instead (a video-only artist left the albums at "0 albums"
+    // with nothing to click).
     function select(type, value) {
         App.videos.setFacet(type, value)
         App.albums.setFacet(type, value)
+        if (value !== "" && App.albums.count === 0)
+            App.albums.setFacet("all", "")
+        if (value !== "" && App.videos.count === 0)
+            App.videos.setFacet("all", "")
         root.navigated()
     }
 
@@ -117,9 +124,16 @@ Rectangle {
 
     // The tag whose values are listed. Follows App.sidebarFacet, but only
     // switches in the middle of the cross-fade below.
-    property string shownKey: App.sidebarFacet
+    // Set once, not bound: as bindings they already held the new value when
+    // the change was looked for, so the swap (with the filter cleared and
+    // the list scrolled to the top) never ran.
+    property string shownKey
     // Likewise the section of the grid whose values are listed.
-    property string shownSection: App.mode === "music" ? "library" : App.videos.section
+    property string shownSection
+    Component.onCompleted: {
+        shownKey = App.sidebarFacet
+        shownSection = App.mode === "music" ? "library" : App.videos.section
+    }
     readonly property var facet: {
         const all = App.facets
         for (let i = 0; i < all.length; ++i) {
@@ -289,6 +303,7 @@ Rectangle {
                 width: selector.width - 24
                 padding: 6
                 closePolicy: Popup.CloseOnEscape | Popup.CloseOnPressOutsideParent
+                focus: true // Escape closes it only while it has the focus
                 transformOrigin: Popup.Top
                 enter: Transition {
                     ParallelAnimation {

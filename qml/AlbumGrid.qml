@@ -36,6 +36,12 @@ Item {
         const row = App.albums.rowOfKey(key)
         if (row >= 0)
             grid.positionViewAtIndex(row, GridView.Center)
+            // Kept as the rows on show even while a relayout settles (the
+            // grid just shown, the panel sliding): the settle would have
+            // put the old rows back.
+            grid.settled.stop()
+            grid.settling = false
+            grid.rowOffset = (grid.contentY - grid.originY + grid.topMargin) / grid.cellHeight
         return row
     }
 
@@ -69,6 +75,7 @@ Item {
         // are not kept, and the rows are put back once it has settled.
         property real rowOffset: 0
         property bool settling: false
+        readonly property alias settled: settled
         Timer {
             id: settled
             interval: 60
@@ -80,11 +87,48 @@ Item {
         function relayout() {
             settling = true
             settled.restart()
+            relaid.restart()
             keepRows()
         }
+        // A cell size changed while cards were still moving (a sort's
+        // displaced transition, 340 ms) left them where the old layout
+        // sent them: once the transition is over the layout is forced.
+        Timer {
+            id: relaid
+            interval: Theme.slow + 80
+            onTriggered: grid.unstick()
+        }
+        // Cards a cut-off transition left in the old layout's places are
+        // not moved by a later layout (the view believes them placed):
+        // found by their column, the view is filled afresh, quietly.
+        function unstick() {
+            const first = indexAt(cellWidth / 2, contentY + cellHeight / 2)
+            if (first < 0)
+                return
+            let stuck = false
+            for (let i = first; i < Math.min(count, first + columns * 6) && !stuck; i++) {
+                const it = itemAtIndex(i)
+                if (it && Math.abs(it.x - (i % columns) * cellWidth) > 1)
+                    stuck = true
+            }
+            if (!stuck)
+                return
+            const m = model
+            const appear = populate
+            populate = null
+            model = null
+            model = m
+            keepRows()
+            Qt.callLater(() => { populate = appear })
+        }
+        // Within the content: a narrower filter and a mode round trip
+        // put the kept rows past the end, and the grid showed nothing.
         function keepRows() {
-            if (visible && cellHeight > 0)
-                contentY = originY - topMargin + rowOffset * cellHeight
+            if (!(visible && cellHeight > 0))
+                return
+            const top = originY - topMargin
+            const bottom = Math.max(top, originY + contentHeight + bottomMargin - height)
+            contentY = Math.max(top, Math.min(bottom, top + rowOffset * cellHeight))
         }
         onContentYChanged: if (visible && !settling && cellHeight > 0) rowOffset = (contentY - originY + topMargin) / cellHeight
         onCellHeightChanged: relayout()

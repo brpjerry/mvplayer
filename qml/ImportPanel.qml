@@ -11,6 +11,7 @@ Popup {
     height: Math.min(Math.max(240, Overlay.overlay ? Overlay.overlay.height - 190 : 560), list.contentHeight + 2)
     padding: 1
     closePolicy: Popup.CloseOnEscape | Popup.CloseOnPressOutsideParent
+    focus: true // Escape closes it only while it has the focus
 
     // Tracks without a video: thousands in a large library. The list makes
     // rows only for what is on screen, and while open is read again only when

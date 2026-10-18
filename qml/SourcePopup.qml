@@ -21,6 +21,7 @@ Popup {
     height: Math.min(body.contentHeight + 2, Overlay.overlay ? Overlay.overlay.height - 140 : 600)
     padding: 1
     closePolicy: Popup.CloseOnEscape | Popup.CloseOnPressOutsideParent
+    focus: true // Escape closes it only while it has the focus
     transformOrigin: Popup.BottomLeft
 
     enter: Transition {
