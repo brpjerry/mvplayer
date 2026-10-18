@@ -156,7 +156,8 @@ ApplicationWindow {
     // widened first.
     function playVideo(id) {
         // The track it was asked from, to come back to if the video fails.
-        const from = player.current && player.current.kind === "track" ? { queue: player.queue, index: player.index } : null
+        const from = player.current && player.current.kind === "track"
+                   ? { queue: player.queue, index: player.index, position: window.mpv.position } : null
         App.mode = "video"
         showSection("library")
         let row = revealVideo(id)
@@ -558,6 +559,7 @@ ApplicationWindow {
                 player.queue = from.queue
                 player.history = []
                 player.load(from.index)
+                window.mpv.seek(from.position, true) // taken once the file is loaded
                 return
             }
             player.failures += 1
