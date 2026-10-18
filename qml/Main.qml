@@ -818,20 +818,12 @@ ApplicationWindow {
     // Pressing anywhere outside a text field takes keyboard focus away from
     // it, so the single-key shortcuts below work again.
     readonly property bool typing: activeFocusItem instanceof TextInput
+    // (A press outside the field is caught in C++, before any item takes
+    // it: a PointHandler here never saw presses the MouseAreas accepted.)
     function releaseTextFocus() {
-        if (window.typing)
-            window.contentItem.forceActiveFocus()
-    }
-    PointHandler {
-        parent: window.contentItem
-        onActiveChanged: {
-            if (!active || !window.typing)
-                return
-            const field = window.activeFocusItem
-            const p = field.mapFromItem(null, point.scenePressPosition.x, point.scenePressPosition.y)
-            if (!field.contains(p))
-                window.releaseTextFocus()
-        }
+        const field = window.activeFocusItem
+        if (window.typing && field)
+            field.focus = false // forcing focus onto the root scope handed it straight back
     }
 
     // ---- Keyboard ----------------------------------------------------------
@@ -844,12 +836,14 @@ ApplicationWindow {
     Shortcut { sequence: "Up"; enabled: !window.typing; onActivated: App.volume = Math.min(1, App.volume + 0.05) }
     Shortcut { sequence: "Down"; enabled: !window.typing; onActivated: App.volume = Math.max(0, App.volume - 0.05) }
     Shortcut { sequence: "M"; enabled: !window.typing; onActivated: App.muted = !App.muted }
-    Shortcut { sequence: "Ctrl+M"; enabled: !window.typing; onActivated: App.mode = App.mode === "music" ? "video" : "music" }
+    Shortcut { sequence: "Ctrl+M"; onActivated: App.mode = App.mode === "music" ? "video" : "music" }
     Shortcut { sequence: controlBar.audioKey; enabled: !window.typing; onActivated: controlBar.switchAudio() }
     Shortcut { sequence: "F"; enabled: !window.typing; onActivated: window.setFullscreen(!window.fullscreen) }
     Shortcut { sequence: "N"; enabled: !window.typing; onActivated: player.next(false) }
     Shortcut { sequence: "P"; enabled: !window.typing; onActivated: player.previous() }
-    Shortcut { sequences: ["Ctrl+F", "/"]; enabled: !window.typing; onActivated: { if (window.view === "player") window.showGrid(); topBar.focusSearch() } }
+    // Ctrl+F from anywhere, "/" only when not typing (it is a character).
+    Shortcut { sequence: "Ctrl+F"; onActivated: { if (window.view === "player") window.showGrid(); topBar.focusSearch() } }
+    Shortcut { sequence: "/"; enabled: !window.typing; onActivated: { if (window.view === "player") window.showGrid(); topBar.focusSearch() } }
     Shortcut {
         sequence: "Escape"
         enabled: !window.typing
