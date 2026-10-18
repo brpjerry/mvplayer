@@ -21,6 +21,20 @@ Item {
     readonly property alias view: grid
     readonly property alias wheel: wheel
 
+    // After a verdict the cards close up and the next card's button lands
+    // under the pointer: a second click would be a second verdict, so the
+    // buttons sleep for a moment.
+    property bool verdictCooldown: false
+    Timer {
+        id: cooldown
+        interval: 500
+        onTriggered: root.verdictCooldown = false
+    }
+    function verdictGiven() {
+        root.verdictCooldown = true
+        cooldown.restart()
+    }
+
     // The card of the video that is loaded in the player, while that card
     // exists (it is on screen or close to it), and where its thumbnail is in
     // this item's coordinates. The player draws the video right there.
@@ -162,8 +176,9 @@ Item {
             judgeOn: App.judgeMode !== "off"
             canDelete: !App.scanning
             onActivated: root.activated(index)
-            onApproved: root.approved(videoId)
-            onRejected: root.rejected(videoId)
+            verdictsEnabled: !root.verdictCooldown
+            onApproved: { root.verdictGiven(); root.approved(videoId) }
+            onRejected: { root.verdictGiven(); root.rejected(videoId) }
             onAllowChannelRequested: root.channelRequested(videoId, true)
             onDenyChannelRequested: root.channelRequested(videoId, false)
             onCurrentChanged: current ? root.claimCurrent(card) : root.releaseCurrent(card)

@@ -36,6 +36,7 @@ Item {
     signal activated()
     signal approved()
     signal rejected()
+    property bool verdictsEnabled: true
     signal allowChannelRequested()
     signal denyChannelRequested()
 
@@ -217,6 +218,7 @@ Item {
         sameTitle: root.sameTitle
         orphan: !root.review
         canDelete: root.canDelete
+        enabled: root.verdictsEnabled
         videoId: root.videoId
         onApproved: root.approved()
         onRejected: root.rejected()
