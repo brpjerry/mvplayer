@@ -240,6 +240,8 @@ Rectangle {
                 color: (textMouse.containsMouse && !root.sourcesInPanel) || sources.visible ? Theme.accentHi : Theme.text
                 font.pixelSize: 14
                 font.weight: Font.DemiBold
+                lineHeightMode: Text.FixedHeight
+                lineHeight: 18 // a CJK fallback font is taller; the lines keep their places
                 elide: Text.ElideRight
                 Behavior on color { ColorAnimation { duration: Theme.fast } }
             }
@@ -250,6 +252,8 @@ Rectangle {
                     text: root.nowArtist
                     color: Theme.textDim
                     font.pixelSize: 12
+                    lineHeightMode: Text.FixedHeight
+                    lineHeight: 16
                     elide: Text.ElideRight
                 }
                 Text {
