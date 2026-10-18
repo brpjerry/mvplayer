@@ -170,15 +170,26 @@ Item {
             Behavior on color { ColorAnimation { duration: Theme.normal } }
             Behavior on anchors.leftMargin { NumberAnimation { duration: Theme.normal; easing.type: Easing.OutCubic } }
         }
-        Text {
+        // The artist gives way, the year stays ("… · 20…" lost the year).
+        Row {
             anchors.left: parent.left
             anchors.right: parent.right
             anchors.top: titleLabel.bottom
             anchors.topMargin: 3
-            text: root.albumArtist.replace(/; /g, ", ") + (root.year > 0 ? "  ·  " + root.year : "")
-            color: Theme.textDim
-            font.pixelSize: 12
-            elide: Text.ElideRight
+            Text {
+                width: Math.min(implicitWidth, parent.width - (yearLabel.visible ? yearLabel.implicitWidth : 0))
+                text: root.albumArtist.replace(/; /g, ", ")
+                color: Theme.textDim
+                font.pixelSize: 12
+                elide: Text.ElideRight
+            }
+            Text {
+                id: yearLabel
+                visible: root.year > 0
+                text: "  ·  " + root.year
+                color: Theme.textDim
+                font.pixelSize: 12
+            }
         }
     }
 

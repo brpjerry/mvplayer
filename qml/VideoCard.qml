@@ -171,18 +171,28 @@ Item {
             Behavior on color { ColorAnimation { duration: Theme.normal } }
             Behavior on anchors.leftMargin { NumberAnimation { duration: Theme.normal; easing.type: Easing.OutCubic } }
         }
-        Text {
+        // The artist gives way, the year stays ("… · 20…" lost the year).
+        Row {
             anchors.left: parent.left
             anchors.right: parent.right
             anchors.top: titleLabel.bottom
             anchors.topMargin: 3
-            // Under review, what matters is which upload this is.
-            // Under review, the upload and whose it is: that is what is judged.
-            text: root.review ? root.ytTitle + (root.ytChannel ? "  —  " + root.ytChannel : "")
-                              : root.artist.replace(/; /g, ", ") + (root.year > 0 ? "  ·  " + root.year : "")
-            color: Theme.textDim
-            font.pixelSize: 12
-            elide: Text.ElideRight
+            Text {
+                width: Math.min(implicitWidth, parent.width - (yearLabel.visible ? yearLabel.implicitWidth : 0))
+                // Under review, the upload and whose it is: that is what is judged.
+                text: root.review ? root.ytTitle + (root.ytChannel ? "  —  " + root.ytChannel : "")
+                                  : root.artist.replace(/; /g, ", ")
+                color: Theme.textDim
+                font.pixelSize: 12
+                elide: Text.ElideRight
+            }
+            Text {
+                id: yearLabel
+                visible: !root.review && root.year > 0
+                text: "  ·  " + root.year
+                color: Theme.textDim
+                font.pixelSize: 12
+            }
         }
     }
 
