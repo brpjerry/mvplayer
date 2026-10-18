@@ -2,6 +2,7 @@
 
 #include "core/Util.h"
 
+#include <QSet>
 #include <QUrl>
 
 #include <algorithm>
@@ -99,6 +100,77 @@ void AlbumModel::reset(const QVector<AlbumInfo> &albums)
         m_rows.insert(albums.at(i).key, i);
     }
     endResetModel();
+}
+
+bool AlbumModel::update(const QVector<AlbumInfo> &albums)
+{
+    // From or to nothing is a fresh start, with the grid's populate
+    // transition rather than an add for every card.
+    if (m_albums.isEmpty() || albums.isEmpty()) {
+        if (m_albums.isEmpty() && albums.isEmpty())
+            return false;
+        reset(albums);
+        return true;
+    }
+    QHash<QString, int> fresh; // key -> index in albums
+    fresh.reserve(albums.size());
+    for (int i = 0; i < albums.size(); ++i)
+        fresh.insert(albums.at(i).key, i);
+    bool changed = false;
+    // Gone: removed a run at a time, from the end, so the rows above keep
+    // their numbers.
+    int runEnd = -1;
+    for (int i = m_albums.size() - 1; i >= -1; --i) {
+        const bool gone = i >= 0 && !fresh.contains(m_albums.at(i).key);
+        if (gone) {
+            if (runEnd < 0)
+                runEnd = i;
+            continue;
+        }
+        if (runEnd >= 0) {
+            beginRemoveRows({}, i + 1, runEnd);
+            m_albums.remove(i + 1, runEnd - i);
+            m_search.remove(i + 1, runEnd - i);
+            endRemoveRows();
+            changed = true;
+            runEnd = -1;
+        }
+    }
+    // Changed: in place, one row at a time.
+    for (int i = 0; i < m_albums.size(); ++i) {
+        const AlbumInfo &now = albums.at(fresh.value(m_albums.at(i).key));
+        if (m_albums.at(i) == now)
+            continue;
+        m_albums[i] = now;
+        m_search[i] = buildSearchText(now);
+        emit dataChanged(index(i, 0), index(i, 0));
+        changed = true;
+    }
+    // New: at the end; the grid's proxy puts them in order.
+    QSet<QString> have;
+    have.reserve(m_albums.size());
+    for (const AlbumInfo &a : std::as_const(m_albums))
+        have.insert(a.key);
+    QVector<AlbumInfo> added;
+    for (const AlbumInfo &a : albums) {
+        if (!have.contains(a.key))
+            added << a;
+    }
+    if (!added.isEmpty()) {
+        beginInsertRows({}, m_albums.size(), m_albums.size() + added.size() - 1);
+        for (const AlbumInfo &a : std::as_const(added)) {
+            m_albums << a;
+            m_search << buildSearchText(a);
+        }
+        endInsertRows();
+        changed = true;
+    }
+    if (changed) {
+        m_rows.clear();
+        for (int i = 0; i < m_albums.size(); ++i)
+            m_rows.insert(m_albums.at(i).key, i);
+    }
+    return changed;
 }
 
 void AlbumModel::setCover(const QString &key, const QString &path)

@@ -942,6 +942,7 @@ ApplicationWindow {
         case "sort-direction": App.videos.sortDescending = arg === "desc"; return "ok" // sort-direction asc|desc
         case "order": return JSON.stringify(App.videos.snapshot().slice(0, parseInt(arg) || 20).map(v => v.title)) // order [n]: the grid's first titles
         case "mode": if (arg) App.mode = arg; return App.mode // mode [video|music]
+        case "rescan": App.rescan(); return "ok" // the library scanned again, as the periodic scan does
         case "video-follows": App.videoFollows = arg !== "off"; return "ok" // video-follows on|off
         case "music-panel": if (arg) App.musicPanel = arg !== "off"; return App.musicPanel ? "on" : "off" // music-panel [on|off]: the panel right of the albums
         case "close": window.close(); return "ok" // close: as the window's close button; into the tray, or the end of the run

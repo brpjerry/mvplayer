@@ -282,6 +282,9 @@ AppController::AppController(const AppOptions &options, QObject *parent)
     m_albumTimer.setInterval(150);
     connect(&m_albumTimer, &QTimer::timeout, this, &AppController::reloadAlbums);
     connect(m_albumModel, &QAbstractItemModel::modelReset, this, &AppController::rebuildFacets);
+    connect(m_albumModel, &QAbstractItemModel::rowsInserted, this, scheduleFacets);
+    connect(m_albumModel, &QAbstractItemModel::rowsRemoved, this, scheduleFacets);
+    connect(m_albumModel, &QAbstractItemModel::dataChanged, this, scheduleFacets);
     connect(&m_covers, &CoverCache::coverReady, m_albumModel, &AlbumModel::setCover);
 
     openLibrary();
@@ -477,7 +480,10 @@ void AppController::reloadAlbums()
         }
     }
     m_libraryTracks = tracks;
-    m_albumModel->reset(albums);
+    // Rows kept where nothing changed: a scan that found the library as it
+    // was (every ten minutes, or a folder touched) leaves the grid's cards
+    // and their covers in place instead of making every one afresh.
+    m_albumModel->update(albums);
 }
 
 void AppController::setMode(const QString &mode)
