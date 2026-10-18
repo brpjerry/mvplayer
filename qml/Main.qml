@@ -212,7 +212,7 @@ ApplicationWindow {
     function showSection(section) {
         if (section === App.videos.section)
             return
-        if (player.current)
+        if (player.current && player.current.kind !== "track")
             player.stop()
         App.videos.showSection(section)
     }
