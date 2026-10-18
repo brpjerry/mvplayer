@@ -19,6 +19,7 @@
 #include <QKeySequence>
 #include <QMouseEvent>
 #include <QQuickItem>
+#include <QPainter>
 #include <QQuickWindow>
 #include <QQuickItemGrabResult>
 #include <QTimer>
@@ -177,7 +178,16 @@ int main(int argc, char **argv)
                     QObject::connect(result.data(), &QQuickItemGrabResult::ready, &wait, &QEventLoop::quit);
                     QTimer::singleShot(5000, &wait, &QEventLoop::quit);
                     wait.exec(QEventLoop::ExcludeSocketNotifiers);
-                    return !result->image().isNull() && result->saveToFile(file) ? QStringLiteral("ok") : QStringLiteral("failed");
+                    if (result->image().isNull())
+                        return QStringLiteral("failed");
+                    // On the window's own colour: the content item alone
+                    // leaves the background clear wherever nothing is drawn.
+                    QImage flat(result->image().size(), QImage::Format_ARGB32_Premultiplied);
+                    flat.fill(window->color());
+                    QPainter painter(&flat);
+                    painter.drawImage(0, 0, result->image());
+                    painter.end();
+                    return flat.save(file) ? QStringLiteral("ok") : QStringLiteral("failed");
                 }
                 // pointer <x> <y>: the pointer is moved there, in the
                 // window's own coordinates; click <x> <y>: and the left
