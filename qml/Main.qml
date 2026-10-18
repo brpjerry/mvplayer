@@ -796,6 +796,10 @@ ApplicationWindow {
                     // The album of the playing track, in the music library.
                     App.mode = "music"
                     albumGrid.reveal(player.current.albumKey)
+                } else if (App.mode === "music" && player.current && player.current.kind !== "track") {
+                    // A video playing on under the albums: back to its library, grown.
+                    App.mode = "video"
+                    window.showPlayer()
                 } else {
                     window.view === "player" ? window.showGrid() : window.showPlayer()
                 }
