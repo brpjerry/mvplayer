@@ -132,6 +132,57 @@ private slots:
         QCOMPARE(p.count(), 4);
     }
 
+    // The albums read again after a scan: the same again is no change at
+    // all, otherwise only the rows concerned move.
+    void reread()
+    {
+        AlbumModel model;
+        AlbumFilterModel p(&model);
+        model.reset(sample());
+        QSignalSpy resets(&model, &QAbstractItemModel::modelReset);
+        QSignalSpy inserted(&model, &QAbstractItemModel::rowsInserted);
+        QSignalSpy removed(&model, &QAbstractItemModel::rowsRemoved);
+        QSignalSpy changed(&model, &QAbstractItemModel::dataChanged);
+        QVERIFY(!model.update(sample()));
+        QCOMPARE(resets.size() + inserted.size() + removed.size() + changed.size(), 0);
+
+        // One album's count changed.
+        QVector<AlbumInfo> albums = sample();
+        albums[2].videos = 7;
+        QVERIFY(model.update(albums));
+        QCOMPARE(changed.size(), 1);
+        QCOMPARE(changed.first().at(0).toModelIndex().row(), 2);
+        QCOMPARE(model.at(2).videos, 7);
+        QCOMPARE(resets.size() + inserted.size() + removed.size(), 0);
+
+        // Two gone, one new: the others keep their rows.
+        albums.remove(1);
+        albums.remove(2); // Zed
+        albums << album(QStringLiteral("Adele"), QStringLiteral("25"), 2015, 11, 2, 500);
+        QVERIFY(model.update(albums));
+        QCOMPARE(removed.size(), 2);
+        QCOMPARE(inserted.size(), 1);
+        QCOMPARE(resets.size(), 0);
+        QCOMPARE(model.rowCount(), 3);
+        QCOMPARE(model.at(0).album, QStringLiteral("Abbey Road"));
+        QCOMPARE(model.at(1).album, QStringLiteral("THE BOOK"));
+        QCOMPARE(model.at(2).album, QStringLiteral("25"));
+        QCOMPARE(model.rowOfKey(Database::albumKey(QStringLiteral("Adele"), QStringLiteral("25"))), 2);
+        QCOMPARE(model.rowOfKey(Database::albumKey(QStringLiteral("Zed"), QString())), -1);
+        QCOMPARE(titles(p), (QStringList{QStringLiteral("25"), QStringLiteral("Abbey Road"), QStringLiteral("THE BOOK")}));
+        p.setSearchText(QStringLiteral("adele"));
+        QCOMPARE(p.count(), 1);
+        p.setSearchText(QString());
+
+        // To nothing, and from nothing, is a reset.
+        QVERIFY(model.update({}));
+        QCOMPARE(resets.size(), 1);
+        QVERIFY(!model.update({}));
+        QVERIFY(model.update(sample()));
+        QCOMPARE(resets.size(), 2);
+        QCOMPARE(model.rowCount(), 4);
+    }
+
     void covers()
     {
         AlbumModel model;

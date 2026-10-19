@@ -26,6 +26,15 @@ struct AlbumInfo {
     static AlbumInfo from(const Database::AlbumSummary &s);
 };
 
+inline bool operator==(const AlbumInfo &a, const AlbumInfo &b)
+{
+    return a.key == b.key && a.albumArtist == b.albumArtist && a.album == b.album && a.artists == b.artists
+        && a.genres == b.genres && a.year == b.year && a.tracks == b.tracks && a.videos == b.videos
+        && a.lookedUp == b.lookedUp && a.duration == b.duration && a.newest == b.newest
+        && a.firstPath == b.firstPath && a.cover == b.cover;
+}
+inline bool operator!=(const AlbumInfo &a, const AlbumInfo &b) { return !(a == b); }
+
 // Every album of the music library.
 class AlbumModel : public QAbstractListModel
 {
@@ -55,6 +64,11 @@ public:
     QHash<int, QByteArray> roleNames() const override;
 
     void reset(const QVector<AlbumInfo> &albums);
+    // The albums read again after a scan: rows whose album is as it was
+    // are left alone, so the grid keeps their cards and covers; what is
+    // gone is removed, what changed is announced, what is new is appended.
+    // Returns whether anything differed.
+    bool update(const QVector<AlbumInfo> &albums);
     // An album's cover was made or found: its file.
     void setCover(const QString &key, const QString &path);
 
