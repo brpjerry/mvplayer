@@ -59,7 +59,11 @@ Item {
         // would drift.
         readonly property int fitWidth: root.room - 36
         property int shownWidth: fitWidth
-        onFitWidthChanged: if (visible) shownWidth = fitWidth
+        // A grid fading out with the mode keeps its layout (the mode is
+        // read itself: the width changes before `enabled` follows it);
+        // it takes the width again when it is the mode's grid once more.
+        onFitWidthChanged: if (visible && App.mode === "music") shownWidth = fitWidth
+        onEnabledChanged: if (enabled && visible) shownWidth = fitWidth
         x: 18
         y: 0
         width: shownWidth

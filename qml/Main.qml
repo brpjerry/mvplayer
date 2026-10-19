@@ -695,10 +695,14 @@ ApplicationWindow {
                     id: grid
                     anchors.fill: parent
                     room: frame.gridRoom
-                    // Recedes as the player grows over it.
-                    opacity: 1 - playerView.cover
+                    // Recedes as the player grows over it, and fades
+                    // across to the albums with the mode (and back).
+                    property real shown: App.mode === "video" ? 1 : 0
+                    Behavior on shown { NumberAnimation { duration: Theme.normal } }
+                    opacity: (1 - playerView.cover) * shown
                     scale: 1 - 0.03 * playerView.cover
-                    visible: opacity > 0 && App.configured && App.mode === "video"
+                    visible: opacity > 0 && App.configured
+                    enabled: App.mode === "video"
                     searchText: topBar.searchText
                     currentVideoId: player.current ? player.current.videoId : -1
                     currentPlaying: window.playingNow
@@ -712,7 +716,11 @@ ApplicationWindow {
                     id: albumGrid
                     anchors.fill: parent
                     room: frame.gridRoom
-                    visible: App.mode === "music" && App.configured
+                    property real shown: App.mode === "music" ? 1 : 0
+                    Behavior on shown { NumberAnimation { duration: Theme.normal } }
+                    opacity: shown
+                    visible: opacity > 0 && App.configured
+                    enabled: App.mode === "music"
                     searchText: topBar.searchText
                     currentKey: player.current && player.current.kind === "track" ? player.current.albumKey : ""
                     currentPlaying: window.playingNow
@@ -758,7 +766,7 @@ ApplicationWindow {
             fullscreen: window.fullscreen
             // The grid occupies the same rectangle, so its coordinates carry over.
             anchorRect: grid.currentThumbRect
-            anchorAvailable: grid.currentThumbAvailable && grid.visible
+            anchorAvailable: grid.currentThumbAvailable && grid.visible && grid.enabled
             onExpandRequested: window.showPlayer()
             onCloseRequested: player.stop()
             onReviewApproved: window.approveVideo(player.current.videoId)
