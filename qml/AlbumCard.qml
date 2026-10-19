@@ -69,7 +69,8 @@ Item {
             Behavior on opacity { NumberAnimation { duration: Theme.normal } }
         }
 
-        // Play affordance
+        // Play affordance; on the album that is loaded a click starts it
+        // over from its first track, and the glyph says so.
         Rectangle {
             anchors.centerIn: coverItem
             width: 52
@@ -82,11 +83,12 @@ Item {
             Behavior on opacity { NumberAnimation { duration: Theme.normal } }
             Behavior on scale { NumberAnimation { duration: Theme.slow; easing.type: Easing.OutBack; easing.overshoot: 1.4 } }
             Icon {
-                // The glyph's own box already sits right of the icon's
-                // centre (x 8..19 of 24), as on the control bar's button.
+                // The play glyph's own box already sits right of the
+                // icon's centre (x 8..19 of 24), as on the control bar's
+                // button; the replay glyph is centred in its box.
                 anchors.centerIn: parent
-                path: Icons.play
-                size: 28
+                path: root.current ? Icons.replay : Icons.play
+                size: root.current ? 26 : 28
                 color: Theme.accentInk
             }
         }
