@@ -1,0 +1,11 @@
+# The libraries come from pacman and MSYS2 at build time, which Dependabot
+# does not read; what it can keep current is the workflows' actions.
+version: 2
+updates:
+  - package-ecosystem: github-actions
+    directory: /
+    schedule:
+      interval: monthly
+    groups:
+      actions:
+        patterns: ["*"]
