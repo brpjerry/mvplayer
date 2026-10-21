@@ -106,6 +106,8 @@ class AppController : public QObject
     // What follows the album, or the video: "autoplay", "repeat" or "none"
     // (player/playMode, kept across restarts).
     Q_PROPERTY(QString playMode READ playMode WRITE setPlayMode NOTIFY playModeChanged)
+    // The queue plays in a random order (player/shuffle, kept across restarts).
+    Q_PROPERTY(bool shuffle READ shuffle WRITE setShuffle NOTIFY shuffleChanged)
     // Whether this desktop has a tray to sit in at all (a status notifier
     // host on Linux; Windows always), known before one is asked for.
     Q_PROPERTY(bool trayHost READ trayHost CONSTANT)
@@ -318,6 +320,8 @@ public:
     void setBackground(bool v);
     QString playMode() const { return m_playMode; }
     void setPlayMode(const QString &mode);
+    bool shuffle() const { return m_shuffle; }
+    void setShuffle(bool on);
     int untrackedCount() const { return m_untrackedCount; }
     Q_INVOKABLE int deleteUntracked();
     void setSkipStillImages(bool v);
@@ -475,6 +479,7 @@ signals:
     void facetsChanged();
     void modeChanged();
     void playModeChanged();
+    void shuffleChanged();
     void lookupAlbumsChanged();
     void settingsChanged();
     void quittingChanged();
@@ -568,6 +573,7 @@ private:
     bool m_videoFollows = false;
     bool m_background = true;
     QString m_playMode = QStringLiteral("autoplay");
+    bool m_shuffle = false;
     bool m_quitting = false;
     int m_untrackedCount = 0;
     QString m_replaceStage;

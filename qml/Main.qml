@@ -225,7 +225,7 @@ ApplicationWindow {
         property var queue: []      // snapshot of the grid when playback started
         property int index: -1
         property var current: null
-        property bool shuffle: false
+        readonly property bool shuffle: App.shuffle   // kept across restarts; set there
         // What follows the queue: "autoplay" goes on (the next album of
         // the music library, the next video of the grid), "repeat" plays
         // the album, or the video, again, "none" stops after it. It is
@@ -599,7 +599,7 @@ ApplicationWindow {
         function onPreviousRequested() { player.previous() }
         function onSeekRequested(seconds) { window.mpv.seek(seconds, true) }
         function onVolumeRequested(volume) { App.volume = volume }
-        function onShuffleRequested(shuffle) { player.shuffle = shuffle }
+        function onShuffleRequested(shuffle) { App.shuffle = shuffle }
         function onRepeatModeRequested(mode) { App.playMode = mode > 0 ? "repeat" : "autoplay" }
         function onFullscreenRequested(fullscreen) { window.setFullscreen(fullscreen) }
         function onRaiseRequested() { window.bringUp() }
@@ -805,7 +805,7 @@ ApplicationWindow {
             onPlayPauseRequested: window.togglePause()
             onNextRequested: player.next(false)
             onPreviousRequested: player.previous()
-            onShuffleToggled: player.shuffle = !player.shuffle
+            onShuffleToggled: App.shuffle = !player.shuffle
             onPlayModeCycled: App.playMode = player.playMode === "autoplay" ? "repeat" : player.playMode === "repeat" ? "none" : "autoplay"
             onFullscreenToggled: window.setFullscreen(!window.fullscreen)
             onNowPlayingClicked: {
@@ -937,7 +937,7 @@ ApplicationWindow {
         case "stop": player.stop(); return "ok"
         case "seek": mpv.seek(parseFloat(arg), true); return "ok"
         case "play-mode": if (arg) App.playMode = arg; return player.playMode // play-mode [autoplay|repeat|none]: what follows the album, or the video
-        case "shuffle": if (arg) player.shuffle = arg !== "off"; return player.shuffle ? "on" : "off" // shuffle [on|off]
+        case "shuffle": if (arg) App.shuffle = arg !== "off"; return player.shuffle ? "on" : "off" // shuffle [on|off]
         case "audio": mpv.audioTrack = parseInt(arg); return "ok"
         case "switch-audio": controlBar.switchAudio(); return "ok" // as the key on the chip does
         case "search": topBar.searchText = arg; return "ok"

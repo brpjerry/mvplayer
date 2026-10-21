@@ -182,6 +182,7 @@ AppController::AppController(const AppOptions &options, QObject *parent)
     m_videoFollows = m_settings->value(QStringLiteral("player/videoFollows"), false).toBool();
     m_background = m_settings->value(QStringLiteral("player/background"), true).toBool();
     setPlayMode(m_settings->value(QStringLiteral("player/playMode"), m_playMode).toString());
+    m_shuffle = m_settings->value(QStringLiteral("player/shuffle"), false).toBool();
     m_cfg.ytdlpArgs = m_settings->value(QStringLiteral("import/ytdlpArgs")).toStringList();
     if (YtDlp::looksLikeCookies(cookiesPath()))
         m_cfg.cookiesFile = cookiesPath();
@@ -1338,6 +1339,15 @@ void AppController::setPlayMode(const QString &mode)
     m_playMode = mode;
     m_settings->setValue(QStringLiteral("player/playMode"), m_playMode);
     emit playModeChanged();
+}
+
+void AppController::setShuffle(bool on)
+{
+    if (on == m_shuffle)
+        return;
+    m_shuffle = on;
+    m_settings->setValue(QStringLiteral("player/shuffle"), m_shuffle);
+    emit shuffleChanged();
 }
 
 void AppController::setVideoFollows(bool v)
