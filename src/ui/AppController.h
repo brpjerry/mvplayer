@@ -103,6 +103,9 @@ class AppController : public QObject
     // Closing the window keeps the app playing in the tray; the tray icon
     // or a second start brings the window back.
     Q_PROPERTY(bool background READ background WRITE setBackground NOTIFY settingsChanged)
+    // What follows the album, or the video: "autoplay", "repeat" or "none"
+    // (player/playMode, kept across restarts).
+    Q_PROPERTY(QString playMode READ playMode WRITE setPlayMode NOTIFY playModeChanged)
     // Whether this desktop has a tray to sit in at all (a status notifier
     // host on Linux; Windows always), known before one is asked for.
     Q_PROPERTY(bool trayHost READ trayHost CONSTANT)
@@ -313,6 +316,8 @@ public:
     // The one way to end the run: Ctrl+Q, the tray's Quit, MPRIS, a signal.
     Q_INVOKABLE void quit();
     void setBackground(bool v);
+    QString playMode() const { return m_playMode; }
+    void setPlayMode(const QString &mode);
     int untrackedCount() const { return m_untrackedCount; }
     Q_INVOKABLE int deleteUntracked();
     void setSkipStillImages(bool v);
@@ -469,6 +474,7 @@ signals:
     void adviceQueueChanged();
     void facetsChanged();
     void modeChanged();
+    void playModeChanged();
     void lookupAlbumsChanged();
     void settingsChanged();
     void quittingChanged();
@@ -561,6 +567,7 @@ private:
     bool m_autoExpand = true;
     bool m_videoFollows = false;
     bool m_background = true;
+    QString m_playMode = QStringLiteral("autoplay");
     bool m_quitting = false;
     int m_untrackedCount = 0;
     QString m_replaceStage;

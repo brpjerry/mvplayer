@@ -228,8 +228,9 @@ ApplicationWindow {
         property bool shuffle: false
         // What follows the queue: "autoplay" goes on (the next album of
         // the music library, the next video of the grid), "repeat" plays
-        // the album, or the video, again, "none" stops after it.
-        property string playMode: "autoplay"
+        // the album, or the video, again, "none" stops after it. It is
+        // App.playMode, kept across restarts, and is set there.
+        readonly property string playMode: App.playMode
         // The queue is an album's tracks (else the grid's videos).
         readonly property bool albumQueue: queue.length > 0 && queue[0].kind === "track"
         property var history: []    // indices played, for "previous" while shuffling
@@ -599,7 +600,7 @@ ApplicationWindow {
         function onSeekRequested(seconds) { window.mpv.seek(seconds, true) }
         function onVolumeRequested(volume) { App.volume = volume }
         function onShuffleRequested(shuffle) { player.shuffle = shuffle }
-        function onRepeatModeRequested(mode) { player.playMode = mode > 0 ? "repeat" : "autoplay" }
+        function onRepeatModeRequested(mode) { App.playMode = mode > 0 ? "repeat" : "autoplay" }
         function onFullscreenRequested(fullscreen) { window.setFullscreen(fullscreen) }
         function onRaiseRequested() { window.bringUp() }
         function onQuitRequested() { App.quit() }
@@ -805,7 +806,7 @@ ApplicationWindow {
             onNextRequested: player.next(false)
             onPreviousRequested: player.previous()
             onShuffleToggled: player.shuffle = !player.shuffle
-            onPlayModeCycled: player.playMode = player.playMode === "autoplay" ? "repeat" : player.playMode === "repeat" ? "none" : "autoplay"
+            onPlayModeCycled: App.playMode = player.playMode === "autoplay" ? "repeat" : player.playMode === "repeat" ? "none" : "autoplay"
             onFullscreenToggled: window.setFullscreen(!window.fullscreen)
             onNowPlayingClicked: {
                 if (player.current && player.current.kind === "track" && !player.videoUp) {
@@ -935,7 +936,7 @@ ApplicationWindow {
         case "previous": player.previous(); return "ok"
         case "stop": player.stop(); return "ok"
         case "seek": mpv.seek(parseFloat(arg), true); return "ok"
-        case "play-mode": if (arg) player.playMode = arg; return player.playMode // play-mode [autoplay|repeat|none]: what follows the album, or the video
+        case "play-mode": if (arg) App.playMode = arg; return player.playMode // play-mode [autoplay|repeat|none]: what follows the album, or the video
         case "shuffle": if (arg) player.shuffle = arg !== "off"; return player.shuffle ? "on" : "off" // shuffle [on|off]
         case "audio": mpv.audioTrack = parseInt(arg); return "ok"
         case "switch-audio": controlBar.switchAudio(); return "ok" // as the key on the chip does
