@@ -181,6 +181,7 @@ AppController::AppController(const AppOptions &options, QObject *parent)
     m_autoExpand = m_settings->value(QStringLiteral("player/autoExpand"), true).toBool();
     m_videoFollows = m_settings->value(QStringLiteral("player/videoFollows"), false).toBool();
     m_background = m_settings->value(QStringLiteral("player/background"), true).toBool();
+    setPlayMode(m_settings->value(QStringLiteral("player/playMode"), m_playMode).toString());
     m_cfg.ytdlpArgs = m_settings->value(QStringLiteral("import/ytdlpArgs")).toStringList();
     if (YtDlp::looksLikeCookies(cookiesPath()))
         m_cfg.cookiesFile = cookiesPath();
@@ -1327,6 +1328,16 @@ void AppController::setBackground(bool v)
     m_background = v;
     saveSettings();
     emit settingsChanged();
+}
+
+void AppController::setPlayMode(const QString &mode)
+{
+    if (mode == m_playMode
+        || (mode != QLatin1String("autoplay") && mode != QLatin1String("repeat") && mode != QLatin1String("none")))
+        return;
+    m_playMode = mode;
+    m_settings->setValue(QStringLiteral("player/playMode"), m_playMode);
+    emit playModeChanged();
 }
 
 void AppController::setVideoFollows(bool v)
