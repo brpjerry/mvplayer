@@ -31,7 +31,8 @@ apt-get install -y -qq --no-install-recommends \
 # TaskTree, which a QML plugin of Qt 6.11 looks for when the build configures.
 if [[ ! -f $QT_DIR/lib/cmake/Qt6ShaderTools/Qt6ShaderToolsConfig.cmake || ! -d $QT_DIR/lib/cmake/Qt6TaskTree ]]; then
     pip install --quiet --break-system-packages aqtinstall
-    aqt install-qt --outputdir /opt/qt linux desktop "$QT_VERSION" linux_gcc_64 -m qtshadertools qttasktree
+    # aqt leaves its log in the current folder.
+    (cd /tmp && aqt install-qt --outputdir /opt/qt linux desktop "$QT_VERSION" linux_gcc_64 -m qtshadertools qttasktree)
 fi
 
 # TagLib 2.
