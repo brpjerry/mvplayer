@@ -106,9 +106,10 @@ Item {
         width: shownWidth
         height: parent.height
 
-        // As many across as chosen (Settings → Appearance), but never a
-        // card under 200 px: a narrow window takes fewer.
-        readonly property int columns: Math.max(1, Math.min(App.thumbColumns, Math.floor(width / 200)))
+        // As many across as keep a card within the chosen width (Settings
+        // → Appearance): the cards share the row and grow with it, and
+        // one more goes across once they would pass that width.
+        readonly property int columns: Math.max(1, Math.ceil(width / App.thumbWidth))
         cellWidth: Math.floor(width / columns)
         cellHeight: Math.round((cellWidth - 20) * 9 / 16) + 74
 
