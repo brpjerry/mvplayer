@@ -215,23 +215,22 @@ AppController::AppController(const AppOptions &options, QObject *parent)
     m_themeMode = m_settings->value(QStringLiteral("ui/theme"), m_themeMode).toString();
     // A column count kept by 0.3.0 and before (ui/thumbColumns,
     // ui/coverColumns) is read once as the width it gave in the default
-    // window (1440 wide:
-    // 1156 px of grid for the videos, 836 for the covers beside the
-    // panel), and dropped.
+    // window (1440 wide: 1156 px of grid for the videos, 836 for the
+    // covers beside the panel), and dropped; a width off the ticks is
+    // written back snapped.
     const auto cardWidth = [this](const char *key, const char *oldKey, int gridWidth, int fallback) {
-        if (m_settings->contains(QLatin1String(key)))
-            return snapCardWidth(m_settings->value(QLatin1String(key)).toInt());
         int px = fallback;
-        if (m_settings->contains(QLatin1String(oldKey))) {
-            const int n = m_settings->value(QLatin1String(oldKey)).toInt();
-            m_settings->remove(QLatin1String(oldKey));
-            if (n > 0) {
-                px = kCardWidths[std::size(kCardWidths) - 1];
-                for (int w : kCardWidths)
-                    if (w * n >= gridWidth) { px = w; break; }
-                m_settings->setValue(QLatin1String(key), px);
-            }
+        const int n = m_settings->value(QLatin1String(oldKey)).toInt();
+        m_settings->remove(QLatin1String(oldKey));
+        if (m_settings->contains(QLatin1String(key)))
+            px = snapCardWidth(m_settings->value(QLatin1String(key)).toInt());
+        else if (n > 0) {
+            px = kCardWidths[std::size(kCardWidths) - 1];
+            for (int w : kCardWidths)
+                if (w * n >= gridWidth) { px = w; break; }
         }
+        if (px != m_settings->value(QLatin1String(key)).toInt())
+            m_settings->setValue(QLatin1String(key), px);
         return px;
     };
     m_thumbWidth = cardWidth("ui/thumbWidth", "ui/thumbColumns", 1156, m_thumbWidth);

@@ -408,9 +408,11 @@ public:
     QVariantList cardWidths() const;
     bool musicPanel() const { return m_musicPanel; }
     void setMusicPanel(bool on);
-    // The ticks, each a quarter wider than the last: at a given width a
-    // card is between the tick and, at n across, n/(n+1) of it.
-    static constexpr int kCardWidths[] = {180, 225, 280, 350, 440, 550};
+    // The ticks, each a quarter wider than the last: at n across a card
+    // is between (n-1)/n of the tick and the tick, so over half of it
+    // from two across on. The last keeps two videos across in a 1440
+    // window (1156 px of grid), as the smallest count did before.
+    static constexpr int kCardWidths[] = {180, 225, 280, 350, 440, 550, 690};
     static constexpr int kDefaultCardWidth = 350;
     static int snapCardWidth(int px);
     bool systemDark() const { return m_systemTheme.dark(); }

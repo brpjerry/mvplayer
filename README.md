@@ -696,10 +696,11 @@ the words is tried against what the judge once saw.
   system's preference and switches with it while the app is running.
 - Settings → Appearance also has two sliders, **Thumbnail size** and **Cover
   art size**: the widest a card gets in the video grid and in the album grid
-  (180 to 550 px in six steps, 350 by default). A grid fits as many cards
+  (180 to 690 px in seven steps, 350 by default). A grid fits as many cards
   across as keep within that width and they share the row, so they grow with
   the window up to the chosen width, and one more goes across once they would
-  pass it. The cover you see is never under half of it.
+  pass it: at two across a card is over half of that width, at three over two
+  thirds.
 - **Closing the window keeps the music playing.** With Settings → Playback →
   **Keep playing when the window is closed** on (it is by default) and a tray
   on the desktop, a close puts the app in the tray instead: its icon there
