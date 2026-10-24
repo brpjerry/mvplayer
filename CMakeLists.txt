@@ -199,6 +199,7 @@ target_link_libraries(mvplayer PRIVATE
     PkgConfig::MPV
 )
 if(WIN32)
+    target_sources(mvplayer PRIVATE src/ui/TaskbarButtons.h src/ui/TaskbarButtons.cpp)
     target_link_libraries(mvplayer PRIVATE dwmapi ole32 uuid)
 endif()
 if(PULSE_FOUND)
