@@ -961,8 +961,8 @@ ApplicationWindow {
         case "system-volume": if (arg) App.systemVolume = arg !== "off"; return App.systemVolume ? "on" : "off" // system-volume [on|off]: the volume bar sets the system volume
         case "volume": if (arg) App.volume = parseFloat(arg); return "" + App.volume // volume [0..1]: the volume bar
         case "mute": if (arg) App.muted = arg !== "off"; return App.muted ? "on" : "off" // mute [on|off]: the volume bar's mute
-        case "thumb-columns": if (arg) App.thumbColumns = parseInt(arg); return "" + App.thumbColumns // thumb-columns [n]: videos across
-        case "cover-columns": if (arg) App.coverColumns = parseInt(arg); return "" + App.coverColumns // cover-columns [n]: albums across
+        case "thumb-width": if (arg) App.thumbWidth = parseInt(arg); return "" + App.thumbWidth // thumb-width [px]: the widest a video card gets (snaps to a tick)
+        case "cover-width": if (arg) App.coverWidth = parseInt(arg); return "" + App.coverWidth // cover-width [px]: the widest a cover gets (snaps to a tick)
         case "albums": return JSON.stringify(App.albums.snapshot().slice(0, parseInt(arg) || 20).map(a => a.albumArtist + " — " + a.album)) // albums [n]: the album grid's first albums
         case "album-tracks": return JSON.stringify(App.albumTracks(parseInt(arg)).map(t => t.title)) // album-tracks <row>
         case "play-album": { // play-album <row> [track]
@@ -1129,7 +1129,7 @@ ApplicationWindow {
                 windowVisible: window.visible, trayHost: App.trayHost, trayAvailable: window.trayAvailable, trayShown: tray.item ? tray.item.visible : false, background: App.background,
                 volume: App.volume, barMuted: App.muted, systemVolume: App.systemVolume, systemVolumeAvailable: App.systemVolumeAvailable,
                 playerVolume: App.playerVolume, playerMuted: App.playerMuted,
-                thumbColumns: App.thumbColumns, coverColumns: App.coverColumns, gridColumns: grid.view.columns, albumColumns: albumGrid.view.columns,
+                thumbWidth: App.thumbWidth, coverWidth: App.coverWidth, gridColumns: grid.view.columns, albumColumns: albumGrid.view.columns,
                 originY: grid.view.originY, contentHeight: grid.view.contentHeight, albumOriginY: albumGrid.view.originY, albumContentHeight: albumGrid.view.contentHeight,
                 playing: player.current ? player.current.title : null, index: player.index,
                 position: mpv.position, duration: mpv.duration, paused: mpv.paused, active: mpv.active, muted: mpv.muted,

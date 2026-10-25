@@ -129,6 +129,7 @@ int main(int argc, char **argv)
             frameStats.attach(window);
             windowFrame.attach(window);
             pointerPacer.attach(window);
+            mediaSession.attach(window);
         }
 
         // A press outside the text field that has the keyboard takes the

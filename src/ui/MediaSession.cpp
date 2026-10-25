@@ -1,5 +1,9 @@
 #include "ui/MediaSession.h"
 
+#ifdef Q_OS_WIN
+#include "ui/TaskbarButtons.h"
+#endif
+
 #ifdef MV_HAVE_DBUS
 #include "ui/Mpris.h"
 
@@ -119,6 +123,15 @@ void MediaSession::setFullscreen(bool fullscreen)
 double MediaSession::length() const
 {
     return m_track.value(QStringLiteral("duration")).toDouble();
+}
+
+void MediaSession::attach(QWindow *window)
+{
+#ifdef Q_OS_WIN
+    new TaskbarButtons(this, window); // the window's child
+#else
+    Q_UNUSED(window)
+#endif
 }
 
 void MediaSession::seeked()

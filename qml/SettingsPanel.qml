@@ -1019,26 +1019,27 @@ Popup {
 
                     Divider {}
 
-                    // How big the cards are: how many go across.
+                    // How big the cards are: the widest one gets, a tick
+                    // per step of the ladder (App.cardWidths).
                     SliderRow {
                         label: "Thumbnail size"
-                        hint: "How many videos across in the video grid; fewer means bigger thumbnails."
-                        from: App.thumbColumnsMin
-                        to: App.thumbColumnsMax
+                        hint: "The widest a video card gets. The cards grow with the window up to it, then one more goes across."
+                        from: 0
+                        to: App.cardWidths.length - 1
                         step: 1
-                        value: App.thumbColumns
-                        valueText: App.thumbColumns + " across"
-                        onMoved: (v) => App.thumbColumns = v
+                        value: App.cardWidths.indexOf(App.thumbWidth)
+                        valueText: App.thumbWidth + " px"
+                        onMoved: (v) => App.thumbWidth = App.cardWidths[v]
                     }
                     SliderRow {
                         label: "Cover art size"
-                        hint: "How many albums across in the music library; fewer means bigger covers."
-                        from: App.coverColumnsMin
-                        to: App.coverColumnsMax
+                        hint: "The widest an album cover gets. The covers grow with the window up to it, then one more goes across."
+                        from: 0
+                        to: App.cardWidths.length - 1
                         step: 1
-                        value: App.coverColumns
-                        valueText: App.coverColumns + " across"
-                        onMoved: (v) => App.coverColumns = v
+                        value: App.cardWidths.indexOf(App.coverWidth)
+                        valueText: App.coverWidth + " px"
+                        onMoved: (v) => App.coverWidth = App.cardWidths[v]
                     }
                     Item { width: 1; height: 8 }
                 }

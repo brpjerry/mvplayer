@@ -1,5 +1,5 @@
 cmake_minimum_required(VERSION 3.21)
-set(MV_VERSION "0.3.0" CACHE STRING "Version recorded in the build")
+set(MV_VERSION "0.3.1" CACHE STRING "Version recorded in the build")
 project(mvplayer VERSION ${MV_VERSION} LANGUAGES CXX)
 
 set(CMAKE_CXX_STANDARD 20)
@@ -199,6 +199,7 @@ target_link_libraries(mvplayer PRIVATE
     PkgConfig::MPV
 )
 if(WIN32)
+    target_sources(mvplayer PRIVATE src/ui/TaskbarButtons.h src/ui/TaskbarButtons.cpp)
     target_link_libraries(mvplayer PRIVATE dwmapi ole32 uuid)
 endif()
 if(PULSE_FOUND)

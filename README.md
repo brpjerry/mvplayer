@@ -695,9 +695,12 @@ the words is tried against what the judge once saw.
 - Settings → Appearance: dark, light, or **Auto**, which follows the operating
   system's preference and switches with it while the app is running.
 - Settings → Appearance also has two sliders, **Thumbnail size** and **Cover
-  art size**: how many cards go across the video grid (2 to 6, 4 by default)
-  and the album grid (2 to 8, 3 by default). The cards share the width
-  evenly, so each step is one column.
+  art size**: the widest a card gets in the video grid and in the album grid
+  (180 to 690 px in seven steps, 350 by default). A grid fits as many cards
+  across as keep within that width and they share the row, so they grow with
+  the window up to the chosen width, and one more goes across once they would
+  pass it: at two across a card is over half of that width, at three over two
+  thirds.
 - **Closing the window keeps the music playing.** With Settings → Playback →
   **Keep playing when the window is closed** on (it is by default) and a tray
   on the desktop, a close puts the app in the tray instead: its icon there
@@ -738,6 +741,11 @@ the words is tried against what the judge once saw.
   can play, pause, skip, seek and change the volume, shuffle and repeat. The
   app shows up there only while a video is loaded, so when idle it leaves the
   media keys to other players.
+- On Windows the window's thumbnail on the taskbar (shown when the pointer
+  rests on the app's taskbar button) has previous, play/pause and next
+  buttons while a video is loaded; previous and next are greyed out when
+  there is nothing to step to. The buttons are drawn dark or white to suit
+  a light or dark taskbar.
 
 ## Keys
 
@@ -792,7 +800,9 @@ Platform-specific code is confined to:
 - `src/ui/IdleInhibitor.cpp`: keeping the screen awake (D-Bus on Linux,
   `SetThreadExecutionState` on Windows).
 - `src/ui/MediaSession.cpp`: the desktop's media controls, MPRIS on Linux
-  (`src/ui/Mpris.cpp`); Windows would need System Media Transport Controls.
+  (`src/ui/Mpris.cpp`), the taskbar thumbnail's buttons on Windows
+  (`src/ui/TaskbarButtons.cpp`). Windows' media flyout and media keys would
+  need System Media Transport Controls.
 - `src/ui/SystemTheme.cpp`: the desktop portal's dark/light preference, with
   Qt's own as the fallback.
 - `src/ui/MpvItem.cpp`: the native-display hand-off to mpv.

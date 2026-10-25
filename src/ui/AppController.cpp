@@ -2,6 +2,9 @@
 
 #include <QGuiApplication>
 
+#include <cstdlib>
+#include <iterator>
+
 #ifdef MV_HAVE_DBUS
 #include <QDBusConnection>
 #include <QDBusConnectionInterface>
@@ -210,8 +213,28 @@ AppController::AppController(const AppOptions &options, QObject *parent)
     if (m_mode != QLatin1String("music"))
         m_mode = QStringLiteral("video");
     m_themeMode = m_settings->value(QStringLiteral("ui/theme"), m_themeMode).toString();
-    m_thumbColumns = qBound(kThumbColumnsMin, m_settings->value(QStringLiteral("ui/thumbColumns"), m_thumbColumns).toInt(), kThumbColumnsMax);
-    m_coverColumns = qBound(kCoverColumnsMin, m_settings->value(QStringLiteral("ui/coverColumns"), m_coverColumns).toInt(), kCoverColumnsMax);
+    // A column count kept by 0.3.0 and before (ui/thumbColumns,
+    // ui/coverColumns) is read once as the width it gave in the default
+    // window (1440 wide: 1156 px of grid for the videos, 836 for the
+    // covers beside the panel), and dropped; a width off the ticks is
+    // written back snapped.
+    const auto cardWidth = [this](const char *key, const char *oldKey, int gridWidth, int fallback) {
+        int px = fallback;
+        const int n = m_settings->value(QLatin1String(oldKey)).toInt();
+        m_settings->remove(QLatin1String(oldKey));
+        if (m_settings->contains(QLatin1String(key)))
+            px = snapCardWidth(m_settings->value(QLatin1String(key)).toInt());
+        else if (n > 0) {
+            px = kCardWidths[std::size(kCardWidths) - 1];
+            for (int w : kCardWidths)
+                if (w * n >= gridWidth) { px = w; break; }
+        }
+        if (px != m_settings->value(QLatin1String(key)).toInt())
+            m_settings->setValue(QLatin1String(key), px);
+        return px;
+    };
+    m_thumbWidth = cardWidth("ui/thumbWidth", "ui/thumbColumns", 1156, m_thumbWidth);
+    m_coverWidth = cardWidth("ui/coverWidth", "ui/coverColumns", 836, m_coverWidth);
     m_musicPanel = m_settings->value(QStringLiteral("ui/musicPanel"), m_musicPanel).toBool();
     // Each library's sort, as it was left (ui/videoSort, ui/albumSort and
     // their directions); a mode that is not one of the menu's is ignored.
@@ -1506,13 +1529,30 @@ void AppController::setThemeMode(const QString &mode)
     emit appearanceChanged();
 }
 
-void AppController::setThumbColumns(int n)
+int AppController::snapCardWidth(int px)
 {
-    n = qBound(kThumbColumnsMin, n, kThumbColumnsMax);
-    if (n == m_thumbColumns)
+    int best = kCardWidths[0];
+    for (int w : kCardWidths)
+        if (std::abs(w - px) < std::abs(best - px))
+            best = w;
+    return best;
+}
+
+QVariantList AppController::cardWidths() const
+{
+    QVariantList out;
+    for (int w : kCardWidths)
+        out << w;
+    return out;
+}
+
+void AppController::setThumbWidth(int px)
+{
+    px = snapCardWidth(px);
+    if (px == m_thumbWidth)
         return;
-    m_thumbColumns = n;
-    m_settings->setValue(QStringLiteral("ui/thumbColumns"), m_thumbColumns);
+    m_thumbWidth = px;
+    m_settings->setValue(QStringLiteral("ui/thumbWidth"), m_thumbWidth);
     emit appearanceChanged();
 }
 
@@ -1525,13 +1565,13 @@ void AppController::setMusicPanel(bool on)
     emit appearanceChanged();
 }
 
-void AppController::setCoverColumns(int n)
+void AppController::setCoverWidth(int px)
 {
-    n = qBound(kCoverColumnsMin, n, kCoverColumnsMax);
-    if (n == m_coverColumns)
+    px = snapCardWidth(px);
+    if (px == m_coverWidth)
         return;
-    m_coverColumns = n;
-    m_settings->setValue(QStringLiteral("ui/coverColumns"), m_coverColumns);
+    m_coverWidth = px;
+    m_settings->setValue(QStringLiteral("ui/coverWidth"), m_coverWidth);
     emit appearanceChanged();
 }
 

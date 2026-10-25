@@ -180,17 +180,16 @@ class AppController : public QObject
     Q_PROPERTY(bool autoAccent READ autoAccent WRITE setAutoAccent NOTIFY appearanceChanged)
     // "auto" (follow the operating system), "dark" or "light"
     Q_PROPERTY(QString themeMode READ themeMode WRITE setThemeMode NOTIFY appearanceChanged)
-    // How many cards across in the video grid and in the album grid
-    // (ui/thumbColumns, ui/coverColumns), within each one's range.
-    Q_PROPERTY(int thumbColumns READ thumbColumns WRITE setThumbColumns NOTIFY appearanceChanged)
-    Q_PROPERTY(int coverColumns READ coverColumns WRITE setCoverColumns NOTIFY appearanceChanged)
+    // The widest a card gets in the video grid and in the album grid, in
+    // px (ui/thumbWidth, ui/coverWidth): a grid fits as many across as
+    // keep within it, and they share the row. One of cardWidths, the
+    // sliders' ticks; any other value snaps to the nearest.
+    Q_PROPERTY(int thumbWidth READ thumbWidth WRITE setThumbWidth NOTIFY appearanceChanged)
+    Q_PROPERTY(int coverWidth READ coverWidth WRITE setCoverWidth NOTIFY appearanceChanged)
+    Q_PROPERTY(QVariantList cardWidths READ cardWidths CONSTANT)
     // The panel right of the album grid (queue, track, cover) is on show;
     // off until it is asked for again (ui/musicPanel).
     Q_PROPERTY(bool musicPanel READ musicPanel WRITE setMusicPanel NOTIFY appearanceChanged)
-    Q_PROPERTY(int thumbColumnsMin READ thumbColumnsMin CONSTANT)
-    Q_PROPERTY(int thumbColumnsMax READ thumbColumnsMax CONSTANT)
-    Q_PROPERTY(int coverColumnsMin READ coverColumnsMin CONSTANT)
-    Q_PROPERTY(int coverColumnsMax READ coverColumnsMax CONSTANT)
     Q_PROPERTY(bool systemDark READ systemDark NOTIFY systemDarkChanged)
     // Which tag the sidebar lists: albumArtist | artist | genre | album | year
     Q_PROPERTY(QString sidebarFacet READ sidebarFacet WRITE setSidebarFacet NOTIFY appearanceChanged)
@@ -402,20 +401,20 @@ public:
     Q_INVOKABLE QString coverAccent(const QUrl &cover) const;
     QString themeMode() const { return m_themeMode; }
     void setThemeMode(const QString &mode);
-    int thumbColumns() const { return m_thumbColumns; }
-    void setThumbColumns(int n);
-    int coverColumns() const { return m_coverColumns; }
-    void setCoverColumns(int n);
+    int thumbWidth() const { return m_thumbWidth; }
+    void setThumbWidth(int px);
+    int coverWidth() const { return m_coverWidth; }
+    void setCoverWidth(int px);
+    QVariantList cardWidths() const;
     bool musicPanel() const { return m_musicPanel; }
     void setMusicPanel(bool on);
-    static constexpr int kThumbColumnsMin = 2;
-    static constexpr int kThumbColumnsMax = 6;
-    static constexpr int kCoverColumnsMin = 2;
-    static constexpr int kCoverColumnsMax = 8;
-    int thumbColumnsMin() const { return kThumbColumnsMin; }
-    int thumbColumnsMax() const { return kThumbColumnsMax; }
-    int coverColumnsMin() const { return kCoverColumnsMin; }
-    int coverColumnsMax() const { return kCoverColumnsMax; }
+    // The ticks, each a quarter wider than the last: at n across a card
+    // is between (n-1)/n of the tick and the tick, so over half of it
+    // from two across on. The last keeps two videos across in a 1440
+    // window (1156 px of grid), as the smallest count did before.
+    static constexpr int kCardWidths[] = {180, 225, 280, 350, 440, 550, 690};
+    static constexpr int kDefaultCardWidth = 350;
+    static int snapCardWidth(int px);
     bool systemDark() const { return m_systemTheme.dark(); }
     QString sidebarFacet() const { return m_sidebarFacet; }
     void setSidebarFacet(const QString &key);
@@ -555,8 +554,8 @@ private:
     QString m_sidebarFacet = QStringLiteral("albumArtist");
     SystemTheme m_systemTheme;
     QString m_themeMode = QStringLiteral("auto");
-    int m_thumbColumns = 4;
-    int m_coverColumns = 3;
+    int m_thumbWidth = kDefaultCardWidth;
+    int m_coverWidth = kDefaultCardWidth;
     bool m_musicPanel = true;
     double m_flickDeceleration = 4800; // px/s²: how quickly a flick glides to a stop
     double m_touchpadGain = 4.0;

@@ -6,6 +6,7 @@
 
 class MprisRoot;
 class MprisPlayer;
+class QWindow;
 
 // What is playing, offered to the desktop's media controls (media keys,
 // panel widgets, lock screen). QML binds the state in and acts on the
@@ -13,7 +14,10 @@ class MprisPlayer;
 //
 // Linux: MPRIS on the session bus, under org.mpris.MediaPlayer2.mvplayer
 // while a video is loaded (idle, the name is left to other players, so media
-// keys reach them). Other platforms need their own here (SMTC on Windows).
+// keys reach them). Windows: previous, play/pause and next under the
+// window's thumbnail on the taskbar (TaskbarButtons), also while a video is
+// loaded; the media flyout and media keys would need SMTC here. Other
+// platforms need their own.
 class MediaSession : public QObject
 {
     Q_OBJECT
@@ -50,6 +54,9 @@ public:
 
     bool hasTrack() const { return !m_track.isEmpty(); }
     double length() const; // seconds, 0 if unknown
+
+    // The window whose taskbar button carries the controls (Windows).
+    void attach(QWindow *window);
 
     // The position jumped (a seek, or a video started over) rather than
     // moving on with playback.
