@@ -130,6 +130,63 @@ private slots:
         QCOMPARE(m_db->pathsNotLookedUp().size(), 1);
         QCOMPARE(m_db->tracksInState({QStringLiteral("pending")}).size(), 3);
     }
+
+    // Where a track sits in its video is kept with the video and with each
+    // candidate of one under review, and maps a moment of the track onto
+    // the video: the track that plays from its file goes on as its video.
+    void audioSpans()
+    {
+        const QVector<AudioSpan> spans = {{2.5, 60.0, 2.5}, {75.0, 120.25, 7.25}};
+        QCOMPARE(audioSpansText(spans), QStringLiteral("2.500-60.000@2.500,75.000-120.250@7.250"));
+        QCOMPARE(audioSpansFromText(audioSpansText(spans)).size(), 2);
+        QCOMPARE(audioSpansFromText(QStringLiteral("0.000-30.000@-4.000")).first().lag, -4.0);
+        QVERIFY(audioSpansFromText(QStringLiteral("junk,1-2")).isEmpty());
+
+        VideoInfo v;
+        v.ytId = QStringLiteral("spans1");
+        v.path = QStringLiteral("A/One [spans1].mkv");
+        v.title = QStringLiteral("One");
+        v.audioSource = QStringLiteral("library");
+        v.reviewStart = 2.5;
+        v.reviewEnd = 120.25;
+        v.spans = spans;
+        const qint64 id = m_db->insertVideo(v);
+        QVERIFY(id > 0);
+        std::optional<VideoInfo> back = m_db->video(id);
+        QVERIFY(back.has_value());
+        QCOMPARE(audioSpansText(back->spans), audioSpansText(spans));
+        // Changed with the audio, and gone with it.
+        back->spans = {{0.0, 50.0, -1.0}};
+        m_db->updateVideoMedia(*back);
+        QCOMPARE(m_db->video(id)->spans.size(), 1);
+        QCOMPARE(m_db->video(id)->spans.first().lag, -1.0);
+        back->spans.clear();
+        m_db->updateVideoMedia(*back);
+        QVERIFY(m_db->video(id)->spans.isEmpty());
+
+        // A candidate's, for its own stream of the file.
+        const std::optional<TrackInfo> track = m_db->track(m_ids.value(QStringLiteral("A/Abbey/01.flac")));
+        QVERIFY(track.has_value());
+        m_db->addCandidate(id, *track, 1, 0.5, QStringLiteral("FLAC 16/44"), spans);
+        const QVector<Database::Candidate> cands = m_db->candidates(id);
+        QCOMPARE(cands.size(), 1);
+        QCOMPARE(audioSpansText(cands.first().spans), audioSpansText(spans));
+        QCOMPARE(m_db->candidateRows(id).first().spans.size(), 2);
+
+        // Track time onto video time: inside a span, by its lag; in a part
+        // of the song the video leaves out, the edge of the nearest span;
+        // past the end of what the video has, its last moment of the song.
+        QCOMPARE(videoTimeOfTrack(spans, 0, 0.0), 2.5);
+        QCOMPARE(videoTimeOfTrack(spans, 0, 30.0), 32.5);
+        QCOMPARE(videoTimeOfTrack(spans, 0, 100.0), 107.25);
+        QCOMPARE(videoTimeOfTrack(spans, 0, 60.0), 60.0);     // the gap begins: the song is cut at 57.5s of the track
+        QCOMPARE(videoTimeOfTrack(spans, 0, 67.0), 75.0);     // nearer the span after the cut
+        QCOMPARE(videoTimeOfTrack(spans, 0, 200.0), 120.25);
+        // Without spans: the track starts where the video's library audio does, or at 0.
+        QCOMPARE(videoTimeOfTrack({}, 2.5, 30.0), 32.5);
+        QCOMPARE(videoTimeOfTrack({}, 0, 30.0), 30.0);
+        QCOMPARE(videoTimeOfTrack({{0.0, 50.0, -4.0}}, 0, 1.0), 0.0); // the video opens 4s into the song
+    }
 };
 
 QTEST_GUILESS_MAIN(DatabaseTest)

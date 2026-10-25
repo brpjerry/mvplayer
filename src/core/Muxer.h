@@ -28,6 +28,9 @@ struct Plan {
 struct ReviewSpan {
     double start = 0;
     double end = 0;
+    // Each stretch, and where the track is in it (kept with the video, so
+    // that the player can go from the track into its video mid-song).
+    QVector<AudioSpan> spans;
 };
 
 struct Probe {
@@ -48,7 +51,8 @@ bool mux(const Plan &plan, const std::atomic<bool> *cancel, QString *audioDetail
 // file has and ahead of YouTube's. plan.outFile is the file (its picture and
 // its other audio are copied); plan.ytAudioStream says which of its audio
 // streams is YouTube's, and the new stream takes that place.
-bool addLibraryStream(const Plan &plan, const std::atomic<bool> *cancel, QString *audioDetail, QString *error);
+bool addLibraryStream(const Plan &plan, const std::atomic<bool> *cancel, QString *audioDetail, QString *error,
+                      ReviewSpan *reviewSpan = nullptr);
 
 // Once the user has accepted a video for one of its candidates: the file
 // keeps that track's audio (stream `libraryStream`, from 0; -1 where the

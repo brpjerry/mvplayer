@@ -254,6 +254,10 @@ public:
     // The audio track a video starts on, from 1: the first, or under review
     // that of its candidate on show.
     Q_INVOKABLE int firstAudioTrack(qint64 videoId) const;
+    // Where second `trackSeconds` of a track is in its video, in seconds of
+    // the video: the track that plays from its file goes on as the video
+    // from there.
+    Q_INVOKABLE double videoPosition(qint64 videoId, double trackSeconds) const;
     int orphanCount() const { return m_orphanCount; }
     QString mode() const { return m_mode; }
     void setMode(const QString &mode);

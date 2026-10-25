@@ -265,6 +265,9 @@ bool composeLibraryAudio(const Plan &plan, const std::atomic<bool> *cancel, Comp
         if (reviewSpan) {
             reviewSpan->start = double(segs.first().start) / rate;
             reviewSpan->end = double(segs.last().end) / rate;
+            reviewSpan->spans.clear();
+            for (const NativeSegment &s : std::as_const(segs))
+                reviewSpan->spans.append({double(s.start) / rate, double(s.end) / rate, double(s.lag) / rate});
         }
     }
     QFile::remove(trackRaw);
@@ -361,10 +364,11 @@ bool mux(const Plan &plan, const std::atomic<bool> *cancel, QString *audioDetail
     return finishFile(args, partFile, plan.outFile, opts, QStringLiteral("ffmpeg mux"), error);
 }
 
-bool addLibraryStream(const Plan &plan, const std::atomic<bool> *cancel, QString *audioDetail, QString *error)
+bool addLibraryStream(const Plan &plan, const std::atomic<bool> *cancel, QString *audioDetail, QString *error,
+                      ReviewSpan *reviewSpan)
 {
     Composed lib;
-    if (!composeLibraryAudio(plan, cancel, &lib, error, nullptr))
+    if (!composeLibraryAudio(plan, cancel, &lib, error, reviewSpan))
         return false;
     const QString partFile = plan.outFile + QStringLiteral(".part.mkv");
     ProcOptions opts;

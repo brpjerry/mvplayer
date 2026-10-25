@@ -131,9 +131,18 @@ Item {
     readonly property bool loading: pendingPath !== "" || awaitingFrame
     readonly property bool settling: motion.running || posterFade.running
 
-    function beginLoad(path) {
+    // `at` (seconds): the file goes on from there, as a track's video does
+    // from where the track was; it is opened at once, not after the layer
+    // has grown, and the sound that plays is not stopped first.
+    function beginLoad(path, at) {
         reveal.stop()
         posterShown = true
+        if (at !== undefined && at >= 0) {
+            pendingPath = ""
+            awaitingFrame = true
+            mpvItem.load(path, at)
+            return
+        }
         if (mpvItem.active)
             mpvItem.paused = true
         pendingPath = path

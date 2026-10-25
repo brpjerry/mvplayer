@@ -153,11 +153,15 @@ ApplicationWindow {
     // A track's music video, asked for from the music library: the video
     // library comes up on its card and it plays, as a click on the card
     // would. A grid narrowed to a tag or a search that leaves it out is
-    // widened first.
+    // widened first. Asked for the track that plays from its file, the
+    // video takes over at the same moment of the song: where the track is,
+    // on the video's timeline (App.videoPosition), without a stop first.
     function playVideo(id) {
         // The track it was asked from, to come back to if the video fails.
         const from = player.current && player.current.kind === "track"
                    ? { queue: player.queue, index: player.index, position: window.mpv.position } : null
+        const at = from && !player.videoUp && player.current.videoId === id && window.mpv.active
+                 ? App.videoPosition(id, window.mpv.livePosition()) : -1
         App.mode = "video"
         showSection("library")
         let row = revealVideo(id)
@@ -167,7 +171,7 @@ ApplicationWindow {
             row = revealVideo(id)
         }
         if (row >= 0) {
-            player.playRow(row)
+            player.playRow(row, at)
             player.fallback = from
         }
     }
@@ -326,7 +330,9 @@ ApplicationWindow {
         onShuffleChanged: if (current) armNext()
         onPlayModeChanged: if (current) armNext()
 
-        function load(i) {
+        // `at` (seconds, optional): a video opened there rather than at
+        // its start, going on from where its track was.
+        function load(i, at) {
             pendingNext = -1
             loads += 1
             index = i
@@ -359,7 +365,7 @@ ApplicationWindow {
             videoUp = false
             // (Under review it starts on the audio of its candidate on show.)
             mpv.firstAudioTrack = App.firstAudioTrack(current.videoId)
-            playerView.beginLoad(current.path)
+            playerView.beginLoad(current.path, at)
         }
 
         // Start playing an album of the music library from one of its
@@ -378,7 +384,8 @@ ApplicationWindow {
         }
 
         // Start playing the grid's `row`; the video grows out of its thumbnail.
-        function playRow(row) {
+        // `at` (seconds, optional): from there, as its track was (playVideo).
+        function playRow(row, at) {
             const list = App.videos.snapshot()
             if (row < 0 || row >= list.length)
                 return
@@ -399,7 +406,7 @@ ApplicationWindow {
             const decodeWidth = grid.thumbDecodeWidth(row)
             queue = list
             history = []
-            load(row)
+            load(row, at)
             // A video under review plays in its thumbnail, next to the
             // others and with its verdict buttons; a click on it enlarges it.
             // So do the orphans among themselves, and every video when that
@@ -930,6 +937,12 @@ ApplicationWindow {
             return "ok"
         }
         case "back": showGrid(); return "ok"
+        case "music-video": { // music-video: the panel's "Music video" button, for the playing track
+            if (!player.current || player.current.kind !== "track" || !(player.current.videoId > 0))
+                return "no video"
+            playVideo(player.current.videoId)
+            return "ok"
+        }
         case "expand": showPlayer(); return "ok"
         case "toggle": togglePause(); return "ok"
         case "next": player.next(false); return "ok"

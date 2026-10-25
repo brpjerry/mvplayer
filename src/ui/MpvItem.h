@@ -78,8 +78,14 @@ public:
     // Set before any item is created: discard audio entirely (test runs).
     static void setSilent(bool silent);
 
-    Q_INVOKABLE void load(const QString &path);
+    // `start` > 0: opened at that second of the file, so that the first
+    // sound out of it is from there (a track going on as its video).
+    Q_INVOKABLE void load(const QString &path, double start = -1);
     Q_INVOKABLE void stop();
+    // Where playback is this instant, asked of mpv, rather than as last
+    // reported (`position`, some milliseconds behind): for a file that
+    // takes over from this one at the same moment.
+    Q_INVOKABLE double livePosition() const;
     // The file to go on to when this one ends, in mpv's own playlist, so
     // that the audio runs on without a gap; fileStarted says when it has.
     // clearNext takes it back. A load() replaces both.
