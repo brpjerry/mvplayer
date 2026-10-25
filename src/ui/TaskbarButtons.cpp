@@ -169,16 +169,14 @@ bool TaskbarButtons::nativeEventFilter(const QByteArray &eventType, void *messag
         || !m_window->handle() || msg->hwnd != reinterpret_cast<HWND>(m_window->winId()))
         return false;
 
-    if (msg->message == m_buttonCreated) {
-        // The window shown again out of the tray, or Explorer restarted.
-        sync(true);
-        return false;
-    }
     if (recolour) {
         schedule();
         return false; // Qt follows it too
     }
-    if (m_session->hasTrack()) {
+    if (msg->message == m_buttonCreated) {
+        // The window shown again out of the tray, or Explorer restarted.
+        sync(true);
+    } else if (m_session->hasTrack()) {
         switch (LOWORD(msg->wParam)) {
         case Previous:
             if (m_session->canStep())
@@ -193,6 +191,10 @@ bool TaskbarButtons::nativeEventFilter(const QByteArray &eventType, void *messag
             break;
         }
     }
-    *result = 0;
+    // Posted messages, the taskbar's clicks among them, come here from the
+    // event loop before they are dispatched, and there is no result to set
+    // then. Taken here, they do not come round again from the window.
+    if (result)
+        *result = 0;
     return true;
 }
