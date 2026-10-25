@@ -131,36 +131,55 @@ Item {
     readonly property bool loading: pendingPath !== "" || awaitingFrame
     readonly property bool settling: motion.running || posterFade.running
 
-    // `at` (seconds): the file goes on from there, as a track's video does
-    // from where the track was; it is opened at once, not after the layer
-    // has grown, and the sound that plays is not stopped first.
+    // `at`: a track going on as its video. A function that gives the
+    // second of the video to open at, asked when the file is opened: the
+    // moment of the song by then. The sound is not stopped first: it fades
+    // out while the layer grows, and the file is opened once the fade has
+    // been heard (mpv has about a fifth of a second in the speaker's
+    // buffer, and a new file drops what is buffered). Its own sound fades
+    // in on its first frame.
+    property var pendingAt: null
     function beginLoad(path, at) {
         reveal.stop()
         posterShown = true
-        if (at !== undefined && at >= 0) {
-            pendingPath = ""
-            awaitingFrame = true
-            mpvItem.load(path, at)
-            return
+        fadeOut.stop()
+        if (at) {
+            pendingAt = at
+            fadeOut.start()
+        } else {
+            pendingAt = null
+            if (mpvItem.active)
+                mpvItem.paused = true
         }
-        if (mpvItem.active)
-            mpvItem.paused = true
         pendingPath = path
         Qt.callLater(flushLoad)
     }
     function flushLoad() {
-        if (pendingPath === "" || settling)
+        if (pendingPath === "" || settling || fadeOut.running)
             return
         const path = pendingPath
+        const at = pendingAt
         awaitingFrame = true
         pendingPath = ""
-        mpvItem.load(path)
+        pendingAt = null
+        mpvItem.load(path, at ? at() : -1)
     }
     function cancelLoad() {
         pendingPath = ""
+        pendingAt = null
         awaitingFrame = false
+        fadeOut.stop()
+        fadeIn.stop()
+        mpvItem.fade = 1
     }
     onSettlingChanged: flushLoad()
+    SequentialAnimation {
+        id: fadeOut
+        NumberAnimation { target: mpvItem; property: "fade"; to: 0; duration: 200 }
+        PauseAnimation { duration: 250 } // the fade through the buffer
+        onFinished: root.flushLoad()
+    }
+    NumberAnimation { id: fadeIn; target: mpvItem; property: "fade"; to: 1; duration: 200 }
 
     Timer {
         id: reveal
@@ -172,6 +191,10 @@ Item {
         function onFirstFrame() {
             root.awaitingFrame = false
             reveal.restart()
+            // Faded out for a change of file (or left part way by a load
+            // that cut one short): back up for the new one.
+            if (mpvItem.fade < 1)
+                fadeIn.restart()
         }
     }
 

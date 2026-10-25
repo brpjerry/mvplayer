@@ -487,9 +487,25 @@ void MpvItem::setPaused(bool paused)
 
 void MpvItem::setVolume(double v)
 {
+    m_wanted = qBound(0.0, v, 1.0);
+    applyVolume();
+}
+
+void MpvItem::setFade(double f)
+{
+    f = qBound(0.0, f, 1.0);
+    if (f == m_fade)
+        return;
+    m_fade = f;
+    emit fadeChanged();
+    applyVolume();
+}
+
+void MpvItem::applyVolume()
+{
     if (!m_core->mpv)
         return;
-    double pct = qBound(0.0, v, 1.0) * 100.0;
+    double pct = m_wanted * m_fade * 100.0;
     mpv_set_property_async(m_core->mpv, 0, "volume", MPV_FORMAT_DOUBLE, &pct);
 }
 

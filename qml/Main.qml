@@ -154,14 +154,15 @@ ApplicationWindow {
     // library comes up on its card and it plays, as a click on the card
     // would. A grid narrowed to a tag or a search that leaves it out is
     // widened first. Asked for the track that plays from its file, the
-    // video takes over at the same moment of the song: where the track is,
-    // on the video's timeline (App.videoPosition), without a stop first.
+    // video takes over at the same moment of the song: the track fades
+    // out, and the video opens where the song is by then, on the video's
+    // timeline (App.videoPosition), and fades in (PlayerView.beginLoad).
     function playVideo(id) {
         // The track it was asked from, to come back to if the video fails.
         const from = player.current && player.current.kind === "track"
                    ? { queue: player.queue, index: player.index, position: window.mpv.position } : null
         const at = from && !player.videoUp && player.current.videoId === id && window.mpv.active
-                 ? App.videoPosition(id, window.mpv.livePosition()) : -1
+                 ? () => App.videoPosition(id, window.mpv.livePosition()) : null
         App.mode = "video"
         showSection("library")
         let row = revealVideo(id)
@@ -330,8 +331,8 @@ ApplicationWindow {
         onShuffleChanged: if (current) armNext()
         onPlayModeChanged: if (current) armNext()
 
-        // `at` (seconds, optional): a video opened there rather than at
-        // its start, going on from where its track was.
+        // `at` (optional): a video opened where its track was rather than
+        // at its start; a function giving the second (PlayerView.beginLoad).
         function load(i, at) {
             pendingNext = -1
             loads += 1
@@ -384,7 +385,7 @@ ApplicationWindow {
         }
 
         // Start playing the grid's `row`; the video grows out of its thumbnail.
-        // `at` (seconds, optional): from there, as its track was (playVideo).
+        // `at` (optional): where its track was (playVideo, load).
         function playRow(row, at) {
             const list = App.videos.snapshot()
             if (row < 0 || row >= list.length)
@@ -1145,7 +1146,7 @@ ApplicationWindow {
                 thumbWidth: App.thumbWidth, coverWidth: App.coverWidth, gridColumns: grid.view.columns, albumColumns: albumGrid.view.columns,
                 originY: grid.view.originY, contentHeight: grid.view.contentHeight, albumOriginY: albumGrid.view.originY, albumContentHeight: albumGrid.view.contentHeight,
                 playing: player.current ? player.current.title : null, index: player.index,
-                position: mpv.position, duration: mpv.duration, paused: mpv.paused, active: mpv.active, muted: mpv.muted,
+                position: mpv.position, duration: mpv.duration, paused: mpv.paused, active: mpv.active, muted: mpv.muted, fade: mpv.fade,
                 hwdec: mpv.hwdec, videoSize: mpv.videoSize.width + "x" + mpv.videoSize.height,
                 audioTrack: mpv.audioTrack, audioTracks: mpv.audioTracks.length, libraryHere: controlBar.libraryHere, librarySpans: controlBar.libSpans.length,
                 busy: App.busy, scanning: App.scanning, status: App.statusText, counts: App.trackCounts,
