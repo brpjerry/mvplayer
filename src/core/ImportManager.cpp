@@ -9,6 +9,7 @@
 
 #include "core/AudioAlign.h"
 #include "core/Matcher.h"
+#include "core/TagWriter.h"
 #include "core/Muxer.h"
 #include "core/Util.h"
 #include "core/YtDlp.h"
@@ -622,6 +623,57 @@ void ImportManager::rescan()
     m_scanPool.start([this, roots, lookup] {
         const LibraryScanner::Result r = LibraryScanner::scan(roots, lookup, *m_db, &m_cancel);
         QMetaObject::invokeMethod(this, [this, r] { onScanFinished(r); }, Qt::QueuedConnection);
+    });
+}
+
+void ImportManager::writeTags(const QVector<qint64> &trackIds, const QHash<QString, QString> &changes,
+                              const std::optional<TagWriter::Picture> &picture)
+{
+    m_writingTags = true;
+    emit activityChanged();
+    m_scanPool.start([this, trackIds, changes, picture] {
+        QVector<qint64> written;
+        QStringList failed;
+        QJsonArray paths;
+        for (qint64 id : trackIds) {
+            const std::optional<TrackInfo> t = m_db->track(id);
+            if (!t || t->absent)
+                continue;
+            QString error;
+            if (TagWriter::write(t->path, changes, picture, &error)) {
+                written << id;
+                paths.append(t->path);
+            } else {
+                failed << QStringLiteral("%1: %2").arg(QFileInfo(t->path).fileName(), error);
+            }
+        }
+        LibraryScanner::Result r;
+        if (!written.isEmpty())
+            r = LibraryScanner::refreshTracks(written, *m_db);
+        QJsonObject tags;
+        for (auto it = changes.constBegin(); it != changes.constEnd(); ++it)
+            tags.insert(it.key(), it.value());
+        appendLog({{QStringLiteral("event"), QStringLiteral("retag")},
+                   {QStringLiteral("tags"), tags},
+                   {QStringLiteral("picture"), picture ? QJsonValue(picture->mime) : QJsonValue()},
+                   {QStringLiteral("files"), paths},
+                   {QStringLiteral("failed"), QJsonArray::fromStringList(failed)},
+                   {QStringLiteral("videosChanged"), r.videosChanged.size()}});
+        QMetaObject::invokeMethod(this, [this, r, written, failed] {
+            m_writingTags = false;
+            if (m_started) {
+                for (qint64 id : r.videosChanged)
+                    emit videoChanged(id);
+                // A track without a video whose new tags are worth a search (A10).
+                for (const TrackInfo &t : m_db->pendingRecordings())
+                    enqueue(t.id);
+                emit libraryChanged();
+            }
+            emit tagsWritten(written.size(), failed);
+            emit activityChanged();
+            if (m_started)
+                pump();
+        }, Qt::QueuedConnection);
     });
 }
 

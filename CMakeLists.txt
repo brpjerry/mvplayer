@@ -25,6 +25,7 @@ qt_add_library(mvcore STATIC
     src/core/Util.h src/core/Util.cpp
     src/core/Database.h src/core/Database.cpp
     src/core/TagReader.h src/core/TagReader.cpp
+    src/core/TagWriter.h src/core/TagWriter.cpp
     src/core/Matcher.h src/core/Matcher.cpp
     src/core/YtDlp.h src/core/YtDlp.cpp
     src/core/AudioAlign.h src/core/AudioAlign.cpp
@@ -171,6 +172,7 @@ set(MV_QML_FILES
     qml/ReviewPanel.qml
     qml/ReplaceDialog.qml
     qml/ChannelDialog.qml
+    qml/TagEditor.qml
 )
 foreach(f ${MV_QML_FILES})
     get_filename_component(fname ${f} NAME)

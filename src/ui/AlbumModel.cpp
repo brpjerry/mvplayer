@@ -2,6 +2,7 @@
 
 #include "core/Util.h"
 
+#include <QFileInfo>
 #include <QSet>
 #include <QUrl>
 
@@ -54,7 +55,7 @@ QVariant AlbumModel::data(const QModelIndex &index, int role) const
     case DurationRole: return a.duration;
     case DurationTextRole: return formatDuration(a.duration);
     case NewestRole: return a.newest;
-    case CoverRole: return a.cover.isEmpty() ? QUrl() : QUrl::fromLocalFile(a.cover);
+    case CoverRole: return coverUrl(a);
     case FirstPathRole: return a.firstPath;
     }
     return {};
@@ -176,10 +177,29 @@ bool AlbumModel::update(const QVector<AlbumInfo> &albums)
 void AlbumModel::setCover(const QString &key, const QString &path)
 {
     const int row = m_rows.value(key, -1);
-    if (row < 0 || m_albums.at(row).cover == path)
+    if (row < 0)
+        return;
+    const qint64 stamp = coverStampOf(path);
+    if (m_albums.at(row).cover == path && m_albums.at(row).coverStamp == stamp)
         return;
     m_albums[row].cover = path;
+    m_albums[row].coverStamp = stamp;
     emit dataChanged(index(row, 0), index(row, 0), {CoverRole});
+}
+
+QUrl AlbumModel::coverUrl(const AlbumInfo &a)
+{
+    if (a.cover.isEmpty())
+        return {};
+    QUrl url = QUrl::fromLocalFile(a.cover);
+    if (a.coverStamp > 0)
+        url.setQuery(QStringLiteral("v=%1").arg(a.coverStamp));
+    return url;
+}
+
+qint64 AlbumModel::coverStampOf(const QString &path)
+{
+    return path.isEmpty() ? 0 : QFileInfo(path).lastModified().toMSecsSinceEpoch();
 }
 
 QVariantMap AlbumModel::toMap(int row) const

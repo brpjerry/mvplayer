@@ -8,6 +8,7 @@
 #include <QDateTime>
 #include <QDir>
 #include <QDirIterator>
+#include <QFileInfo>
 #include <QMultiHash>
 #include <QSet>
 #include <QThread>
@@ -98,6 +99,73 @@ QVector<AudioPrint::Print> printsOf(const QStringList &files, const std::atomic<
 
 constexpr int kPrintBatch = 16; // files fingerprinted between two saves
 
+// A known track whose file changed, moved or was retagged: `t` is the file
+// as it is now, `old` the track as the database has it. The track keeps its
+// video and import state (A10); new tags can turn a failed lookup into a hit,
+// or a title into one the rules skip.
+void carryOver(TrackInfo &t, const TrackInfo &old)
+{
+    t.id = old.id;
+    t.recording = old.recording;
+    t.videoId = old.videoId;
+    t.attempts = old.attempts;
+    t.lastAttempt = old.lastAttempt;
+    t.state = old.state;
+    t.message = old.message;
+    t.absent = false;
+    if (old.lookup == 2)
+        t.lookup = 2; // named by a re-import: stays looked up (H9)
+    // Its video was deleted while it was away: to be looked up again.
+    if (old.absent && t.state == QLatin1String("done") && t.videoId <= 0) {
+        t.state = QStringLiteral("pending");
+        t.message.clear();
+    }
+    const bool retagged = t.title != old.title || t.artist != old.artist
+        || t.albumArtist != old.albumArtist || t.album != old.album;
+    if (t.state != QLatin1String("done") && retagged) {
+        // New tags can turn a failed lookup into a hit.
+        QString why;
+        const bool nonMv = Matcher::isNonMvTrack(t, &why);
+        t.state = nonMv ? QStringLiteral("skipped") : QStringLiteral("pending");
+        t.message = nonMv ? why : QString();
+    }
+}
+
+// A video carries the tags of the best file it belongs to, among `tracks`
+// (every file of the video's that is in the music folders): the videos
+// whose tags changed with that.
+QVector<qint64> syncVideoTags(Database &db, const QList<TrackInfo> &tracks)
+{
+    QVector<qint64> changed;
+    QHash<qint64, TrackInfo> best;
+    for (const TrackInfo &t : tracks) {
+        if (t.state != QLatin1String("done") || t.videoId <= 0)
+            continue;
+        const auto b = best.find(t.videoId);
+        if (b == best.end())
+            best.insert(t.videoId, t);
+        else if (betterSource(t, *b))
+            *b = t;
+    }
+    for (const TrackInfo &t : std::as_const(best)) {
+        auto v = db.video(t.videoId);
+        if (!v || (v->title == t.title && v->artist == t.artist && v->albumArtist == t.albumArtist && v->album == t.album
+                   && v->genre == t.genre && v->year == t.year && v->trackNo == t.trackNo && v->tags == t.tags))
+            continue;
+        v->title = t.title;
+        v->artist = t.artist;
+        v->albumArtist = t.albumArtist;
+        v->album = t.album;
+        v->genre = t.genre;
+        v->year = t.year;
+        v->trackNo = t.trackNo;
+        v->tags = t.tags;
+        db.updateVideoTags(*v);
+        changed << v->id;
+    }
+    return changed;
+}
+
 Result scan(const QStringList &libraryRoots, const QStringList &lookupRoots, Database &db, const std::atomic<bool> *cancel)
 {
     Result res;
@@ -150,30 +218,7 @@ Result scan(const QStringList &libraryRoots, const QStringList &lookupRoots, Dat
     // A known track whose file changed or moved: it keeps its video and
     // import state, the tags are refreshed.
     const auto refresh = [&](TrackInfo &t, const TrackInfo &old) {
-        t.id = old.id;
-        t.recording = old.recording;
-        t.videoId = old.videoId;
-        t.attempts = old.attempts;
-        t.lastAttempt = old.lastAttempt;
-        t.state = old.state;
-        t.message = old.message;
-        t.absent = false;
-        if (old.lookup == 2)
-            t.lookup = 2; // named by a re-import: stays looked up (H9)
-        // Its video was deleted while it was away: to be looked up again.
-        if (old.absent && t.state == QLatin1String("done") && t.videoId <= 0) {
-            t.state = QStringLiteral("pending");
-            t.message.clear();
-        }
-        const bool retagged = t.title != old.title || t.artist != old.artist
-            || t.albumArtist != old.albumArtist || t.album != old.album;
-        if (t.state != QLatin1String("done") && retagged) {
-            // New tags can turn a failed lookup into a hit.
-            QString why;
-            const bool nonMv = Matcher::isNonMvTrack(t, &why);
-            t.state = nonMv ? QStringLiteral("skipped") : QStringLiteral("pending");
-            t.message = nonMv ? why : QString();
-        }
+        carryOver(t, old);
         if (save(t))
             ++res.changed;
     };
@@ -516,35 +561,42 @@ Result scan(const QStringList &libraryRoots, const QStringList &lookupRoots, Dat
         }
     }
 
-    // A video carries the tags of the best file it belongs to.
-    QHash<qint64, TrackInfo> best;
-    for (const TrackInfo &t : std::as_const(current)) {
-        if (t.state != QLatin1String("done") || t.videoId <= 0)
-            continue;
-        const auto b = best.find(t.videoId);
-        if (b == best.end())
-            best.insert(t.videoId, t);
-        else if (betterSource(t, *b))
-            *b = t;
-    }
-    for (const TrackInfo &t : std::as_const(best)) {
-        auto v = db.video(t.videoId);
-        if (!v || (v->title == t.title && v->artist == t.artist && v->albumArtist == t.albumArtist && v->album == t.album
-                   && v->genre == t.genre && v->year == t.year && v->trackNo == t.trackNo && v->tags == t.tags))
-            continue;
-        v->title = t.title;
-        v->artist = t.artist;
-        v->albumArtist = t.albumArtist;
-        v->album = t.album;
-        v->genre = t.genre;
-        v->year = t.year;
-        v->trackNo = t.trackNo;
-        v->tags = t.tags;
-        db.updateVideoTags(*v);
-        res.videosChanged << v->id;
-    }
+    res.videosChanged = syncVideoTags(db, current.values());
 
     res.directories = QStringList(dirs.begin(), dirs.end());
+    res.ok = true;
+    return res;
+}
+
+Result refreshTracks(const QVector<qint64> &trackIds, Database &db)
+{
+    Result res;
+    QSet<qint64> videos;
+    for (qint64 id : trackIds) {
+        const std::optional<TrackInfo> old = db.track(id);
+        if (!old || old->absent)
+            continue;
+        const QFileInfo fi(old->path);
+        TrackInfo t;
+        t.path = old->path;
+        t.mtime = fi.lastModified().toSecsSinceEpoch();
+        t.size = fi.size();
+        if (!fi.isFile() || !TagReader::read(t))
+            continue;
+        t.lookup = old->lookup; // whether it is looked up is the next scan's to settle (A12)
+        carryOver(t, *old);
+        if (!db.upsertTrack(t))
+            continue;
+        ++res.changed;
+        if (t.state == QLatin1String("done") && t.videoId > 0)
+            videos.insert(t.videoId);
+    }
+    // The video shows the tags of its best file, which may be another
+    // file of the recording than the one written.
+    QList<TrackInfo> holders;
+    for (qint64 videoId : std::as_const(videos))
+        holders << db.tracksForVideo(videoId);
+    res.videosChanged = syncVideoTags(db, holders);
     res.ok = true;
     return res;
 }

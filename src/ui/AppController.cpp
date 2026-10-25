@@ -8,6 +8,7 @@
 #ifdef MV_HAVE_DBUS
 #include <QDBusConnection>
 #include <QDBusConnectionInterface>
+#include <QDBusMessage>
 #endif
 
 #include "ui/AccentColor.h"
@@ -18,6 +19,7 @@
 #include <functional>
 
 #include "core/ArtistChannels.h"
+#include "core/TagWriter.h"
 #include "core/Util.h"
 #include "core/YtDlp.h"
 
@@ -27,7 +29,10 @@
 #include <QDir>
 #include <QLocale>
 #include <QRegularExpression>
+#include <QProcess>
 #include <QSet>
+#include <QImageReader>
+#include <QBuffer>
 #include <QSaveFile>
 #include <QFile>
 #include <QFileInfo>
@@ -409,6 +414,7 @@ void AppController::openLibrary()
         refreshCounts();
     });
     connect(m_manager.get(), &ImportManager::libraryChanged, this, [this] { m_albumTimer.start(); });
+    connect(m_manager.get(), &ImportManager::tagsWritten, this, &AppController::tagsWritten);
     connect(m_manager.get(), &ImportManager::videoAdded, this, [this] { m_albumTimer.start(); });
     connect(m_manager.get(), &ImportManager::videoRemoved, this, [this] { m_albumTimer.start(); });
     connect(m_manager.get(), &ImportManager::channelListsChanged, this, &AppController::channelListsChanged);
@@ -500,6 +506,7 @@ void AppController::reloadAlbums()
         for (const Database::AlbumSummary &s : m_db->albumSummaries()) {
             AlbumInfo a = AlbumInfo::from(s);
             a.cover = m_covers.lookup(a.key, a.firstPath, true);
+            a.coverStamp = AlbumModel::coverStampOf(a.cover);
             tracks += a.tracks;
             albums << a;
         }
@@ -528,7 +535,7 @@ QVariantList AppController::albumTracks(int row) const
     if (!m_db || row < 0 || row >= m_albums->rowCount())
         return out;
     const AlbumInfo &a = m_albumModel->at(m_albums->mapToSource(m_albums->index(row, 0)).row());
-    const QUrl cover = a.cover.isEmpty() ? QUrl() : QUrl::fromLocalFile(a.cover);
+    const QUrl cover = AlbumModel::coverUrl(a);
     for (const TrackInfo &t : m_db->tracksOfAlbum(a.albumArtist, a.album)) {
         QVariantMap m{
             {QStringLiteral("kind"), QStringLiteral("track")},
@@ -1245,6 +1252,151 @@ void AppController::rejectVideo(qint64 videoId)
     refreshCounts();
 }
 
+QVariantList AppController::albumTrackIds(const QVariantList &albums) const
+{
+    QVariantList out;
+    if (!m_db)
+        return out;
+    for (const QVariant &a : albums) {
+        const QVariantMap m = a.toMap();
+        for (const TrackInfo &t : m_db->tracksOfAlbum(m.value(QStringLiteral("albumArtist")).toString(), m.value(QStringLiteral("album")).toString()))
+            out << t.id;
+    }
+    return out;
+}
+
+QVariantList AppController::videoTrackIds(const QVariantList &videoIds) const
+{
+    QVariantList out;
+    if (!m_db)
+        return out;
+    for (const QVariant &id : videoIds) {
+        for (const TrackInfo &t : m_db->tracksForVideo(id.toLongLong())) {
+            if (!out.contains(t.id))
+                out << t.id;
+        }
+    }
+    return out;
+}
+
+QVariantMap AppController::tagEditorInfo(const QVariantList &trackIds) const
+{
+    QVariantMap info;
+    QVariantList tracks;
+    QSet<qint64> songs;
+    QHash<QString, QString> common;  // tag -> the one value every file has
+    QSet<QString> mixed;
+    bool first = true;
+    int artFiles = 0;
+    QString artPath, artKind;
+    if (m_db) {
+        for (const QVariant &id : trackIds) {
+            const std::optional<TrackInfo> t = m_db->track(id.toLongLong());
+            if (!t || t->absent)
+                continue;
+            if (const std::optional<TagWriter::Picture> pic = TagWriter::picture(t->path)) {
+                ++artFiles;
+                if (artPath.isEmpty()) {
+                    artPath = t->path;
+                    // "JPEG · 48 KB"
+                    QString kind = pic->mime.section(QLatin1Char('/'), -1).toUpper();
+                    if (kind == QLatin1String("JPG"))
+                        kind = QStringLiteral("JPEG");
+                    artKind = (kind.isEmpty() ? QString() : kind + QStringLiteral(" · ")) + QLocale().formattedDataSize(pic->data.size(), 0);
+                }
+            }
+            tracks << QVariantMap{
+                {QStringLiteral("trackId"), t->id},
+                {QStringLiteral("path"), t->path},
+                {QStringLiteral("title"), t->title},
+                {QStringLiteral("artist"), t->artist},
+                {QStringLiteral("album"), t->album},
+            };
+            songs.insert(Database::trackKey(*t));
+            for (const TagWriter::Field &f : TagWriter::fields()) {
+                const QString key = QLatin1String(f.key);
+                QString value = t->tags.value(key).toString();
+                // The other spelling of the album artist counts as the tag.
+                if (value.isEmpty() && key == QLatin1String("ALBUMARTIST"))
+                    value = t->tags.value(QStringLiteral("ALBUM ARTIST")).toString();
+                if (first)
+                    common.insert(key, value);
+                else if (common.value(key) != value)
+                    mixed.insert(key);
+            }
+            first = false;
+        }
+    }
+    QVariantList fields;
+    for (const TagWriter::Field &f : TagWriter::fields()) {
+        const QString key = QLatin1String(f.key);
+        fields << QVariantMap{
+            {QStringLiteral("key"), key},
+            {QStringLiteral("label"), QString::fromLatin1(f.label)},
+            {QStringLiteral("perTrack"), f.perTrack},
+            {QStringLiteral("value"), mixed.contains(key) ? QString() : common.value(key)},
+            {QStringLiteral("mixed"), mixed.contains(key)},
+        };
+    }
+    info.insert(QStringLiteral("files"), tracks.size());
+    info.insert(QStringLiteral("songs"), songs.size());
+    info.insert(QStringLiteral("tracks"), tracks);
+    info.insert(QStringLiteral("fields"), fields);
+    info.insert(QStringLiteral("artFiles"), artFiles);
+    info.insert(QStringLiteral("artPath"), artPath);
+    info.insert(QStringLiteral("artKind"), artKind);
+    info.insert(QStringLiteral("artStamp"), artPath.isEmpty() ? 0 : QFileInfo(artPath).lastModified().toSecsSinceEpoch());
+    return info;
+}
+
+QString AppController::writeTags(const QVariantList &trackIds, const QVariantMap &changes, const QUrl &pictureUrl)
+{
+    if (!m_manager)
+        return tr("No library is open.");
+    if (m_manager->writingTags())
+        return tr("Tags are still being written.");
+    QVector<qint64> ids;
+    for (const QVariant &id : trackIds)
+        ids << id.toLongLong();
+    QHash<QString, QString> tags;
+    for (auto it = changes.constBegin(); it != changes.constEnd(); ++it)
+        tags.insert(it.key().toUpper(), it.value().toString().trimmed());
+    std::optional<TagWriter::Picture> picture;
+    if (!pictureUrl.isEmpty()) {
+        // JPEG and PNG go in as they are; anything else is decoded and
+        // kept as PNG, which every tag format and player reads.
+        const QString file = urlToPath(pictureUrl);
+        QFile f(file);
+        if (!f.open(QIODevice::ReadOnly))
+            return tr("The picture cannot be read.");
+        TagWriter::Picture pic;
+        pic.data = f.readAll();
+        pic.onlyReplace = true;
+        QImageReader reader(file);
+        const QByteArray format = reader.format().toLower();
+        if (format == "jpeg" || format == "jpg") {
+            pic.mime = QStringLiteral("image/jpeg");
+        } else if (format == "png") {
+            pic.mime = QStringLiteral("image/png");
+        } else {
+            const QImage img = reader.read();
+            if (img.isNull())
+                return tr("The picture cannot be read: %1").arg(reader.errorString());
+            QBuffer buf(&pic.data);
+            pic.data.clear();
+            buf.open(QIODevice::WriteOnly);
+            img.save(&buf, "PNG");
+            pic.mime = QStringLiteral("image/png");
+        }
+        picture = pic;
+    }
+    if (ids.isEmpty() || (tags.isEmpty() && !picture))
+        return tr("Nothing to write.");
+    m_manager->writeTags(ids, tags, picture);
+    emit activityChanged();
+    return {};
+}
+
 void AppController::keepOrphan(qint64 videoId)
 {
     if (m_manager)
@@ -1854,6 +2006,44 @@ QVariantMap AppController::videoSources(qint64 videoId) const
         {QStringLiteral("videoLength"), v->duration > 0 ? formatDuration(v->duration) : QString()},
         {QStringLiteral("files"), files},
     };
+}
+
+bool AppController::openFileLocation(const QString &path) const
+{
+    if (path.isEmpty())
+        return false;
+    const QFileInfo fi(path);
+    const bool exists = fi.exists();
+    const QString dir = fi.absolutePath();
+#if defined(Q_OS_WIN)
+    if (exists) {
+        // explorer.exe /select,"<path>": the folder, with the file picked out.
+        // Its switch and the path are one argument, which Qt's quoting
+        // would split or wrap; the native form goes as it is.
+        QProcess p;
+        p.setProgram(QStringLiteral("explorer.exe"));
+        p.setNativeArguments(QStringLiteral("/select,\"%1\"").arg(QDir::toNativeSeparators(fi.absoluteFilePath())));
+        if (p.startDetached())
+            return true;
+    }
+#elif defined(MV_HAVE_DBUS)
+    if (exists && QDBusConnection::sessionBus().isConnected()) {
+        // The file manager's own "show these items", which every desktop's
+        // file manager serves (Nautilus, Dolphin, Thunar, Nemo…).
+        QDBusMessage call = QDBusMessage::createMethodCall(QStringLiteral("org.freedesktop.FileManager1"), QStringLiteral("/org/freedesktop/FileManager1"),
+                                                           QStringLiteral("org.freedesktop.FileManager1"), QStringLiteral("ShowItems"));
+        call << QStringList{QUrl::fromLocalFile(fi.absoluteFilePath()).toString()} << QString();
+        const QDBusMessage reply = QDBusConnection::sessionBus().call(call, QDBus::Block, 3000);
+        if (reply.type() != QDBusMessage::ErrorMessage)
+            return true;
+    }
+#elif defined(Q_OS_MACOS)
+    if (exists && QProcess::startDetached(QStringLiteral("open"), {QStringLiteral("-R"), fi.absoluteFilePath()}))
+        return true;
+#endif
+    if (!QDir(dir).exists())
+        return false;
+    return QDesktopServices::openUrl(QUrl::fromLocalFile(dir));
 }
 
 QString AppController::urlToPath(const QUrl &url) const

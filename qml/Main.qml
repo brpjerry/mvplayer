@@ -719,6 +719,7 @@ ApplicationWindow {
                     onApproved: (id) => window.approveVideo(id)
                     onRejected: (id) => window.rejectVideo(id)
                     onChannelRequested: (id, allow) => channelDialog.openFor(id, allow)
+                    onEditRequested: (ids, subject) => tagEditor.openFor(App.videoTrackIds(ids), ids.length > 1, subject)
                 }
 
                 AlbumGrid {
@@ -734,6 +735,8 @@ ApplicationWindow {
                     currentKey: player.current && player.current.kind === "track" ? player.current.albumKey : ""
                     currentPlaying: window.playingNow
                     onActivated: (row) => player.playAlbum(row, 0)
+                    // An album is a batch even by itself: its files share the fields shown.
+                    onEditRequested: (albums, subject) => tagEditor.openFor(App.albumTrackIds(albums), true, subject)
                 }
 
                 Welcome {
@@ -763,6 +766,7 @@ ApplicationWindow {
             onPlayRequested: (i) => player.load(i)
             onVideoRequested: (videoId) => window.playVideo(videoId)
             onCoverDoubleClicked: coverOverlay.show()
+            onEditRequested: (ids, subject) => tagEditor.openFor(ids, ids.length > 1, subject)
         }
 
         PlayerView {
@@ -843,6 +847,18 @@ ApplicationWindow {
 
     SettingsPanel { id: settings }
     ReplaceDialog { id: replaceDialog }
+    // The tags of a song, an album or a selection, written into the files.
+    // The selection that asked for it is let go once the tags are written.
+    TagEditor {
+        id: tagEditor
+        onClosed: if (saved) window.clearSelections()
+    }
+    function clearSelections() {
+        grid.clearSelection()
+        albumGrid.clearSelection()
+        nowPlaying.clearSelection()
+    }
+    readonly property bool anySelection: grid.selected.length > 0 || albumGrid.selected.length > 0 || nowPlaying.selected.length > 0
     ChannelDialog {
         id: channelDialog
         // A video that plays is let go of before its channel's videos change.
@@ -913,6 +929,8 @@ ApplicationWindow {
         onActivated: {
             if (coverOverlay.open)
                 coverOverlay.hide()
+            else if (window.anySelection)
+                window.clearSelections()
             else if (window.fullscreen)
                 window.setFullscreen(false)
             else if (window.view === "player")
@@ -1047,6 +1065,52 @@ ApplicationWindow {
         }
         case "reimport-path": return "" + App.reimportPath(arg)
         case "replace-dialog": replaceDialog.openFor(parseInt(arg)); return "ok" // replace-dialog <video id>
+        // The tag editor. select-album <row> / select-video <row> / select-queue <index>: Ctrl+click on a card or row;
+        // video-menu <row> / queue-menu <index>: the right-click menu; tag-editor albums <row,row…> | videos <id,id…> | tracks <id,id…>
+        // opens it as the menu would; tag-set <KEY> <value> types into a field (no value: empties it), tag-revert <KEY>,
+        // tag-save, tag-cancel, tag-state (as it stands), selection (what is picked).
+        case "select-album": albumGrid.toggleSelected(parseInt(arg)); return "" + albumGrid.selected.length
+        case "select-video": grid.toggleSelected(parseInt(arg)); return "" + grid.selected.length
+        case "select-queue": nowPlaying.toggleSelected(parseInt(arg)); return "" + nowPlaying.selected.length
+        case "clear-selection": window.clearSelections(); return "ok"
+        case "selection": return JSON.stringify({ albums: albumGrid.selected.map(a => a.key), videos: grid.selected, queue: nowPlaying.selected })
+        case "video-menu": grid.openMenu(parseInt(arg), null); return "ok"
+        case "queue-menu": nowPlaying.openMenu(parseInt(arg), null); return "ok"
+        // A click on an entry of the open menu: album-menu-pick play|lookup|reimport|edit, video-menu-pick, queue-menu-pick
+        case "album-menu-pick": albumGrid.pickMenu(arg); return "ok"
+        case "video-menu-pick": grid.pickMenu(); return "ok"
+        case "queue-menu-pick": nowPlaying.pickMenu(); return "ok"
+        case "tag-editor": {
+            const sp2 = arg.indexOf(" ")
+            const what = sp2 < 0 ? arg : arg.slice(0, sp2)
+            const list = sp2 < 0 ? [] : arg.slice(sp2 + 1).split(",").map(x => parseInt(x))
+            if (what === "albums") {
+                const albums = list.map(row => { const a = App.albums.get(row); return { key: a.key, albumArtist: a.albumArtist, album: a.album } })
+                tagEditor.openFor(App.albumTrackIds(albums), true, albumGrid.subjectOf(albums))
+            } else if (what === "videos") {
+                tagEditor.openFor(App.videoTrackIds(list), list.length > 1, list.length > 1 ? list.length + " songs" : (App.videos.get(App.videos.rowOfVideo(list[0])).title || ""))
+            } else if (what === "tracks") {
+                tagEditor.openFor(list, list.length > 1, list.length > 1 ? list.length + " songs" : "")
+            } else {
+                return "albums | videos | tracks"
+            }
+            return "ok"
+        }
+        case "tag-set": {
+            const sp2 = arg.indexOf(" ")
+            tagEditor.set(sp2 < 0 ? arg : arg.slice(0, sp2), sp2 < 0 ? "" : arg.slice(sp2 + 1))
+            return "ok"
+        }
+        case "tag-revert": tagEditor.revert(arg); return "ok"
+        case "tag-art": tagEditor.art = arg ? App.pathToUrl(arg) : ""; return "ok" // tag-art [image file]: the picture in place of the embedded one (none: as it is)
+        case "tag-save": tagEditor.save(); return tagEditor.writing ? "writing" : "nothing to write"
+        case "tag-cancel": tagEditor.close(); return "ok"
+        case "tag-state": return JSON.stringify({ opened: tagEditor.opened, batch: tagEditor.batch, subject: tagEditor.subject,
+            files: tagEditor.files, songs: tagEditor.songs, writing: tagEditor.writing, failed: tagEditor.failed, edits: tagEditor.edits,
+            artFiles: tagEditor.artFiles, art: "" + tagEditor.art,
+            fields: tagEditor.fields.map(f => ({ key: f.key, label: f.label, value: f.value, mixed: f.mixed })) })
+        case "grab-window": window.contentItem.grabToImage(r => r.saveToFile(arg)); return "ok" // grab-window <file>: the window with its popups
+        case "open-location": return App.openFileLocation(arg) ? "ok" : "nothing to open" // open-location <file>: as the menus' "Open file location"
         case "replace-search": return App.replaceSearch(parseInt(arg)) ? "ok" : "busy"
         case "replace-check": { // replace-check <video id> <link or id>
             const s = arg.indexOf(" ")
@@ -1156,7 +1220,9 @@ ApplicationWindow {
                 cookiesStatus: App.cookiesStatus, checkingQuality: App.checkingQuality, reviewCount: App.reviewCount,
                 importPaused: App.importPaused, pauseKind: App.pauseKind, accountOnBotCheck: App.accountOnBotCheck,
                 ignoreSmallChannels: App.ignoreSmallChannels, minSubscribers: App.minSubscribers,
-                channelDialog: channelDialog.opened,
+                channelDialog: channelDialog.opened, tagEditor: tagEditor.opened, writingTags: App.writingTags,
+                selectedAlbums: albumGrid.selected.length, selectedVideos: grid.selected.length, selectedQueue: nowPlaying.selected.length,
+                videoMenu: grid.menuOpen, queueMenu: nowPlaying.menuOpen,
                 facet: App.videos.facetType, facetValue: App.videos.facetValue, section: App.videos.section,
                 sortMode: App.videos.sortMode, sortDescending: App.videos.sortDescending,
                 orphanCount: App.orphanCount, reviewLabel: controlBar.reviewLabel, trackLength: controlBar.trackLength,

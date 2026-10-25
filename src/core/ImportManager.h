@@ -3,6 +3,7 @@
 #include "core/AudioAlign.h"
 #include "core/Database.h"
 #include "core/LibraryScanner.h"
+#include "core/TagWriter.h"
 
 #include <QDateTime>
 #include <QFileSystemWatcher>
@@ -84,6 +85,17 @@ public:
     void stop(); // cancels running work and waits for it
     void rescan();
     void retryUnmatched();
+    // The tag editor: writes `changes` to the files of these tracks
+    // (TagWriter; an empty value removes the tag), then takes the new tags
+    // into the library as a scan would (LibraryScanner::refreshTracks): a
+    // track keeps its video, which shows the new tags, and one without a
+    // video is looked up under them (A10). Runs on the scan thread, after
+    // any scan under way; tagsWritten says how it went.
+    // With `picture`, it goes into each file as its front cover (in place
+    // of the one it has, where Picture::onlyReplace).
+    void writeTags(const QVector<qint64> &trackIds, const QHash<QString, QString> &changes,
+                   const std::optional<TagWriter::Picture> &picture = std::nullopt);
+    bool writingTags() const { return m_writingTags; }
     // Looks these tracks up again as if for the first time, the video each
     // has judged by today's rules as one candidate among the search results:
     // kept where it still fits outright (and the download skipped), sent to
@@ -224,6 +236,9 @@ signals:
     void activityChanged();
     // The music library was read: tracks came, went or changed.
     void libraryChanged();
+    // writeTags is done: how many files took the tags, and for each that
+    // did not, its name and why.
+    void tagsWritten(int written, const QStringList &failed);
     void idle();
     void undoChanged();
     // Judge mode: a lookup the judge settled by itself (W1, W3), or left
@@ -367,6 +382,7 @@ private:
     std::atomic<int> m_upgradeTotal{0};
     bool m_rescanWanted = false;
     bool m_started = false;
+    std::atomic<bool> m_writingTags{false};
 
     QSet<QString> m_claimed; // YouTube ids being imported right now (guarded by m_mutex)
 

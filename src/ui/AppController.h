@@ -153,6 +153,8 @@ class AppController : public QObject
     Q_PROPERTY(int judgeLeft READ judgeLeft NOTIFY judgeChanged)
     Q_PROPERTY(int adviceLeft READ adviceLeft NOTIFY adviceQueueChanged)
 
+    // The tag editor is writing to the music files (ImportManager::writeTags).
+    Q_PROPERTY(bool writingTags READ writingTags NOTIFY activityChanged)
     // Replacing a video by hand: whether a search, check or replacement
     // runs, what it is doing, and for which video.
     Q_PROPERTY(bool replacing READ replacing NOTIFY replaceChanged)
@@ -278,6 +280,24 @@ public:
     Q_INVOKABLE int lookupAlbum(const QString &albumArtist, const QString &album);
     Q_INVOKABLE void removeLookupAlbum(const QString &albumArtist, const QString &album);
     Q_INVOKABLE int reimportAlbum(const QString &albumArtist, const QString &album);
+    // The tag editor (qml/TagEditor.qml). What it is opened for, as track
+    // (file) ids: the files of albums, each {albumArtist, album}; the files
+    // that have videos; tracks a right click named. tagEditorInfo is what
+    // it shows for them: {files: n, songs: n (distinct recordings), tracks:
+    // [{trackId, path, title, artist, album}], fields: [{key, label,
+    // perTrack, value, mixed}], artFiles: n (files with a picture embedded),
+    // artPath (the first of them), artStamp}, value being what every file
+    // has under the tag, or empty with mixed set where they differ.
+    // writeTags puts the changed fields ({KEY: value}; empty removes the
+    // tag) into every file, and the image at `picture` (if any) in place of
+    // the embedded picture of each file that has one; the library takes
+    // them at once and tagsWritten says how it went. It answers with what
+    // is wrong (another write runs, the picture cannot be read), or nothing.
+    Q_INVOKABLE QVariantList albumTrackIds(const QVariantList &albums) const;
+    Q_INVOKABLE QVariantList videoTrackIds(const QVariantList &videoIds) const;
+    Q_INVOKABLE QVariantMap tagEditorInfo(const QVariantList &trackIds) const;
+    Q_INVOKABLE QString writeTags(const QVariantList &trackIds, const QVariantMap &changes, const QUrl &picture = QUrl());
+    bool writingTags() const { return m_manager && m_manager->writingTags(); }
     Q_INVOKABLE void keepOrphan(qint64 videoId);
     // False while the music folders are being read.
     Q_INVOKABLE bool deleteOrphan(qint64 videoId);
@@ -463,6 +483,11 @@ public:
     Q_INVOKABLE QVariantMap videoSources(qint64 videoId) const;
     // How long the first of those files plays ("4:59"); empty with none.
     Q_INVOKABLE QString trackLength(qint64 videoId) const;
+    // Shows a file in the desktop's file manager (its folder, with the file
+    // picked out where the file manager can): Explorer on Windows, the
+    // file manager that serves org.freedesktop.FileManager1 on Linux, else
+    // whatever opens folders. False when nothing could be started.
+    Q_INVOKABLE bool openFileLocation(const QString &path) const;
     Q_INVOKABLE QString urlToPath(const QUrl &url) const;
     Q_INVOKABLE QUrl pathToUrl(const QString &path) const;
     Q_INVOKABLE QString displayPath(const QString &path) const;
@@ -492,6 +517,7 @@ signals:
     void appearanceChanged();
     void systemDarkChanged();
     void videoImported(const QVariantMap &video);
+    void tagsWritten(int written, const QStringList &failed);
     void replaceChanged();
     // Up to three uploads that are the track by ear, or why there are none.
     void replaceOptionsReady(qint64 videoId, const QVariantList &options, const QString &error);

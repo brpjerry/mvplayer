@@ -5,7 +5,8 @@ matching video library: it finds each track's music video on YouTube, checks by
 ear that it really is that recording, downloads it at the best quality on
 offer, and muxes in your own audio where it is better than YouTube's.
 
-The audio library (one or more folders) is only ever read. Videos go to a
+The audio library (one or more folders) is only ever read, except for the
+tags you edit in it yourself (see "Editing tags"). Videos go to a
 single separate folder (`~/Videos/MVs` by default; `Videos\MVs` in your user
 folder on Windows).
 
@@ -465,6 +466,8 @@ Everything the importer decides is recorded in
 - `outdated-option`: at a re-import, a track no longer a candidate of a
   video under review that today's rules rule out for it by its length
   (under half the track, say) or as one from a small channel.
+- `retag`: tags written into music files by the tag editor (or `mvplayer-import
+  tags`): which tags, which files, and the files that did not take them.
 - `untracked-kept` / `untracked-deleted`: a video whose tracks are gone kept,
   or deleted (one at a time, or all of them from Settings).
 - `paused` / `resumed`: the request circuit breaker.
@@ -544,6 +547,10 @@ command.
 ./build/mvplayer-import align track.flac video.mkv       # show the alignment
 ./build/mvplayer-import mux track.flac video.mkv out.mkv # audio replacement only
 ./build/mvplayer-import check-video video.mkv            # still image or real video?
+./build/mvplayer-import tags track.flac                  # a music file's tags
+./build/mvplayer-import tags track.flac TITLE="…" GENRE= # written into the file (an empty value removes the tag;
+                                                         # PICTURE=cover.jpg embeds the picture); with --mv-dir the
+                                                         # library takes them at once
 ```
 
 ## The judge
@@ -734,6 +741,28 @@ the words is tried against what the judge once saw.
   (with YouTube Premium), the channels you allowed and denied, and the
   judge. Settings → Judge offers Claude API keys and ChatGPT account sign-in
   for advice on review cards or judging lookups, as described above.
+- **Editing tags.** A right click on an album, on a video, or on a track of
+  the queue offers **Edit tags** (and **Open file location**, which shows
+  the file in the file manager: an album's first track, a video's file, a
+  queue track's file). The tags are written into the music files
+  themselves (the one thing the app changes in the music library).
+  One song gets every tag: title, artist, album artist, album, track and
+  disc number, date, genre, composer, comment. An album, or several albums
+  or songs picked with **Ctrl+click** (a tick marks each; Escape or a plain
+  click lets them go), gets a batch edit: only the tags an album's files
+  share are offered, so no title and no track number. A field whose files
+  differ says "Mixed"; a field left as it is stays as each file has it, one
+  you change goes into every file, and one you empty is taken out of them.
+  Where the files carry a picture, a **Cover art** row shows it and
+  **Replace…** puts another in its place, in every file that has one (a
+  file without one is left alone, and the row is not shown when none has
+  one). The library takes the new tags at once: an album retitled is a new card,
+  a track that has its video keeps it and the video is shown under the new
+  tags (nothing happens to the video's file, which keeps its name and
+  place), and a track without a video whose title, artist or album changed
+  is looked up again (`docs/import-rules.html`, A10). The import log
+  records a `retag` event. Headless: `mvplayer-import tags <file>
+  KEY=value … PICTURE=<image>`.
 - The right-hand transport button says what follows the album that plays
   (in the music library) or the video (in the video library): **Autoplay**
   goes on to the next album in the grid's order, or the next video;
@@ -768,6 +797,7 @@ the words is tried against what the judge once saw.
 | Ctrl+F, / | Search |
 | Ctrl+, | Settings |
 | F12 | Frame rate counter |
+| Ctrl+click | Pick albums, videos or queue tracks for a batch edit of their tags (right-click → Edit tags) |
 
 ## Options
 
