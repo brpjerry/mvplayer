@@ -1,4 +1,5 @@
 import QtQuick
+import QtQuick.Controls.Basic
 import MvPlayer.Core
 
 // Thumbnail grid of the (filtered) library.
@@ -22,9 +23,42 @@ Item {
     signal rejected(var videoId)
     // Allow (true) or deny the channel of this video under review.
     signal channelRequested(var videoId, bool allow)
+    // Edit the tags of these videos' tracks (one song, or a batch).
+    signal editRequested(var videoIds, string subject)
 
     readonly property alias view: grid
     readonly property alias wheel: wheel
+    readonly property bool menuOpen: menu.opened
+
+    // Videos picked with Ctrl+click, by id: a right click on one of them
+    // edits the tags of all of their tracks. A plain click, or Escape, lets
+    // them go. Only a library video has a track to edit: one under review
+    // or an orphan is not picked.
+    property var selected: []
+    function isSelected(videoId) { return selected.indexOf(videoId) >= 0 }
+    function toggleSelected(row) {
+        const v = App.videos.get(row)
+        if (!v || v.review || v.orphan)
+            return
+        selected = isSelected(v.videoId) ? selected.filter(id => id !== v.videoId) : selected.concat([v.videoId])
+    }
+    function clearSelection() { selected = [] }
+
+    // A right click on a card: edit the tags of its track, or of the tracks
+    // of every video selected where it is one of them.
+    function openMenu(row, item) {
+        const v = App.videos.get(row)
+        if (!v || v.videoId === undefined)
+            return
+        const p = item ? item.mapToItem(root, item.width / 2 - 20, item.height / 2 - 40) : Qt.point(root.width / 2 - 130, 60)
+        menu.video = v
+        menu.editIds = !v.review && !v.orphan && isSelected(v.videoId) && selected.length > 1 ? selected : [v.videoId]
+        menu.x = Math.max(8, Math.min(p.x, root.width - menu.width - 8))
+        menu.y = Math.max(8, Math.min(p.y, root.height - menu.height - 8))
+        menu.open()
+    }
+    // The open menu's entry, as a click on it (tests).
+    function pickMenu() { if (menu.opened && menu.canEdit) menu.pick() }
 
     // After a verdict the cards close up and the next card's button lands
     // under the pointer: a second click would be a second verdict, so the
@@ -205,7 +239,10 @@ Item {
             orphanView: App.videos.section === "orphans"
             judgeOn: App.judgeMode !== "off"
             canDelete: !App.scanning
-            onActivated: root.activated(index)
+            selected: root.isSelected(videoId)
+            onActivated: { root.clearSelection(); root.activated(index) }
+            onMenuRequested: root.openMenu(index, card)
+            onToggleRequested: root.toggleSelected(index)
             verdictsEnabled: !root.verdictCooldown
             onApproved: { root.verdictGiven(); root.approved(videoId) }
             onRejected: { root.verdictGiven(); root.rejected(videoId) }
@@ -253,6 +290,143 @@ Item {
             touchpadGain: App.touchpadGain
             wheelStep: App.wheelStep
             deceleration: App.flickDeceleration
+        }
+    }
+
+    Popup {
+        id: menu
+        property var video: ({})
+        property var editIds: []
+        readonly property bool canEdit: !(video.review || video.orphan)
+        function pick() {
+            const ids = editIds
+            const subject = ids.length > 1 ? ids.length + " songs" : (video.title || "")
+            close()
+            root.editRequested(ids, subject)
+        }
+        width: 268
+        padding: 6
+        // Any press outside closes it and goes no further: nothing under
+        // it is activated until it is gone.
+        modal: true
+        dim: false
+        focus: true // Escape closes it only while it has the focus
+        closePolicy: Popup.CloseOnEscape | Popup.CloseOnPressOutside
+        transformOrigin: Popup.TopLeft
+        enter: Transition {
+            ParallelAnimation {
+                NumberAnimation { property: "opacity"; from: 0; to: 1; duration: Theme.normal }
+                NumberAnimation { property: "scale"; from: 0.95; to: 1; duration: Theme.slow; easing.type: Easing.BezierSpline; easing.bezierCurve: Theme.emphasized }
+            }
+        }
+        exit: Transition { NumberAnimation { property: "opacity"; to: 0; duration: Theme.fast } }
+        background: Rectangle {
+            radius: Theme.radius
+            color: Theme.raised
+            border.width: 1
+            border.color: Theme.line
+        }
+        contentItem: Column {
+            Item {
+                width: menu.availableWidth
+                height: 34
+                enabled: menu.canEdit
+                opacity: enabled ? 1 : 0.4
+                Rectangle {
+                    anchors.fill: parent
+                    radius: Theme.radiusSmall
+                    color: Theme.hover
+                    opacity: editMouse.containsMouse ? 1 : 0
+                    Behavior on opacity { NumberAnimation { duration: Theme.fast } }
+                }
+                Icon {
+                    x: 10
+                    anchors.verticalCenter: parent.verticalCenter
+                    path: Icons.edit
+                    size: 16
+                    color: Theme.textDim
+                }
+                Text {
+                    x: 34
+                    width: parent.width - 44
+                    anchors.verticalCenter: parent.verticalCenter
+                    text: menu.editIds.length > 1 ? "Edit tags of " + menu.editIds.length + " songs" : "Edit tags"
+                    color: Theme.text
+                    font.pixelSize: 13
+                    elide: Text.ElideRight
+                }
+                MouseArea {
+                    id: editMouse
+                    anchors.fill: parent
+                    hoverEnabled: true
+                    cursorShape: Qt.PointingHandCursor
+                    onClicked: menu.pick()
+                }
+            }
+            Text {
+                width: menu.availableWidth
+                leftPadding: 10
+                rightPadding: 10
+                topPadding: 2
+                bottomPadding: 8
+                text: !menu.canEdit ? (menu.video.review ? "A video under review has no track of its own yet: accept it first."
+                                                         : "No track in your music folders has this video.")
+                    : menu.editIds.length > 1 ? "The tags their music files share. Titles and track numbers are each file's own."
+                    : "The tags of its music file, written into the file. The video keeps its file and is shown under the new tags."
+                color: Theme.textFaint
+                font.pixelSize: 11
+                wrapMode: Text.WordWrap
+            }
+            // The video's file, in the file manager
+            Item {
+                width: menu.availableWidth
+                height: 34
+                Rectangle {
+                    anchors.fill: parent
+                    radius: Theme.radiusSmall
+                    color: Theme.hover
+                    opacity: locationMouse.containsMouse ? 1 : 0
+                    Behavior on opacity { NumberAnimation { duration: Theme.fast } }
+                }
+                Icon {
+                    x: 10
+                    anchors.verticalCenter: parent.verticalCenter
+                    path: Icons.folder
+                    size: 16
+                    color: Theme.textDim
+                }
+                Text {
+                    x: 34
+                    width: parent.width - 44
+                    anchors.verticalCenter: parent.verticalCenter
+                    text: "Open file location"
+                    color: Theme.text
+                    font.pixelSize: 13
+                    elide: Text.ElideRight
+                }
+                MouseArea {
+                    id: locationMouse
+                    anchors.fill: parent
+                    hoverEnabled: true
+                    cursorShape: Qt.PointingHandCursor
+                    onClicked: {
+                        const path = menu.video.path
+                        menu.close()
+                        App.openFileLocation(path)
+                    }
+                }
+            }
+            Text {
+                width: menu.availableWidth
+                leftPadding: 10
+                rightPadding: 10
+                topPadding: 2
+                bottomPadding: 8
+                text: "The video's file, in the file manager."
+                color: Theme.textFaint
+                font.pixelSize: 11
+                wrapMode: Text.WordWrap
+            }
         }
     }
 

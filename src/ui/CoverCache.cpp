@@ -133,7 +133,11 @@ QImage CoverCache::extract(const QString &trackPath)
         if (!img.isNull())
             return img;
     }
+    return extractEmbedded(trackPath);
+}
 
+QImage CoverCache::extractEmbedded(const QString &trackPath)
+{
     // The picture in the file's tags, the front cover where it says which.
 #ifdef Q_OS_WIN
     const std::wstring name = QDir::toNativeSeparators(trackPath).toStdWString();

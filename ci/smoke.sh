@@ -1623,6 +1623,24 @@ rm -f "$WORK/judge-answers.json.asked"
 OUT=$(MVPLAYER_YTDLP="$SITE" MVPLAYER_CLAUDE_API="http://127.0.0.1:$JUDGE_PORT" timeout 120 "$BUILD/mvplayer-import" --allow-still-images --music-dir "$WORK/lib5" --mv-dir "$WORK/mvlib-j8" --jobs 1 2>&1)
 [[ ! -e "$WORK/judge-answers.json.asked" ]]
 
+echo "== tags written into a file"
+# The tag editor's writer, headless: tags go into the file and read back,
+# an empty value takes a tag out, and with --mv-dir the library's row takes
+# them at once; a track without a video that has a new title is looked up
+# again under it (A10).
+mkdir -p "$WORK/libt/T"
+ffmpeg -v error -y -f lavfi -i "$(song 247 29)" -metadata title="Before" -metadata artist=Tee -metadata genre=Rock "$WORK/libt/T/t.flac"
+OUT=$("$BUILD/mvplayer-import" tags "$WORK/libt/T/t.flac" TITLE="After" ALBUM="An Album" GENRE= 2>/dev/null)
+echo "$OUT" | grep -E "^(TITLE|ALBUM|GENRE|ARTIST)="
+[[ "$OUT" == *"TITLE=After"* && "$OUT" == *"ALBUM=An Album"* && "$OUT" == *"ARTIST=Tee"* && "$OUT" != *"GENRE="* ]]
+! "$BUILD/mvplayer-import" tags "$WORK/libt/T/t.flac" nonsense >/dev/null 2>&1
+MVPLAYER_YTDLP="$FAKE" MVPLAYER_PAUSE_SECS=1 timeout 60 "$BUILD/mvplayer-import" --music-dir "$WORK/libt" --mv-dir "$WORK/mvlib-t" >/dev/null 2>&1
+[[ "$(python3 -c "import sqlite3, sys; print(sqlite3.connect(sys.argv[1]).execute('SELECT title, state FROM tracks').fetchall())" "$WORK/mvlib-t/.mvplayer/library.db")" == "[('After', 'not_found')]" ]]
+OUT=$("$BUILD/mvplayer-import" tags "$WORK/libt/T/t.flac" TITLE="Later" --mv-dir "$WORK/mvlib-t" 2>/dev/null)
+echo "$OUT" | grep -E "^library:"
+[[ "$OUT" == *"library: updated"* ]]
+[[ "$(python3 -c "import sqlite3, sys; print(sqlite3.connect(sys.argv[1]).execute('SELECT title, state FROM tracks').fetchall())" "$WORK/mvlib-t/.mvplayer/library.db")" == "[('Later', 'pending')]" ]]
+
 echo "== an album cover from a file's tags"
 # CoverCache reads the picture embedded in a music file (the unit test skips
 # this without a file to read; ffmpeg makes one here).
@@ -1632,6 +1650,15 @@ MVPLAYER_COVER_FILE="$WORK/art.flac" "$BUILD/mvplayer-covers-test$EXE" embedded 
 grep -E "^(PASS|FAIL|SKIP) .*embedded" "$TEST_LOG"
 if [[ "$TEST_RESULT" -ne 0 ]]; then cat "$TEST_LOG"; exit "$TEST_RESULT"; fi
 grep -q "PASS   : CoverCacheTest::embedded()" "$TEST_LOG"
+# The tag editor's cover art: the embedded picture read back, and another
+# put in its place (a file without one gets none unless asked).
+OUT=$("$BUILD/mvplayer-import" tags "$WORK/art.flac" 2>/dev/null)
+[[ "$OUT" == *"PICTURE=image/png"* ]]
+ffmpeg -v error -y -f lavfi -i "color=c=blue:s=320x320:d=1" -frames:v 1 "$WORK/cover2.jpg"
+OUT=$("$BUILD/mvplayer-import" tags "$WORK/art.flac" PICTURE="$WORK/cover2.jpg" 2>/dev/null)
+echo "$OUT" | grep "^PICTURE="
+[[ "$OUT" == *"PICTURE=image/jpeg, $(stat -c %s "$WORK/cover2.jpg") bytes"* ]]
+[[ "$("$BUILD/mvplayer-import" tags "$WORK/libt/T/t.flac" 2>/dev/null)" != *"PICTURE="* ]]
 
 echo "== binaries start"
 "$BUILD/mvplayer-import" --help >/dev/null

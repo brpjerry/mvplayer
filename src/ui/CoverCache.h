@@ -33,6 +33,8 @@ public:
     static QString fileFor(const QString &dir, const QString &key);
     static QString make(const QString &dir, const QString &key, const QString &trackPath);
     static QImage extract(const QString &trackPath);
+    // Only the picture embedded in the file (its front cover), whatever is beside it.
+    static QImage extractEmbedded(const QString &trackPath);
     static constexpr int kMaxSide = 512;
 
 signals:

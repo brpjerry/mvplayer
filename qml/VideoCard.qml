@@ -31,9 +31,12 @@ Item {
 
     property bool current: false   // this video is loaded in the player
     property bool playing: false   // ...and not paused
+    property bool selected: false  // picked with Ctrl+click, for a batch edit of its track's tags
     readonly property Item thumbnail: thumbItem
 
     signal activated()
+    signal menuRequested()         // a right click
+    signal toggleRequested()       // Ctrl+click: into the selection, or out of it
     signal approved()
     signal rejected()
     property bool verdictsEnabled: true
@@ -71,6 +74,47 @@ Item {
             opacity: root.current ? 1 : 0
             visible: opacity > 0
             Behavior on opacity { NumberAnimation { duration: Theme.normal } }
+        }
+
+        // Selected for a batch edit: a ring and a tick
+        Rectangle {
+            anchors.fill: thumbItem
+            radius: Theme.radius
+            color: Theme.accentSoft
+            opacity: root.selected ? 0.45 : 0
+            visible: opacity > 0
+            Behavior on opacity { NumberAnimation { duration: Theme.normal } }
+        }
+        Rectangle {
+            anchors.fill: thumbItem
+            anchors.margins: -4
+            radius: Theme.radius + 4
+            color: "transparent"
+            border.width: 2
+            border.color: Theme.accent
+            opacity: root.selected && !root.current ? 1 : 0
+            visible: opacity > 0
+            Behavior on opacity { NumberAnimation { duration: Theme.normal } }
+        }
+        Rectangle {
+            anchors.left: thumbItem.left
+            anchors.top: thumbItem.top
+            anchors.margins: 8
+            width: 24
+            height: 24
+            radius: 12
+            color: Theme.accent
+            opacity: root.selected ? 1 : 0
+            scale: root.selected ? 1 : 0.6
+            visible: opacity > 0
+            Behavior on opacity { NumberAnimation { duration: Theme.fast } }
+            Behavior on scale { NumberAnimation { duration: Theme.normal; easing.type: Easing.OutBack } }
+            Icon {
+                anchors.centerIn: parent
+                path: Icons.check
+                size: 16
+                color: Theme.accentInk
+            }
         }
 
         // Play affordance
@@ -202,8 +246,16 @@ Item {
         id: mouse
         anchors.fill: body
         hoverEnabled: true
+        acceptedButtons: Qt.LeftButton | Qt.RightButton
         cursorShape: Qt.PointingHandCursor
-        onClicked: root.activated()
+        onClicked: (event) => {
+            if (event.button === Qt.RightButton)
+                root.menuRequested()
+            else if (event.modifiers & Qt.ControlModifier)
+                root.toggleRequested()
+            else
+                root.activated()
+        }
     }
 
     ReviewControls {

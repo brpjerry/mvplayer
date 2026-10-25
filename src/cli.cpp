@@ -8,6 +8,8 @@
 //       Runs the audio replacement on a local video file.
 //   mvplayer-import check-video <video> [keyframes]
 //       Reports whether the picture is a still image.
+//   mvplayer-import tags <file> [KEY=value ...]
+//       Prints a music file's tags; with assignments, writes them first.
 
 #include "core/ArtistChannels.h"
 #include "core/AudioAlign.h"
@@ -19,7 +21,9 @@
 #include <QTimer>
 #include "core/Muxer.h"
 #include "core/Subtitles.h"
+#include "core/LibraryScanner.h"
 #include "core/TagReader.h"
+#include "core/TagWriter.h"
 #include "core/TalkCheck.h"
 #include "core/Util.h"
 #include "core/YtDlp.h"
@@ -96,7 +100,7 @@ int main(int argc, char **argv)
         {QStringLiteral("reimport-before"), QStringLiteral("Likewise every track with a video whose last lookup was before this time (ISO 8601, e.g. 2026-10-05T16:35 or 2026-10-05)."), QStringLiteral("time")},
         {QStringLiteral("lookup-album"), QStringLiteral("Look an album of the music library up wherever its files are, as <album artist>/<album> (repeatable)."), QStringLiteral("album")},
     });
-    parser.addPositionalArgument(QStringLiteral("command"), QStringLiteral("Optional: align <track> <video> | mux <track> <video> <out.mkv> | check-video <video> [keyframes] | same-recording <file> <file> | same-version <track title> <album> <video title> [own] | check-cookies [video id] | convert-subs <file.srv3> <out without extension> | talk-check <file>... | rank-check <track title> <artist> <video title> <channel> [verified] | artist-channels <artist>"));
+    parser.addPositionalArgument(QStringLiteral("command"), QStringLiteral("Optional: align <track> <video> | mux <track> <video> <out.mkv> | check-video <video> [keyframes] | same-recording <file> <file> | same-version <track title> <album> <video title> [own] | check-cookies [video id] | convert-subs <file.srv3> <out without extension> | talk-check <file>... | rank-check <track title> <artist> <video title> <channel> [verified] | artist-channels <artist> | tags <file> [KEY=value ...] [PICTURE=<image>]"));
     parser.process(app);
 
     const QString authFile = parser.isSet(QStringLiteral("chatgpt-auth-file"))
@@ -148,6 +152,72 @@ int main(int argc, char **argv)
     }
 
     const QStringList pos = parser.positionalArguments();
+    if (pos.value(0) == QLatin1String("tags")) {
+        // tags <file> [KEY=value ...]: the file's tags; with assignments,
+        // written first (the tag editor, headless; an empty value removes the
+        // tag). With --mv-dir the library takes them at once, as the app
+        // does; otherwise its next scan does.
+        if (pos.size() < 2)
+            parser.showHelp(2);
+        const QString file = QFileInfo(pos[1]).absoluteFilePath();
+        QHash<QString, QString> changes;
+        std::optional<TagWriter::Picture> picture;
+        for (int i = 2; i < pos.size(); ++i) {
+            const int eq = pos[i].indexOf(QLatin1Char('='));
+            if (eq <= 0) {
+                out << "error: expected KEY=value, got " << pos[i] << Qt::endl;
+                return 2;
+            }
+            const QString key = pos[i].left(eq).toUpper(), value = pos[i].mid(eq + 1);
+            if (key == QLatin1String("PICTURE")) {
+                // PICTURE=<image file>: the file's one picture, its front cover.
+                QFile img(value);
+                if (!img.open(QIODevice::ReadOnly)) {
+                    out << "error: cannot read " << value << Qt::endl;
+                    return 1;
+                }
+                const QString suffix = QFileInfo(value).suffix().toLower();
+                picture = TagWriter::Picture{img.readAll(), suffix == QLatin1String("png") ? QStringLiteral("image/png")
+                                             : suffix == QLatin1String("webp") ? QStringLiteral("image/webp") : QStringLiteral("image/jpeg")};
+                continue;
+            }
+            changes.insert(key, value);
+        }
+        if (!changes.isEmpty() || picture) {
+            QString err;
+            if (!TagWriter::write(file, changes, picture, &err)) {
+                out << "error: " << err << Qt::endl;
+                return 1;
+            }
+            if (parser.isSet(QStringLiteral("mv-dir"))) {
+                const QString mvDir = QDir(parser.value(QStringLiteral("mv-dir"))).absolutePath();
+                Database db(QDir(ImportManager::dataDir(mvDir)).filePath(QStringLiteral("library.db")), mvDir);
+                if (!db.init(&err)) {
+                    out << "error: cannot open library database: " << err << Qt::endl;
+                    return 1;
+                }
+                const TrackInfo known = db.tracksByPath().value(file);
+                if (known.id <= 0) {
+                    out << "library: no such track" << Qt::endl;
+                } else {
+                    const LibraryScanner::Result r = LibraryScanner::refreshTracks({known.id}, db);
+                    out << "library: " << (r.changed ? "updated" : "unchanged") << ", " << r.videosChanged.size() << " video(s) retagged" << Qt::endl;
+                }
+            }
+        }
+        TrackInfo t;
+        t.path = file;
+        if (!TagReader::read(t)) {
+            out << "error: not a readable audio file" << Qt::endl;
+            return 1;
+        }
+        for (auto it = t.tags.constBegin(); it != t.tags.constEnd(); ++it)
+            out << it.key() << "=" << it.value().toString() << Qt::endl;
+        if (const std::optional<TagWriter::Picture> pic = TagWriter::picture(file))
+            out << "PICTURE=" << pic->mime << ", " << pic->data.size() << " bytes" << Qt::endl;
+        return 0;
+    }
+
     if (pos.value(0) == QLatin1String("align")) {
         if (pos.size() != 3)
             parser.showHelp(2);

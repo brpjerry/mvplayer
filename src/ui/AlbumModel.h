@@ -6,6 +6,7 @@
 #include <QCollator>
 #include <QHash>
 #include <QSortFilterProxyModel>
+#include <QUrl>
 
 // One album of the music library, as the music player's grid shows it.
 struct AlbumInfo {
@@ -22,6 +23,7 @@ struct AlbumInfo {
     qint64 newest = 0;   // mtime of its newest file
     QString firstPath;   // its first file, where the cover comes from
     QString cover;       // the cover's file (CoverCache); empty: none, or not made yet
+    qint64 coverStamp = 0; // when that file was made (ms): a cover made afresh is a new picture at the same path
 
     static AlbumInfo from(const Database::AlbumSummary &s);
 };
@@ -31,7 +33,7 @@ inline bool operator==(const AlbumInfo &a, const AlbumInfo &b)
     return a.key == b.key && a.albumArtist == b.albumArtist && a.album == b.album && a.artists == b.artists
         && a.genres == b.genres && a.year == b.year && a.tracks == b.tracks && a.videos == b.videos
         && a.lookedUp == b.lookedUp && a.duration == b.duration && a.newest == b.newest
-        && a.firstPath == b.firstPath && a.cover == b.cover;
+        && a.firstPath == b.firstPath && a.cover == b.cover && a.coverStamp == b.coverStamp;
 }
 inline bool operator!=(const AlbumInfo &a, const AlbumInfo &b) { return !(a == b); }
 
@@ -71,6 +73,11 @@ public:
     bool update(const QVector<AlbumInfo> &albums);
     // An album's cover was made or found: its file.
     void setCover(const QString &key, const QString &path);
+    // The cover as the grid loads it: its file, with when it was made in
+    // the query, so that one made afresh (the picture in the files
+    // replaced) is loaded afresh and not served from the image cache.
+    static QUrl coverUrl(const AlbumInfo &a);
+    static qint64 coverStampOf(const QString &path);
 
     const QVector<AlbumInfo> &albums() const { return m_albums; }
     const AlbumInfo &at(int row) const { return m_albums.at(row); }

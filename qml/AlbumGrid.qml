@@ -17,13 +17,33 @@ Item {
     property real room: width
 
     signal activated(int row)
+    // Edit the tags these albums share, each {key, albumArtist, album}.
+    signal editRequested(var albums, string subject)
 
     readonly property alias view: grid
     readonly property alias wheel: wheel
     readonly property bool menuOpen: menu.opened
 
-    // A right click on a card: play the album, ask for its videos (A12), or
-    // look its tracks up again by today's rules (H).
+    // Albums picked with Ctrl+click, each {key, albumArtist, album}: a right
+    // click on one of them edits the tags of all of them. A plain click, or
+    // Escape, lets them go.
+    property var selected: []
+    function isSelected(key) { return selected.some(a => a.key === key) }
+    function toggleSelected(row) {
+        const a = App.albums.get(row)
+        if (!a || !a.key)
+            return
+        selected = isSelected(a.key) ? selected.filter(s => s.key !== a.key)
+                                     : selected.concat([{ key: a.key, albumArtist: a.albumArtist, album: a.album }])
+    }
+    function clearSelection() { selected = [] }
+    function subjectOf(albums) {
+        return albums.length === 1 ? (albums[0].album.length > 0 ? albums[0].album : "Unknown album") : albums.length + " albums"
+    }
+
+    // A right click on a card: play the album, ask for its videos (A12),
+    // look its tracks up again by today's rules (H), or edit its tags (the
+    // tags of every album selected, where it is one of them).
     function openMenu(row, item) {
         const a = App.albums.get(row)
         if (!a || !a.key)
@@ -31,10 +51,14 @@ Item {
         const p = item ? item.mapToItem(root, item.width / 2 - 20, item.height / 2 - 40) : Qt.point(root.width / 2 - 130, 60)
         menu.row = row
         menu.album = a
+        menu.editAlbums = isSelected(a.key) && selected.length > 1 ? selected : [{ key: a.key, albumArtist: a.albumArtist, album: a.album }]
         menu.x = Math.max(8, Math.min(p.x, root.width - menu.width - 8))
         menu.y = Math.max(8, Math.min(p.y, root.height - menu.height - 8))
         menu.open()
     }
+
+    // The open menu's entry, as a click on it (tests).
+    function pickMenu(key) { if (menu.opened) menu.pick(key) }
 
     // Brings an album's card into view; returns its row, or -1.
     function reveal(key) {
@@ -165,8 +189,10 @@ Item {
             height: grid.cellHeight
             current: key === root.currentKey
             playing: current && root.currentPlaying
-            onActivated: root.activated(index)
+            selected: root.isSelected(key)
+            onActivated: { root.clearSelection(); root.activated(index) }
             onMenuRequested: root.openMenu(index, card)
+            onToggleRequested: root.toggleSelected(index)
         }
 
         add: Transition {
@@ -211,6 +237,7 @@ Item {
         id: menu
         property int row: -1
         property var album: ({})
+        property var editAlbums: []
         readonly property int tracks: album.trackCount || 0
         readonly property int lookedUp: album.lookupCount || 0
         readonly property int videos: album.videoCount || 0
@@ -243,6 +270,10 @@ Item {
                 App.lookupAlbum(album.albumArtist, album.album)
             else if (key === "reimport")
                 App.reimportAlbum(album.albumArtist, album.album)
+            else if (key === "edit")
+                root.editRequested(editAlbums, root.subjectOf(editAlbums))
+            else if (key === "location")
+                App.openFileLocation(album.firstPath)
             close()
         }
         contentItem: Column {
@@ -254,7 +285,13 @@ Item {
                     { key: "reimport", icon: Icons.refresh,
                       text: menu.videos > 0 ? "Re-import " + menu.videos + (menu.videos === 1 ? " video" : " videos") : "Look its tracks up again",
                       show: menu.lookedUp > 0,
-                      why: "By today's rules: a video that still fits is kept, one that no longer does goes to review or is replaced." }
+                      why: "By today's rules: a video that still fits is kept, one that no longer does goes to review or is replaced." },
+                    { key: "edit", icon: Icons.edit,
+                      text: menu.editAlbums.length > 1 ? "Edit tags of " + menu.editAlbums.length + " albums" : "Edit tags",
+                      show: true,
+                      why: "The tags the album's files share: artist, album, date, genre and the like. Titles and track numbers are each file's own." },
+                    { key: "location", icon: Icons.folder, text: "Open file location", show: true,
+                      why: "The folder of its first track, in the file manager." }
                 ]
                 Column {
                     id: entry
@@ -264,7 +301,7 @@ Item {
                     Item {
                         width: parent.width
                         height: 34
-                        enabled: entry.modelData.key === "play" || App.configured
+                        enabled: entry.modelData.key === "play" || entry.modelData.key === "edit" || entry.modelData.key === "location" || App.configured
                         opacity: enabled ? 1 : 0.4
                         Rectangle {
                             anchors.fill: parent

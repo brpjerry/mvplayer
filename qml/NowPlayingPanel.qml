@@ -1,4 +1,5 @@
 import QtQuick
+import QtQuick.Controls.Basic
 import MvPlayer.Core
 
 // Right of the album grid in music mode: the queue, the track that plays
@@ -17,6 +18,35 @@ Rectangle {
     signal playRequested(int index)
     signal videoRequested(var videoId)
     signal coverDoubleClicked()     // the cover, to see it large
+    // Edit the tags of these tracks' files (one song, or a batch).
+    signal editRequested(var trackIds, string subject)
+
+    // Tracks of the queue picked with Ctrl+click, by track id: a right click
+    // on one of them edits the tags of all of them. A plain click, or
+    // Escape, lets them go.
+    property var selected: []
+    readonly property bool menuOpen: rowMenu.opened
+    function isSelected(trackId) { return selected.indexOf(trackId) >= 0 }
+    function toggleSelected(index) {
+        const t = queue[index]
+        if (!t || t.kind !== "track")
+            return
+        selected = isSelected(t.trackId) ? selected.filter(id => id !== t.trackId) : selected.concat([t.trackId])
+    }
+    function clearSelection() { selected = [] }
+    function openMenu(index, item) {
+        const t = queue[index]
+        if (!t || t.kind !== "track")
+            return
+        const p = item ? item.mapToItem(root, 40, item.height - 4) : Qt.point(40, 60)
+        rowMenu.track = t
+        rowMenu.editIds = isSelected(t.trackId) && selected.length > 1 ? selected : [t.trackId]
+        rowMenu.x = Math.max(8, Math.min(p.x, root.width - rowMenu.width - 8))
+        rowMenu.y = Math.max(8, Math.min(p.y, root.height - rowMenu.height - 8))
+        rowMenu.open()
+    }
+    // The open menu's entry, as a click on it (tests).
+    function pickMenu() { if (rowMenu.opened) rowMenu.pick() }
 
     width: active ? panelWidth : 0
     Behavior on width { NumberAnimation { duration: Theme.slow; easing.type: Easing.BezierSpline; easing.bezierCurve: Theme.emphasized } }
@@ -138,6 +168,7 @@ Rectangle {
                 required property var modelData
                 readonly property bool now: index === root.index
                 readonly property bool played: index < root.index
+                readonly property bool selected: root.hasTrack && root.isSelected(row.modelData.trackId)
                 width: list.width
                 height: 38
 
@@ -146,8 +177,19 @@ Rectangle {
                     anchors.leftMargin: 8
                     anchors.rightMargin: 8
                     radius: Theme.radiusSmall
-                    color: row.now ? Theme.accentSoft : rowMouse.pressed ? Theme.pressed : Theme.hover
-                    opacity: row.now || rowMouse.containsMouse ? 1 : 0
+                    color: row.now || row.selected ? Theme.accentSoft : rowMouse.pressed ? Theme.pressed : Theme.hover
+                    opacity: row.now || row.selected || rowMouse.containsMouse ? 1 : 0
+                    Behavior on opacity { NumberAnimation { duration: Theme.fast } }
+                }
+                Rectangle {
+                    anchors.fill: parent
+                    anchors.leftMargin: 8
+                    anchors.rightMargin: 8
+                    radius: Theme.radiusSmall
+                    color: "transparent"
+                    border.width: 1
+                    border.color: Theme.accent
+                    opacity: row.selected ? 1 : 0
                     Behavior on opacity { NumberAnimation { duration: Theme.fast } }
                 }
                 Rectangle {
@@ -165,10 +207,19 @@ Rectangle {
                     width: 26
                     anchors.verticalCenter: parent.verticalCenter
                     horizontalAlignment: Text.AlignRight
+                    visible: !row.selected
                     text: row.modelData.trackNo > 0 ? row.modelData.trackNo : row.index + 1
                     color: row.now ? Theme.accent : Theme.textFaint
                     font.pixelSize: 12
                     font.features: { "tnum": 1 }
+                }
+                Icon {
+                    anchors.right: number.right
+                    anchors.verticalCenter: parent.verticalCenter
+                    visible: row.selected
+                    path: Icons.check
+                    size: 16
+                    color: Theme.accent
                 }
                 Text {
                     anchors.left: number.right
@@ -207,8 +258,18 @@ Rectangle {
                     id: rowMouse
                     anchors.fill: parent
                     hoverEnabled: true
+                    acceptedButtons: Qt.LeftButton | Qt.RightButton
                     cursorShape: Qt.PointingHandCursor
-                    onClicked: root.playRequested(row.index)
+                    onClicked: (event) => {
+                        if (event.button === Qt.RightButton)
+                            root.openMenu(row.index, row)
+                        else if (event.modifiers & Qt.ControlModifier)
+                            root.toggleSelected(row.index)
+                        else {
+                            root.clearSelection()
+                            root.playRequested(row.index)
+                        }
+                    }
                 }
             }
 
@@ -218,6 +279,127 @@ Rectangle {
                 text: "Click an album to play it"
                 color: Theme.textFaint
                 font.pixelSize: 13
+            }
+        }
+
+        // A right click on a row: edit the tags of its file, or of the files
+        // of every track selected where it is one of them.
+        Popup {
+            id: rowMenu
+            property var track: ({})
+            property var editIds: []
+            function pick() {
+                const ids = editIds
+                const subject = ids.length > 1 ? ids.length + " songs" : (track.title || "")
+                close()
+                root.editRequested(ids, subject)
+            }
+            width: 240
+            padding: 6
+            modal: true
+            dim: false
+            focus: true // Escape closes it only while it has the focus
+            closePolicy: Popup.CloseOnEscape | Popup.CloseOnPressOutside
+            transformOrigin: Popup.TopLeft
+            enter: Transition {
+                ParallelAnimation {
+                    NumberAnimation { property: "opacity"; from: 0; to: 1; duration: Theme.normal }
+                    NumberAnimation { property: "scale"; from: 0.95; to: 1; duration: Theme.slow; easing.type: Easing.BezierSpline; easing.bezierCurve: Theme.emphasized }
+                }
+            }
+            exit: Transition { NumberAnimation { property: "opacity"; to: 0; duration: Theme.fast } }
+            background: Rectangle {
+                radius: Theme.radius
+                color: Theme.raised
+                border.width: 1
+                border.color: Theme.line
+            }
+            contentItem: Column {
+                Item {
+                    width: rowMenu.availableWidth
+                    height: 34
+                    Rectangle {
+                        anchors.fill: parent
+                        radius: Theme.radiusSmall
+                        color: Theme.hover
+                        opacity: editMouse.containsMouse ? 1 : 0
+                        Behavior on opacity { NumberAnimation { duration: Theme.fast } }
+                    }
+                    Icon {
+                        x: 10
+                        anchors.verticalCenter: parent.verticalCenter
+                        path: Icons.edit
+                        size: 16
+                        color: Theme.textDim
+                    }
+                    Text {
+                        x: 34
+                        width: parent.width - 44
+                        anchors.verticalCenter: parent.verticalCenter
+                        text: rowMenu.editIds.length > 1 ? "Edit tags of " + rowMenu.editIds.length + " songs" : "Edit tags"
+                        color: Theme.text
+                        font.pixelSize: 13
+                        elide: Text.ElideRight
+                    }
+                    MouseArea {
+                        id: editMouse
+                        anchors.fill: parent
+                        hoverEnabled: true
+                        cursorShape: Qt.PointingHandCursor
+                        onClicked: rowMenu.pick()
+                    }
+                }
+                Text {
+                    width: rowMenu.availableWidth
+                    leftPadding: 10
+                    rightPadding: 10
+                    topPadding: 2
+                    bottomPadding: 8
+                    text: rowMenu.editIds.length > 1 ? "The tags their files share. Titles and track numbers are each file's own."
+                                                     : "The tags of its file, written into the file."
+                    color: Theme.textFaint
+                    font.pixelSize: 11
+                    wrapMode: Text.WordWrap
+                }
+                // The track's file, in the file manager
+                Item {
+                    width: rowMenu.availableWidth
+                    height: 34
+                    Rectangle {
+                        anchors.fill: parent
+                        radius: Theme.radiusSmall
+                        color: Theme.hover
+                        opacity: locationMouse.containsMouse ? 1 : 0
+                        Behavior on opacity { NumberAnimation { duration: Theme.fast } }
+                    }
+                    Icon {
+                        x: 10
+                        anchors.verticalCenter: parent.verticalCenter
+                        path: Icons.folder
+                        size: 16
+                        color: Theme.textDim
+                    }
+                    Text {
+                        x: 34
+                        width: parent.width - 44
+                        anchors.verticalCenter: parent.verticalCenter
+                        text: "Open file location"
+                        color: Theme.text
+                        font.pixelSize: 13
+                        elide: Text.ElideRight
+                    }
+                    MouseArea {
+                        id: locationMouse
+                        anchors.fill: parent
+                        hoverEnabled: true
+                        cursorShape: Qt.PointingHandCursor
+                        onClicked: {
+                            const path = rowMenu.track.path
+                            rowMenu.close()
+                            App.openFileLocation(path)
+                        }
+                    }
+                }
             }
         }
 
