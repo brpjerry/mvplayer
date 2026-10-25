@@ -741,6 +741,11 @@ the words is tried against what the judge once saw.
   can play, pause, skip, seek and change the volume, shuffle and repeat. The
   app shows up there only while a video is loaded, so when idle it leaves the
   media keys to other players.
+- On Windows the window's thumbnail on the taskbar (shown when the pointer
+  rests on the app's taskbar button) has previous, play/pause and next
+  buttons while a video is loaded; previous and next are greyed out when
+  there is nothing to step to. The buttons are drawn dark or white to suit
+  a light or dark taskbar.
 
 ## Keys
 
@@ -795,7 +800,9 @@ Platform-specific code is confined to:
 - `src/ui/IdleInhibitor.cpp`: keeping the screen awake (D-Bus on Linux,
   `SetThreadExecutionState` on Windows).
 - `src/ui/MediaSession.cpp`: the desktop's media controls, MPRIS on Linux
-  (`src/ui/Mpris.cpp`); Windows would need System Media Transport Controls.
+  (`src/ui/Mpris.cpp`), the taskbar thumbnail's buttons on Windows
+  (`src/ui/TaskbarButtons.cpp`). Windows' media flyout and media keys would
+  need System Media Transport Controls.
 - `src/ui/SystemTheme.cpp`: the desktop portal's dark/light preference, with
   Qt's own as the fallback.
 - `src/ui/MpvItem.cpp`: the native-display hand-off to mpv.
