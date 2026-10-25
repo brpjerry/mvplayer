@@ -289,11 +289,14 @@ int main(int argc, char **argv)
         plan.replaceAudio = true;
         out << plan.align.summary() << Qt::endl;
         QString detail;
-        if (!Muxer::mux(plan, nullptr, &detail, &err)) {
+        Muxer::ReviewSpan span;
+        if (!Muxer::mux(plan, nullptr, &detail, &err, &span)) {
             out << "error: " << err << Qt::endl;
             return 1;
         }
         out << "wrote " << plan.outFile << " (" << detail << ")" << Qt::endl;
+        // Where the track sits in the video, as the library keeps it.
+        out << "spans: " << audioSpansText(span.spans) << Qt::endl;
         return 0;
     }
 

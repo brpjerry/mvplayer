@@ -58,6 +58,7 @@ public:
         int stream = 0;      // which audio stream of the video's file is this track's audio, from 1; 0: none
         double fit = 0;      // how close its waveform is to the upload's (AudioAlign likeness); 0: not measured
         QString audioDetail; // what that stream is, e.g. "FLAC 24/48"
+        QVector<AudioSpan> spans; // where that stream is the track's audio, and where the track is in it
     };
     static qint64 trackKey(const TrackInfo &t) { return t.recording > 0 ? t.recording : -t.id; }
     // Several writes of the calling thread as one: nothing another thread
@@ -74,7 +75,8 @@ public:
         Database *m_db;
         bool m_open = false;
     };
-    void addCandidate(qint64 videoId, const TrackInfo &track, int stream, double fit, const QString &audioDetail);
+    void addCandidate(qint64 videoId, const TrackInfo &track, int stream, double fit, const QString &audioDetail,
+                      const QVector<AudioSpan> &spans = {});
     void removeCandidate(qint64 videoId, const TrackInfo &track);
     // The judge's answer about a video under review for one of its
     // candidates (docs/import-rules-judge.html, X2): keep or not, how sure,
@@ -260,6 +262,7 @@ public:
         int stream = 0;
         double fit = 0;
         QString audioDetail;
+        QVector<AudioSpan> spans;
     };
     QVector<CandidateRow> candidateRows(qint64 videoId);
     void restoreCandidates(qint64 videoId, const QVector<CandidateRow> &rows);

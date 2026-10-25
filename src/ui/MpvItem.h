@@ -21,6 +21,10 @@ class MpvItem : public QQuickFramebufferObject
     Q_PROPERTY(bool active READ active NOTIFY activeChanged)
     Q_PROPERTY(double volume READ volume WRITE setVolume NOTIFY volumeChanged)
     Q_PROPERTY(bool muted READ muted WRITE setMuted NOTIFY mutedChanged)
+    // A gain on top of `volume`, 1 ordinarily: run to 0 and back for a fade
+    // around a change of file. (`volume` reports what mpv plays at, so
+    // that includes the fade.)
+    Q_PROPERTY(double fade READ fade WRITE setFade NOTIFY fadeChanged)
     Q_PROPERTY(int audioTrack READ audioTrack WRITE setAudioTrack NOTIFY audioTrackChanged)
     Q_PROPERTY(QVariantList audioTracks READ audioTracks NOTIFY audioTracksChanged)
     // The audio track the next file starts on, from 1: the first, unless the
@@ -56,6 +60,8 @@ public:
     void setVolume(double v); // 0..1
     bool muted() const { return m_muted; }
     void setMuted(bool m);
+    double fade() const { return m_fade; }
+    void setFade(double f);
     int audioTrack() const { return m_audioTrack; }
     void setAudioTrack(int id);
     QVariantList audioTracks() const { return m_audioTracks; }
@@ -78,8 +84,14 @@ public:
     // Set before any item is created: discard audio entirely (test runs).
     static void setSilent(bool silent);
 
-    Q_INVOKABLE void load(const QString &path);
+    // `start` > 0: opened at that second of the file, so that the first
+    // sound out of it is from there (a track going on as its video).
+    Q_INVOKABLE void load(const QString &path, double start = -1);
     Q_INVOKABLE void stop();
+    // Where playback is this instant, asked of mpv, rather than as last
+    // reported (`position`, some milliseconds behind): for a file that
+    // takes over from this one at the same moment.
+    Q_INVOKABLE double livePosition() const;
     // The file to go on to when this one ends, in mpv's own playlist, so
     // that the audio runs on without a gap; fileStarted says when it has.
     // clearNext takes it back. A load() replaces both.
@@ -96,6 +108,7 @@ signals:
     void activeChanged();
     void volumeChanged();
     void mutedChanged();
+    void fadeChanged();
     void audioTrackChanged();
     void audioTracksChanged();
     void hasSubtitlesChanged();
@@ -134,6 +147,9 @@ private:
     bool m_active = false;
     bool m_awaitingFirstFrame = false;
     double m_volume = 1.0;
+    double m_wanted = 1.0; // the volume asked for; mpv gets it times the fade
+    double m_fade = 1.0;
+    void applyVolume();
     bool m_muted = false;
     int m_audioTrack = 0;
     int m_firstAudioTrack = 1;

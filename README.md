@@ -681,7 +681,12 @@ the words is tried against what the judge once saw.
   a button to take it off again), and **Re-import album videos**. With
   Settings → Playback → **Play the music video when a track has one** on, a
   track that has its video plays the video, grown over the albums, and the
-  next track without one goes back to the music.
+  next track without one goes back to the music. With it off, the panel's
+  **Music video** button brings the playing track's video up in its place,
+  from the same moment of the song: the track fades out as the video grows
+  over the albums, and the video opens where the song is by then, going by
+  where the track's audio sits in it, and fades in. Switching back to the
+  music library leaves the video playing, as before.
 - The sort button in the top bar orders the grid by title, by artist,
   chronologically by the track's year ("Chronological - Audio") or by the day
   the upload was published ("Chronological - Video", the year where the day

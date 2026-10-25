@@ -347,20 +347,53 @@ QQuickFramebufferObject::Renderer *MpvItem::createRenderer() const
     return new MpvRenderer(m_core);
 }
 
-void MpvItem::load(const QString &path)
+void MpvItem::load(const QString &path, double start)
 {
     m_pendingSeek = -1;
     m_loaded = false;
     if (!m_core->mpv)
         return;
     const QByteArray p = path.toUtf8();
-    const char *cmd[] = {"loadfile", p.constData(), nullptr};
-    mpv_command_async(m_core->mpv, 0, cmd);
+    if (start > 0) {
+        // The start as an option of the file itself: mpv opens it there,
+        // rather than at its beginning and seeking from it (a run of the
+        // wrong sound first). The command's arguments by name: their order
+        // differs between mpv versions.
+        const QByteArray at = QByteArray::number(start, 'f', 3);
+        char optKey[] = "start";
+        char *optKeys[] = {optKey};
+        mpv_node optVals[1];
+        optVals[0].format = MPV_FORMAT_STRING;
+        optVals[0].u.string = const_cast<char *>(at.constData());
+        mpv_node_list opts = {1, optVals, optKeys};
+        char nameKey[] = "name", urlKey[] = "url", flagsKey[] = "flags", optionsKey[] = "options";
+        char name[] = "loadfile", flags[] = "replace";
+        char *keys[] = {nameKey, urlKey, flagsKey, optionsKey};
+        mpv_node vals[4];
+        vals[0].format = MPV_FORMAT_STRING;
+        vals[0].u.string = name;
+        vals[1].format = MPV_FORMAT_STRING;
+        vals[1].u.string = const_cast<char *>(p.constData());
+        vals[2].format = MPV_FORMAT_STRING;
+        vals[2].u.string = flags;
+        vals[3].format = MPV_FORMAT_NODE_MAP;
+        vals[3].u.list = &opts;
+        mpv_node_list args = {4, vals, keys};
+        mpv_node cmd;
+        cmd.format = MPV_FORMAT_NODE_MAP;
+        cmd.u.list = &args;
+        mpv_command_node_async(m_core->mpv, 0, &cmd);
+    } else {
+        const char *cmd[] = {"loadfile", p.constData(), nullptr};
+        mpv_command_async(m_core->mpv, 0, cmd);
+    }
     setPaused(false);
     m_awaitingFirstFrame = true;
     m_restartColor = true;
-    if (m_position != 0) {
-        m_position = 0;
+    // (The seek bar stays where the sound goes on, not back to 0 and forward.)
+    const double from = start > 0 ? start : 0;
+    if (m_position != from) {
+        m_position = from;
         emit positionChanged();
     }
     if (!m_active) {
@@ -409,6 +442,14 @@ void MpvItem::stop()
     }
 }
 
+double MpvItem::livePosition() const
+{
+    double pos = m_position;
+    if (m_core->mpv && m_active && m_loaded)
+        mpv_get_property(m_core->mpv, "time-pos", MPV_FORMAT_DOUBLE, &pos);
+    return pos;
+}
+
 void MpvItem::seek(double seconds, bool exact)
 {
     if (!m_core->mpv)
@@ -446,9 +487,25 @@ void MpvItem::setPaused(bool paused)
 
 void MpvItem::setVolume(double v)
 {
+    m_wanted = qBound(0.0, v, 1.0);
+    applyVolume();
+}
+
+void MpvItem::setFade(double f)
+{
+    f = qBound(0.0, f, 1.0);
+    if (f == m_fade)
+        return;
+    m_fade = f;
+    emit fadeChanged();
+    applyVolume();
+}
+
+void MpvItem::applyVolume()
+{
     if (!m_core->mpv)
         return;
-    double pct = qBound(0.0, v, 1.0) * 100.0;
+    double pct = m_wanted * m_fade * 100.0;
     mpv_set_property_async(m_core->mpv, 0, "volume", MPV_FORMAT_DOUBLE, &pct);
 }
 

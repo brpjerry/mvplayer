@@ -363,6 +363,12 @@ OUT=$(MVPLAYER_YTDLP="$SITE" timeout 120 "$BUILD/mvplayer-import" --allow-still-
 echo "$OUT" | grep -E "^\[import\]|^done:"
 [[ "$OUT" == *"for your review (1 video)"* && "$OUT" == *"done: 0 videos and 1 for review; tracks: review=1"* ]]
 [[ "$(streams)" == "h264 flac opus " && "$(review_state)" == "[(1, 'library')]" ]]
+# Where the track sits in the video is kept with the video, and with its
+# candidate for the candidate's stream: "start-end@lag,…" in seconds of the
+# video, for the player to go from the track into its video at the same moment.
+SPANS=$(python3 -c "import sqlite3, sys; db = sqlite3.connect(sys.argv[1]); print(db.execute('SELECT spans FROM videos').fetchone()[0], db.execute('SELECT spans FROM candidates').fetchone()[0])" "$WORK/mvlib5/.mvplayer/library.db")
+echo "spans: $SPANS"
+[[ "$SPANS" =~ ^([0-9]+\.[0-9]{3}-[0-9]+\.[0-9]{3}@-?[0-9]+\.[0-9]{3},?)+\ ([0-9]+\.[0-9]{3}-[0-9]+\.[0-9]{3}@-?[0-9]+\.[0-9]{3},?)+$ ]]
 # When the upload was published is kept with the video: its premiere date, before its upload date.
 [[ "$(python3 -c "import sqlite3, sys; print(sqlite3.connect(sys.argv[1]).execute(\"SELECT yt_date FROM videos WHERE yt_id = 'liv'\").fetchall())" "$WORK/mvlib5/.mvplayer/library.db")" == "[('2023-03-08',)]" ]]
 # search, audio to listen to, the video. (The look at the picture is left out:

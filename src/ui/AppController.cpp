@@ -1199,6 +1199,18 @@ int AppController::firstAudioTrack(qint64 videoId) const
     return c.stream > 0 ? c.stream : v->ytStream + 1;
 }
 
+double AppController::videoPosition(qint64 videoId, double trackSeconds) const
+{
+    const std::optional<VideoInfo> v = m_db ? m_db->video(videoId) : std::nullopt;
+    if (!v)
+        return qMax(0.0, trackSeconds);
+    // (Without spans kept, reviewStart is where the track's audio begins in
+    // the video, on a video that has it; 0 on one that plays YouTube's.)
+    const double at = videoTimeOfTrack(v->spans, v->reviewStart, trackSeconds);
+    // Never past the video's end: that would end it on the spot.
+    return v->duration > 0 ? qMin(at, qMax(0.0, v->duration - 0.5)) : at;
+}
+
 void AppController::updateShown(const VideoInfo &v)
 {
     if (!v.review || !m_db)

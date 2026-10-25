@@ -3,6 +3,7 @@
 #include <QJsonObject>
 #include <QString>
 #include <QStringList>
+#include <QVector>
 
 // A file in the (read-only) audio library.
 struct TrackInfo {
@@ -82,6 +83,17 @@ inline bool betterSource(const TrackInfo &a, const TrackInfo &b)
     return a.id < b.id;
 }
 
+// A stretch of a video over which its library audio stream is the track's
+// own audio: seconds of the video, and where the track is then (track time =
+// video time - lag). Between the spans, and outside them, the stream is the
+// video's own audio. Kept with the video so that a track that plays from
+// its file can go on as its video from the same moment of the song.
+struct AudioSpan {
+    double start = 0;
+    double end = 0;
+    double lag = 0;
+};
+
 // A music video in the MV library.
 struct VideoInfo {
     qint64 id = 0;
@@ -122,6 +134,10 @@ struct VideoInfo {
     // Which of the file's audio streams is YouTube's, from 0: the ones before
     // it are the library's.
     int ytStream = 0;
+    // Where the library stream is the track's own audio, and where the track
+    // is in it (AudioSpan). Empty: YouTube's audio, or not kept (videos from
+    // before it was; reviewStart then says where the track's audio begins).
+    QVector<AudioSpan> spans;
 
     QString ytTitle;
     QString ytChannel;
@@ -146,6 +162,59 @@ struct VideoInfo {
     QJsonObject tags;
     qint64 addedAt = 0;
 };
+
+// The spans as the database keeps them: "start-end@lag,…", seconds to the
+// millisecond; and back. Malformed pieces are left out.
+inline QString audioSpansText(const QVector<AudioSpan> &spans)
+{
+    QStringList parts;
+    for (const AudioSpan &s : spans)
+        parts << QStringLiteral("%1-%2@%3").arg(s.start, 0, 'f', 3).arg(s.end, 0, 'f', 3).arg(s.lag, 0, 'f', 3);
+    return parts.join(QLatin1Char(','));
+}
+
+inline QVector<AudioSpan> audioSpansFromText(const QString &text)
+{
+    QVector<AudioSpan> spans;
+    for (const QString &part : text.split(QLatin1Char(','), Qt::SkipEmptyParts)) {
+        const int at = part.indexOf(QLatin1Char('@'));
+        const int dash = part.indexOf(QLatin1Char('-'), 1); // (a start is never negative; a lag may be)
+        if (at < 0 || dash < 0 || dash > at)
+            continue;
+        bool ok1 = false, ok2 = false, ok3 = false;
+        AudioSpan s;
+        s.start = part.left(dash).toDouble(&ok1);
+        s.end = part.mid(dash + 1, at - dash - 1).toDouble(&ok2);
+        s.lag = part.mid(at + 1).toDouble(&ok3);
+        if (ok1 && ok2 && ok3 && s.end > s.start)
+            spans.append(s);
+    }
+    return spans;
+}
+
+// Where second `trackSec` of the track is in the video: by the span that
+// holds it; in a part of the song the video leaves out, or past where the
+// video has the song, at the edge of the nearest span. Without spans
+// (YouTube's audio, or a video from before they were kept) the track is
+// taken to start at `fallbackStart` seconds of the video.
+inline double videoTimeOfTrack(const QVector<AudioSpan> &spans, double fallbackStart, double trackSec)
+{
+    if (spans.isEmpty())
+        return qMax(0.0, trackSec + fallbackStart);
+    const AudioSpan *nearest = nullptr;
+    double nearestGap = 0;
+    for (const AudioSpan &s : spans) {
+        const double from = s.start - s.lag, to = s.end - s.lag; // the span, in seconds of the track
+        if (trackSec >= from && trackSec <= to)
+            return trackSec + s.lag;
+        const double gap = trackSec < from ? from - trackSec : trackSec - to;
+        if (!nearest || gap < nearestGap) {
+            nearest = &s;
+            nearestGap = gap;
+        }
+    }
+    return qBound(nearest->start, trackSec + nearest->lag, nearest->end);
+}
 
 inline QStringList splitMulti(const QString &s)
 {

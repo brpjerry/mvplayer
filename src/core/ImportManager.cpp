@@ -746,6 +746,7 @@ bool ImportManager::putLibraryAudioIn(const VideoInfo &video, const TrackInfo &t
     v.review = review;
     v.reviewStart = span.start;
     v.reviewEnd = span.end;
+    v.spans = span.spans;
     v.ytStream = 1;
     m_db->updateVideoMedia(v);
     qInfo().noquote() << (review ? QStringLiteral("[audio] “%1” (%2) could not be confirmed as the track's recording: it waits for your review")
@@ -767,6 +768,7 @@ bool ImportManager::keepYoutubeAudio(const VideoInfo &video, const TrackInfo &tr
     v.audioDetail = QStringLiteral("YouTube");
     v.ytStream = 0;
     v.review = false;
+    v.spans.clear();
     m_db->updateVideoMedia(v);
     emit videoChanged(v.id);
     return true;
@@ -873,6 +875,7 @@ bool ImportManager::addCandidate(const VideoInfo &video, const TrackInfo &track,
 {
     int stream = 0;
     QString detail;
+    QVector<AudioSpan> spans;
     if (cfg.replaceAudio && libraryIsBetter(track, storedYoutubeQuality(video))) {
         const AudioAlign::Result placed = placedWhole(align);
         if (placed.byOffset) {
@@ -890,20 +893,23 @@ bool ImportManager::addCandidate(const VideoInfo &video, const TrackInfo &track,
             plan.ytId = video.ytId;
             plan.align = placed;
             plan.replaceAudio = true;
-            if (!Muxer::addLibraryStream(plan, &m_cancel, &detail, error))
+            Muxer::ReviewSpan span;
+            if (!Muxer::addLibraryStream(plan, &m_cancel, &detail, error, &span))
                 return false;
+            spans = span.spans;
             VideoInfo v = video;
             stream = video.ytStream + 1;
             v.ytStream = video.ytStream + 1;
             if (video.ytStream == 0) {
                 v.audioSource = QStringLiteral("library");
                 v.audioDetail = detail;
+                v.spans = spans;
             }
             m_db->updateVideoMedia(v);
         }
     }
     // (A fit of nothing at all still counts as measured.)
-    m_db->addCandidate(video.id, track, stream, qMax(align.likeness, 1e-6), detail);
+    m_db->addCandidate(video.id, track, stream, qMax(align.likeness, 1e-6), detail, spans);
     emit videoChanged(video.id);
     return true;
 }
@@ -1096,10 +1102,15 @@ void ImportManager::approveJob(qint64 videoId, qint64 trackId, const ImportSetti
             if (!c.audioDetail.isEmpty())
                 v->audioDetail = c.audioDetail;
             v->ytStream = 1;
+            // Where this track sits in the video, where that was kept with
+            // the candidate; else the first candidate's stays, near enough.
+            if (!c.spans.isEmpty())
+                v->spans = c.spans;
         } else {
             v->audioSource = QStringLiteral("youtube");
             v->audioDetail = QStringLiteral("YouTube");
             v->ytStream = 0;
+            v->spans.clear();
         }
     }
     v->review = false;
@@ -1587,6 +1598,7 @@ bool ImportManager::settleShared(qint64 videoId, const ImportSettings &cfg)
         v->audioSource = QStringLiteral("youtube");
         v->audioDetail = QStringLiteral("YouTube");
         v->ytStream = 0;
+        v->spans.clear();
         m_db->updateVideoMedia(*v);
     }
     if (auto now = m_db->video(videoId)) {
@@ -1981,7 +1993,8 @@ QString ImportManager::upgradeVideo(const VideoInfo &video, const ImportSettings
     }
 
     QString audioDetail;
-    if (!Muxer::mux(plan, &m_cancel, &audioDetail, &error))
+    Muxer::ReviewSpan span;
+    if (!Muxer::mux(plan, &m_cancel, &audioDetail, &error, &span))
         return fail(error);
 
     VideoInfo v = video;
@@ -1997,6 +2010,9 @@ QString ImportManager::upgradeVideo(const VideoInfo &video, const ImportSettings
     v.ytStream = plan.replaceAudio ? 1 : 0;
     v.audioDetail = audioDetail;
     v.ytAbr = YtDlp::audioKbps(audioInfo);
+    v.reviewStart = span.start;
+    v.reviewEnd = span.end;
+    v.spans = span.spans;
     m_db->updateVideoMedia(v);
     QStringList gains;
     if (betterVideo)
@@ -4512,6 +4528,7 @@ void ImportManager::runJob(qint64 trackId, const ImportSettings &cfg)
     v.vouched = judgeVouch && !needsReview;
     v.reviewStart = span.start;
     v.reviewEnd = span.end;
+    v.spans = span.spans;
     v.ytTitle = chosen.title;
     v.ytChannel = chosen.channel;
     const YtDlp::Channel channel = YtDlp::channelOf(ytInfo, chosen.channel);
@@ -4539,7 +4556,7 @@ void ImportManager::runJob(qint64 trackId, const ImportSettings &cfg)
     }
     // Under review it is a card of its own, with this track as its candidate.
     if (needsReview)
-        m_db->addCandidate(videoId, track, plan.replaceAudio ? 1 : 0, qMax(alignment.likeness, 1e-6), audioDetail);
+        m_db->addCandidate(videoId, track, plan.replaceAudio ? 1 : 0, qMax(alignment.likeness, 1e-6), audioDetail, span.spans);
     *review = needsReview;
     *videoIdOut = videoId;
     *summary = QStringLiteral("%1 · %2×%3 · %4").arg(chosen.title).arg(pr.width).arg(pr.height).arg(audioDetail);

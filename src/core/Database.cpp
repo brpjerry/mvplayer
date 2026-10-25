@@ -90,7 +90,7 @@ const char *kVideoCols =
     "id, yt_id, path, thumb, title, artist, album_artist, album, genre, year, track_no, duration, "
     "width, height, fps, vcodec, audio_source, audio_detail, yt_title, yt_channel, tags_json, added_at, yt_abr, "
     "review, review_start, review_end, yt_stream, yt_channel_id, yt_channel_subs, yt_channel_verified, yt_channel_handle, vouched, "
-    "yt_date, yt_description";
+    "yt_date, yt_description, spans";
 
 // Text that was kept, though it may be empty: never the null string, which
 // stands for "not kept".
@@ -144,6 +144,7 @@ VideoInfo readVideo(const QSqlQuery &q)
     if (!q.value(i).isNull())
         v.ytDescription = q.value(i).toString();
     ++i;
+    v.spans = audioSpansFromText(q.value(i++).toString());
     return v;
 }
 
@@ -507,8 +508,11 @@ bool Database::init(QString *error)
     // can be ignored: its subscribers and its verified mark, and its handle,
     // by which an exception names it. And when the upload was published.
     // And the upload's description, for the judge (judge page, V1).
+    // And where the track's audio sits in the video (AudioSpan), for the
+    // player to go from a track into its video at the same moment of the
+    // song; on a video under review, each candidate's for its own stream.
     for (const char *column : {"yt_channel_subs INTEGER", "yt_channel_verified INTEGER NOT NULL DEFAULT 0", "yt_channel_handle TEXT",
-                               "yt_date TEXT", "yt_description TEXT"}) {
+                               "yt_date TEXT", "yt_description TEXT", "spans TEXT"}) {
         QSqlQuery q(db);
         const QString name = QString::fromLatin1(column).section(QLatin1Char(' '), 0, 0);
         bool has = false;
@@ -517,6 +521,19 @@ bool Database::init(QString *error)
                 has |= q.value(1).toString() == name;
         }
         if (!has && !q.exec(QStringLiteral("ALTER TABLE videos ADD COLUMN ") + QLatin1String(column))) {
+            if (error)
+                *error = q.lastError().text();
+            return false;
+        }
+    }
+    {
+        QSqlQuery q(db);
+        bool has = false;
+        if (q.exec(QStringLiteral("PRAGMA table_info(candidates)"))) {
+            while (q.next())
+                has |= q.value(1).toString() == QLatin1String("spans");
+        }
+        if (!has && !q.exec(QStringLiteral("ALTER TABLE candidates ADD COLUMN spans TEXT"))) {
             if (error)
                 *error = q.lastError().text();
             return false;
@@ -1005,8 +1022,8 @@ qint64 Database::insertVideo(const VideoInfo &v)
         "INSERT INTO videos (yt_id, path, thumb, title, artist, album_artist, album, genre, year,"
         " track_no, duration, width, height, fps, vcodec, audio_source, audio_detail, yt_title,"
         " yt_channel, tags_json, added_at, yt_abr, review, review_start, review_end, yt_stream, yt_channel_id,"
-        " yt_channel_subs, yt_channel_verified, yt_channel_handle, vouched, yt_date, yt_description)"
-        " VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)"));
+        " yt_channel_subs, yt_channel_verified, yt_channel_handle, vouched, yt_date, yt_description, spans)"
+        " VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)"));
     q.addBindValue(v.ytId);
     q.addBindValue(storedPath(v.path));
     q.addBindValue(storedPath(v.thumb));
@@ -1040,6 +1057,7 @@ qint64 Database::insertVideo(const VideoInfo &v)
     q.addBindValue(v.vouched && !v.review);
     q.addBindValue(v.ytDate.isNull() ? QVariant() : QVariant(v.ytDate));
     q.addBindValue(v.ytDescription.isEmpty() ? QVariant() : QVariant(v.ytDescription));
+    q.addBindValue(v.spans.isEmpty() ? QVariant() : QVariant(audioSpansText(v.spans)));
     if (!run(q))
         return 0;
     return q.lastInsertId().toLongLong();
@@ -1068,7 +1086,8 @@ void Database::updateVideoMedia(const VideoInfo &v)
     QSqlQuery q(conn());
     q.prepare(QStringLiteral(
         "UPDATE videos SET duration = ?, width = ?, height = ?, fps = ?, vcodec = ?, audio_source = ?,"
-        " audio_detail = ?, yt_abr = ?, review = ?, review_start = ?, review_end = ?, yt_stream = ?, vouched = ? WHERE id = ?"));
+        " audio_detail = ?, yt_abr = ?, review = ?, review_start = ?, review_end = ?, yt_stream = ?, vouched = ?, spans = ?"
+        " WHERE id = ?"));
     q.addBindValue(v.duration);
     q.addBindValue(v.width);
     q.addBindValue(v.height);
@@ -1083,6 +1102,7 @@ void Database::updateVideoMedia(const VideoInfo &v)
     q.addBindValue(v.ytStream);
     // (A video that waits for a verdict has none yet.)
     q.addBindValue(v.vouched && !v.review);
+    q.addBindValue(v.spans.isEmpty() ? QVariant() : QVariant(audioSpansText(v.spans)));
     q.addBindValue(v.id);
     run(q);
 }
@@ -1103,17 +1123,19 @@ void Database::updateVideoChannel(const VideoInfo &v)
     run(q);
 }
 
-void Database::addCandidate(qint64 videoId, const TrackInfo &track, int stream, double fit, const QString &audioDetail)
+void Database::addCandidate(qint64 videoId, const TrackInfo &track, int stream, double fit, const QString &audioDetail,
+                            const QVector<AudioSpan> &spans)
 {
     QSqlQuery q(conn());
-    q.prepare(QStringLiteral("INSERT INTO candidates (video_id, track_key, stream, fit, audio_detail) VALUES (?, ?, ?, ?, ?)"
+    q.prepare(QStringLiteral("INSERT INTO candidates (video_id, track_key, stream, fit, audio_detail, spans) VALUES (?, ?, ?, ?, ?, ?)"
                              " ON CONFLICT(video_id, track_key) DO UPDATE SET stream = excluded.stream, fit = excluded.fit,"
-                             " audio_detail = excluded.audio_detail"));
+                             " audio_detail = excluded.audio_detail, spans = excluded.spans"));
     q.addBindValue(videoId);
     q.addBindValue(trackKey(track));
     q.addBindValue(stream);
     q.addBindValue(fit);
     q.addBindValue(QString(audioDetail.isNull() ? QStringLiteral("") : audioDetail));
+    q.addBindValue(spans.isEmpty() ? QVariant() : QVariant(audioSpansText(spans)));
     run(q);
 }
 
@@ -1223,7 +1245,7 @@ QVector<Database::Candidate> Database::candidates(qint64 videoId)
 {
     QVector<Candidate> out;
     QSqlQuery q(conn());
-    q.prepare(QStringLiteral("SELECT track_key, stream, fit, audio_detail FROM candidates WHERE video_id = ? ORDER BY rowid"));
+    q.prepare(QStringLiteral("SELECT track_key, stream, fit, audio_detail, spans FROM candidates WHERE video_id = ? ORDER BY rowid"));
     q.addBindValue(videoId);
     if (!run(q))
         return out;
@@ -1242,7 +1264,7 @@ QVector<Database::Candidate> Database::candidates(qint64 videoId)
                 best = file;
         }
         if (best)
-            out << Candidate{*best, q.value(1).toInt(), q.value(2).toDouble(), q.value(3).toString()};
+            out << Candidate{*best, q.value(1).toInt(), q.value(2).toDouble(), q.value(3).toString(), audioSpansFromText(q.value(4).toString())};
     }
     return out;
 }
@@ -1640,12 +1662,14 @@ QVector<Database::CandidateRow> Database::candidateRows(qint64 videoId)
 {
     QVector<CandidateRow> out;
     QSqlQuery q(conn());
-    q.prepare(QStringLiteral("SELECT track_key, stream, fit, audio_detail FROM candidates WHERE video_id = ? ORDER BY rowid"));
+    q.prepare(QStringLiteral("SELECT track_key, stream, fit, audio_detail, spans FROM candidates WHERE video_id = ? ORDER BY rowid"));
     q.addBindValue(videoId);
     if (!run(q))
         return out;
-    while (q.next())
-        out << CandidateRow{q.value(0).toLongLong(), q.value(1).toInt(), q.value(2).toDouble(), q.value(3).toString()};
+    while (q.next()) {
+        out << CandidateRow{q.value(0).toLongLong(), q.value(1).toInt(), q.value(2).toDouble(), q.value(3).toString(),
+                            audioSpansFromText(q.value(4).toString())};
+    }
     return out;
 }
 
@@ -1654,12 +1678,13 @@ void Database::restoreCandidates(qint64 videoId, const QVector<CandidateRow> &ro
     clearCandidates(videoId);
     for (const CandidateRow &r : rows) {
         QSqlQuery q(conn());
-        q.prepare(QStringLiteral("INSERT INTO candidates (video_id, track_key, stream, fit, audio_detail) VALUES (?, ?, ?, ?, ?)"));
+        q.prepare(QStringLiteral("INSERT INTO candidates (video_id, track_key, stream, fit, audio_detail, spans) VALUES (?, ?, ?, ?, ?, ?)"));
         q.addBindValue(videoId);
         q.addBindValue(r.trackKey);
         q.addBindValue(r.stream);
         q.addBindValue(r.fit);
         q.addBindValue(r.audioDetail);
+        q.addBindValue(r.spans.isEmpty() ? QVariant() : QVariant(audioSpansText(r.spans)));
         run(q);
     }
 }
@@ -1727,6 +1752,7 @@ bool Database::restoreVideo(const VideoInfo &v)
         q.addBindValue(v.vouched && !v.review);
         q.addBindValue(v.ytDate.isNull() ? QVariant() : QVariant(v.ytDate));
         q.addBindValue(v.ytDescription.isEmpty() ? QVariant() : QVariant(v.ytDescription));
+        q.addBindValue(v.spans.isEmpty() ? QVariant() : QVariant(audioSpansText(v.spans)));
     };
     QStringList sets;
     for (const QString &c : cols)
