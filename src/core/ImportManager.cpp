@@ -3487,11 +3487,12 @@ void ImportManager::runJob(qint64 trackId, const ImportSettings &cfg)
     };
 
     if (shortlisted.isEmpty()) {
-        // (S4 in judge mode.)
+        // (S4 in judge mode.) No results at all: YouTube answered the probe,
+        // so the search matched nothing (B6).
         finish(QStringLiteral("not_found"), 0,
                (judging ? QStringLiteral("the judge found nothing that looks like the track's official video among %1 results%2")
                               .arg(candidates.size()).arg(pickReason.isEmpty() ? QString() : QStringLiteral(": ") + pickReason)
-                        : candidates.isEmpty() ? QStringLiteral("the search matched nothing (YouTube answered the probe, B6)")
+                        : candidates.isEmpty() ? QStringLiteral("the search matched nothing")
                                                : QStringLiteral("none of %1 search results looked like an official video").arg(candidates.size()))
                    + (priorRejected ? QStringLiteral("; ") + reasons.join(QStringLiteral("; ")) : QString()));
         return;

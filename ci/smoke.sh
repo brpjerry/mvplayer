@@ -236,7 +236,7 @@ rm -f "$WORK/probe-args"
 OUT=$(MVPLAYER_YTDLP="$FAKE6" MVPLAYER_PAUSE_SECS=1 timeout 60 "$BUILD/mvplayer-import" \
     --music-dir "$WORK/lib" --mv-dir "$WORK/mvlib-b6" --jobs 1 2>&1)
 echo "$OUT" | grep -E "paused|^\[import\] A|^done:" | cut -c1-110
-[[ "$OUT" != *"paused"* && "$OUT" == *"the search matched nothing (YouTube answered the probe, B6)"* && "$OUT" == *"done: 0 videos; tracks: not_found=2"* ]]
+[[ "$OUT" != *"paused"* && "$OUT" == *"the search matched nothing"* && "$OUT" == *"done: 0 videos; tracks: not_found=2"* ]]
 [[ $(grep -c "official music video" "$WORK/probe-args") -ge 2 ]]
 grep -q '"event":"paused"' "$WORK/mvlib/.mvplayer/import-log.jsonl"
 

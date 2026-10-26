@@ -84,16 +84,18 @@ Rectangle {
         if (v.audioDetail) parts.push(v.audioDetail)
         return parts.join("  ·  ")
     }
-    // Why the track has no video, in a few words (docs/import-rules.html).
+    // Why the track has no video, in a few words (docs/import-rules.html):
+    // not in a video folder (A12), or skipped as too short, an audio-only
+    // variant or talk (A2–A4), or by the judge (import-rules-judge Q2).
     function stateLine(t) {
         if (t.lookup === 0)
-            return "Not looked up: its folder is not a video folder (A12)"
+            return "Not looked up: its folder is not a video folder"
         switch (t.state) {
         case "pending": return "Waiting to be looked up"
         case "not_found": return "No music video found"
         case "review": return "A video waits for your verdict"
         case "failed": return "The last lookup could not finish; it is tried again"
-        case "skipped": return "Not looked up: skipped by the rules (A2–A4)"
+        case "skipped": return "Not looked up: an interlude, instrumental or talk"
         }
         return ""
     }
@@ -315,6 +317,8 @@ Rectangle {
                 border.color: Theme.line
             }
             contentItem: Column {
+                // The tags of its file, written into the file; of several,
+                // the tags their files share.
                 Item {
                     width: rowMenu.availableWidth
                     height: 34
@@ -348,18 +352,6 @@ Rectangle {
                         cursorShape: Qt.PointingHandCursor
                         onClicked: rowMenu.pick()
                     }
-                }
-                Text {
-                    width: rowMenu.availableWidth
-                    leftPadding: 10
-                    rightPadding: 10
-                    topPadding: 2
-                    bottomPadding: 8
-                    text: rowMenu.editIds.length > 1 ? "The tags their files share. Titles and track numbers are each file's own."
-                                                     : "The tags of its file, written into the file."
-                    color: Theme.textFaint
-                    font.pixelSize: 11
-                    wrapMode: Text.WordWrap
                 }
                 // The track's file, in the file manager
                 Item {
