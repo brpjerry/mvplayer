@@ -32,7 +32,8 @@ Rectangle {
         root.navigated()
     }
 
-    // A right click on a row: its videos looked up again by today's rules.
+    // A right click on a row: its videos looked up again by today's rules
+    // (H), each kept, sent to review or replaced as they decide.
     function askReimport(item, type, value, count) {
         const p = item ? item.mapToItem(root, 0, item.height) : Qt.point(0, fixed.y + fixed.height)
         rowMenu.facetType = type
@@ -107,17 +108,6 @@ Rectangle {
                         rowMenu.close()
                     }
                 }
-            }
-            Text {
-                width: rowMenu.availableWidth
-                leftPadding: 10
-                rightPadding: 10
-                topPadding: 4
-                bottomPadding: 6
-                text: "Each is looked up again by today's rules: kept, sent to review or replaced as they decide."
-                color: Theme.textFaint
-                font.pixelSize: 11
-                wrapMode: Text.WordWrap
             }
         }
     }

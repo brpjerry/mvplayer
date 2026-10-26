@@ -279,72 +279,60 @@ Item {
         contentItem: Column {
             Repeater {
                 model: [
-                    { key: "play", icon: Icons.play, text: "Play", show: true, why: "" },
-                    { key: "lookup", icon: Icons.movie, text: "Find videos for this album", show: menu.lookedUp < menu.tracks,
-                      why: "Its tracks are looked up wherever their files are, from now on. Settings → Library lists such albums." },
+                    { key: "play", icon: Icons.play, text: "Play", show: true },
+                    // Its tracks are looked up wherever their files are, from
+                    // now on (A12); Settings → Library lists such albums.
+                    { key: "lookup", icon: Icons.movie, text: "Find videos for this album", show: menu.lookedUp < menu.tracks },
+                    // By today's rules (H): a video that still fits is kept, one
+                    // that no longer does goes to review or is replaced.
                     { key: "reimport", icon: Icons.refresh,
                       text: menu.videos > 0 ? "Re-import " + menu.videos + (menu.videos === 1 ? " video" : " videos") : "Look its tracks up again",
-                      show: menu.lookedUp > 0,
-                      why: "By today's rules: a video that still fits is kept, one that no longer does goes to review or is replaced." },
+                      show: menu.lookedUp > 0 },
+                    // The tags the album's files share: titles and track numbers
+                    // are each file's own.
                     { key: "edit", icon: Icons.edit,
                       text: menu.editAlbums.length > 1 ? "Edit tags of " + menu.editAlbums.length + " albums" : "Edit tags",
-                      show: true,
-                      why: "The tags the album's files share: artist, album, date, genre and the like. Titles and track numbers are each file's own." },
-                    { key: "location", icon: Icons.folder, text: "Open file location", show: true,
-                      why: "The folder of its first track, in the file manager." }
+                      show: true },
+                    // The folder of its first track, in the file manager.
+                    { key: "location", icon: Icons.folder, text: "Open file location", show: true }
                 ]
-                Column {
+                Item {
                     id: entry
                     required property var modelData
                     visible: modelData.show
                     width: menu.availableWidth
-                    Item {
-                        width: parent.width
-                        height: 34
-                        enabled: entry.modelData.key === "play" || entry.modelData.key === "edit" || entry.modelData.key === "location" || App.configured
-                        opacity: enabled ? 1 : 0.4
-                        Rectangle {
-                            anchors.fill: parent
-                            radius: Theme.radiusSmall
-                            color: Theme.hover
-                            opacity: entryMouse.containsMouse ? 1 : 0
-                            Behavior on opacity { NumberAnimation { duration: Theme.fast } }
-                        }
-                        Icon {
-                            x: 10
-                            anchors.verticalCenter: parent.verticalCenter
-                            path: entry.modelData.icon
-                            size: 16
-                            color: Theme.textDim
-                        }
-                        Text {
-                            x: 34
-                            width: parent.width - 44
-                            anchors.verticalCenter: parent.verticalCenter
-                            text: entry.modelData.text
-                            color: Theme.text
-                            font.pixelSize: 13
-                            elide: Text.ElideRight
-                        }
-                        MouseArea {
-                            id: entryMouse
-                            anchors.fill: parent
-                            hoverEnabled: true
-                            cursorShape: Qt.PointingHandCursor
-                            onClicked: menu.pick(entry.modelData.key)
-                        }
+                    height: 34
+                    enabled: modelData.key === "play" || modelData.key === "edit" || modelData.key === "location" || App.configured
+                    opacity: enabled ? 1 : 0.4
+                    Rectangle {
+                        anchors.fill: parent
+                        radius: Theme.radiusSmall
+                        color: Theme.hover
+                        opacity: entryMouse.containsMouse ? 1 : 0
+                        Behavior on opacity { NumberAnimation { duration: Theme.fast } }
+                    }
+                    Icon {
+                        x: 10
+                        anchors.verticalCenter: parent.verticalCenter
+                        path: entry.modelData.icon
+                        size: 16
+                        color: Theme.textDim
                     }
                     Text {
-                        visible: entry.modelData.why.length > 0
-                        width: parent.width
-                        leftPadding: 10
-                        rightPadding: 10
-                        topPadding: 2
-                        bottomPadding: 8
-                        text: entry.modelData.why
-                        color: Theme.textFaint
-                        font.pixelSize: 11
-                        wrapMode: Text.WordWrap
+                        x: 34
+                        width: parent.width - 44
+                        anchors.verticalCenter: parent.verticalCenter
+                        text: entry.modelData.text
+                        color: Theme.text
+                        font.pixelSize: 13
+                        elide: Text.ElideRight
+                    }
+                    MouseArea {
+                        id: entryMouse
+                        anchors.fill: parent
+                        hoverEnabled: true
+                        cursorShape: Qt.PointingHandCursor
+                        onClicked: menu.pick(entry.modelData.key)
                     }
                 }
             }

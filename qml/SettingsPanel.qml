@@ -643,7 +643,7 @@ Popup {
                         }
                     }
 
-                    // Tracks looked up again by today's rules, by folder or by file.
+                    // Tracks looked up again by today's rules (H), by folder or by file.
                     Item {
                         id: reimport
                         property string note: ""
@@ -674,7 +674,7 @@ Popup {
                             Text {
                                 width: parent.width
                                 text: reimport.note.length > 0 ? reimport.note
-                                    : "Looks the tracks in a folder, or one file, up again by today's rules. A video that still fits is kept without a download; one that no longer does goes to review, or is replaced."
+                                    : "Looks the tracks in a folder, or one file, up again. A video that still fits is kept without a download; one that no longer does goes to review, or is replaced."
                                 color: reimport.note.length > 0 ? Theme.text : Theme.textDim
                                 font.pixelSize: 12
                                 wrapMode: Text.WordWrap
@@ -1598,6 +1598,8 @@ Popup {
 
                     // What the judge does (docs/import-rules-judge.html, X4):
                     // nothing, advice on cards under review, or the lookup itself.
+                    // Off and in advice mode, the lookups run by the rules as
+                    // before (docs/import-rules.html).
                     Column {
                         width: parent.width
                         spacing: 8
@@ -1611,8 +1613,8 @@ Popup {
                             text: App.judgeMode === "judge"
                                 ? "Judge: it runs each lookup — writes the search, picks what to listen to, and gives the verdict. A verdict it is at least 85% sure of stands by itself; anything less, a cut, an interrupted video or one the audio check doubts is left for you, with its advice on the card."
                                 : App.judgeMode === "advice"
-                                ? "Advice: lookups run by the rules as before; each card under review shows whether the judge would keep the video for the candidate on show, and how sure it is. Nothing is decided by it."
-                                : "Off: the rules decide, and cards carry no advice."
+                                ? "Advice: lookups run as usual; each card under review shows whether the judge would keep the video for the candidate on show, and how sure it is. Nothing is decided by it."
+                                : "Off: lookups run as usual, and cards carry no advice."
                             color: Theme.textDim
                             font.pixelSize: 12
                             wrapMode: Text.WordWrap

@@ -68,7 +68,8 @@ int main(int argc, char **argv)
         {QStringLiteral("allow-unofficial"), QStringLiteral("Accept uploads that do not look official.")},
         {QStringLiteral("keep-youtube-audio"), QStringLiteral("Never replace the video's audio with the library track.")},
         {QStringLiteral("allow-still-images"), QStringLiteral("Accept videos whose picture never changes.")},
-        {QStringLiteral("judge"), QStringLiteral("The judge (docs/import-rules-judge.html): off, advice, or judge (it runs the lookup)."), QStringLiteral("mode"), QStringLiteral("off")},
+        // The judge's modes: docs/import-rules-judge.html.
+        {QStringLiteral("judge"), QStringLiteral("The judge: off, advice (on videos under review), or judge (it runs the lookup)."), QStringLiteral("mode"), QStringLiteral("off")},
         {QStringLiteral("judge-model"), QStringLiteral("Claude: haiku, sonnet or opus. ChatGPT: a model slug from --chatgpt-models."), QStringLiteral("model"), QStringLiteral("sonnet")},
         {QStringLiteral("judge-provider"), QStringLiteral("Judge provider: claude or chatgpt."), QStringLiteral("provider"), QStringLiteral("claude")},
         {QStringLiteral("chatgpt-auth-file"), QStringLiteral("ChatGPT account store; the app's by default."), QStringLiteral("file")},
@@ -96,7 +97,8 @@ int main(int argc, char **argv)
         {QStringLiteral("fetch-subtitles"), QStringLiteral("Fetch the subtitles that the videos already imported lack (needs --subtitles).")},
         {QStringLiteral("delete-untracked"), QStringLiteral("After reading the music folders, delete the videos that none of their tracks has.")},
         {QStringLiteral("check-quality"), QStringLiteral("Look at the videos already imported again and rebuild those the account is offered in better quality.")},
-        {QStringLiteral("reimport"), QStringLiteral("Look the tracks at this path (a music file, or a folder of them) up again by today's rules: a video that still fits is kept, one that no longer does goes to review or is replaced (repeatable)."), QStringLiteral("path")},
+        // By today's rules (docs/import-rules.html, H).
+        {QStringLiteral("reimport"), QStringLiteral("Look the tracks at this path (a music file, or a folder of them) up again: a video that still fits is kept, one that no longer does goes to review or is replaced (repeatable)."), QStringLiteral("path")},
         {QStringLiteral("reimport-before"), QStringLiteral("Likewise every track with a video whose last lookup was before this time (ISO 8601, e.g. 2026-10-05T16:35 or 2026-10-05)."), QStringLiteral("time")},
         {QStringLiteral("lookup-album"), QStringLiteral("Look an album of the music library up wherever its files are, as <album artist>/<album> (repeatable)."), QStringLiteral("album")},
     });

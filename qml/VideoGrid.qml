@@ -327,6 +327,10 @@ Item {
             border.color: Theme.line
         }
         contentItem: Column {
+            // The tags of its music file, written into the file (the video
+            // keeps its file and is shown under the new tags); of several,
+            // the tags their files share. A video under review has no track
+            // of its own until it is accepted, and an orphan none at all.
             Item {
                 width: menu.availableWidth
                 height: 34
@@ -362,20 +366,6 @@ Item {
                     cursorShape: Qt.PointingHandCursor
                     onClicked: menu.pick()
                 }
-            }
-            Text {
-                width: menu.availableWidth
-                leftPadding: 10
-                rightPadding: 10
-                topPadding: 2
-                bottomPadding: 8
-                text: !menu.canEdit ? (menu.video.review ? "A video under review has no track of its own yet: accept it first."
-                                                         : "No track in your music folders has this video.")
-                    : menu.editIds.length > 1 ? "The tags their music files share. Titles and track numbers are each file's own."
-                    : "The tags of its music file, written into the file. The video keeps its file and is shown under the new tags."
-                color: Theme.textFaint
-                font.pixelSize: 11
-                wrapMode: Text.WordWrap
             }
             // The video's file, in the file manager
             Item {
@@ -415,17 +405,6 @@ Item {
                         App.openFileLocation(path)
                     }
                 }
-            }
-            Text {
-                width: menu.availableWidth
-                leftPadding: 10
-                rightPadding: 10
-                topPadding: 2
-                bottomPadding: 8
-                text: "The video's file, in the file manager."
-                color: Theme.textFaint
-                font.pixelSize: 11
-                wrapMode: Text.WordWrap
             }
         }
     }
