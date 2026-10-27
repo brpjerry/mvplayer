@@ -33,6 +33,7 @@ qt_add_library(mvcore STATIC
     src/core/Muxer.h src/core/Muxer.cpp
     src/core/TalkCheck.h src/core/TalkCheck.cpp
     src/core/Subtitles.h src/core/Subtitles.cpp
+    src/core/MusicBrainz.h src/core/MusicBrainz.cpp
     src/core/ArtistChannels.h src/core/ArtistChannels.cpp
     src/core/LibraryScanner.h src/core/LibraryScanner.cpp
     src/core/ImportManager.h src/core/ImportManager.cpp

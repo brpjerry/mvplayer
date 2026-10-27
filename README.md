@@ -156,6 +156,13 @@ outline, for every track without a video
    says so ("MC", "MC06", "Talk 2", "… (Interview)"; the word has to be the
    whole title or a tag) and the track also sounds like it: full of pauses
    and without a pulse. Either alone is not enough.
+   Beside the search, MusicBrainz is asked for the music video of the
+   track's recording, found by the recording id or ISRC its file carries, or
+   else by its title and artist. An upload it links as that music video is
+   listened to first, whether or not the search returned it, and counts as
+   on the artist's own channel: a label's upload of the artist's video can
+   be taken outright, and a small channel is no reason against it. What it
+   says is kept with the recording for 30 days.
 2. **Verify** the best candidates by downloading only their audio and
    comparing Chromaprint fingerprints with the track. A video is accepted only
    if its soundtrack contains the recording, and its picture is not a still
@@ -176,7 +183,8 @@ outline, for every track without a video
    when it is named after the artist and nothing else ("Artist", "Artist
    Official", "DJGenki" for "DJ Genki", either half of "A and B"), when
    MusicBrainz lists it for the artist (asked once per artist, remembered
-   in the library), or when you allowed it. Anything else that is the song
+   in the library) or links that very upload as the track's music video,
+   or when you allowed it. Anything else that is the song
    — a label's upload, a verified re-upload channel, a video titled "Music
    Video" by anyone, the artist's own video over another mix — goes to
    review, where the card shows the channel. What audio your file has does

@@ -448,6 +448,12 @@ bool Database::init(QString *error)
         QString::fromLatin1(kChannelListsSql),
         QString::fromLatin1(kJudgeAdviceSql),
         QString::fromLatin1(kLookupAlbumsSql),
+        // What MusicBrainz said of a track's recording (B14): the uploads it
+        // links as its music video, space-separated, asked by `question`.
+        // Kept for a while and asked again; older versions pass it by.
+        QStringLiteral("CREATE TABLE IF NOT EXISTS music_videos ("
+                       " track_key INTEGER PRIMARY KEY, question TEXT NOT NULL DEFAULT '', uploads TEXT NOT NULL DEFAULT '',"
+                       " checked_until INTEGER NOT NULL DEFAULT 0)"),
         QStringLiteral("CREATE INDEX IF NOT EXISTS tracks_state ON tracks(state)"),
         QStringLiteral("CREATE INDEX IF NOT EXISTS tracks_lookup ON tracks(lookup, state)"),
         QStringLiteral("CREATE INDEX IF NOT EXISTS tracks_video ON tracks(video_id)"),
@@ -1396,6 +1402,38 @@ void Database::setArtistChannelsKnown(const QString &artist, int days)
     QSqlQuery q(conn());
     q.prepare(QStringLiteral("INSERT OR REPLACE INTO artist_channels (artist, channel_id, channel, source, checked_until) VALUES (?, '', '', 'musicbrainz', ?)"));
     q.addBindValue(artist);
+    q.addBindValue(QDateTime::currentSecsSinceEpoch() + qint64(days) * 86400);
+    run(q);
+}
+
+bool Database::musicVideosKnown(const TrackInfo &track, const QString &question, QStringList *uploads)
+{
+    QSqlQuery q(conn());
+    q.prepare(QStringLiteral("SELECT uploads FROM music_videos WHERE track_key = ? AND question = ? AND checked_until > ?"));
+    q.addBindValue(trackKey(track));
+    q.addBindValue(question);
+    q.addBindValue(QDateTime::currentSecsSinceEpoch());
+    if (!run(q) || !q.next())
+        return false;
+    *uploads = q.value(0).toString().split(QLatin1Char(' '), Qt::SkipEmptyParts);
+    return true;
+}
+
+QStringList Database::musicVideosKept(const TrackInfo &track)
+{
+    QSqlQuery q(conn());
+    q.prepare(QStringLiteral("SELECT uploads FROM music_videos WHERE track_key = ?"));
+    q.addBindValue(trackKey(track));
+    return run(q) && q.next() ? q.value(0).toString().split(QLatin1Char(' '), Qt::SkipEmptyParts) : QStringList();
+}
+
+void Database::setMusicVideos(const TrackInfo &track, const QString &question, const QStringList &uploads, int days)
+{
+    QSqlQuery q(conn());
+    q.prepare(QStringLiteral("INSERT OR REPLACE INTO music_videos (track_key, question, uploads, checked_until) VALUES (?, ?, ?, ?)"));
+    q.addBindValue(trackKey(track));
+    q.addBindValue(question);
+    q.addBindValue(uploads.join(QLatin1Char(' ')));
     q.addBindValue(QDateTime::currentSecsSinceEpoch() + qint64(days) * 86400);
     run(q);
 }
