@@ -3439,14 +3439,17 @@ void ImportManager::runJob(qint64 trackId, const ImportSettings &cfg)
     // track's recording, beside whatever the search returned. Not in judge
     // mode: there the judge picks what is listened to (judge page, S3).
     if (!judging && MusicBrainz::enabled()) {
-        const QString question = MusicBrainz::question(track);
+        // (The fingerprint the library made of the file, for AcoustID: B15.)
+        const QByteArray print = m_db->fingerprintOf(track.id);
+        const QString question = MusicBrainz::question(track, print);
         QStringList uploads;
         if (m_db->musicVideosKnown(track, question, &uploads)) {
             logMusicBrainz.insert(QStringLiteral("kept"), true);
         } else {
             report(QStringLiteral("Asking MusicBrainz"));
-            QString how, mbError;
-            const QStringList recordings = MusicBrainz::recordingsOf(track, &how, &mbError);
+            QStringList ways;
+            QString mbError, acoustidError;
+            const QStringList recordings = MusicBrainz::recordingsOf(track, print, &ways, &mbError, &acoustidError);
             if (mbError.isEmpty() && !recordings.isEmpty())
                 uploads = MusicBrainz::musicVideosOf(recordings, &mbError);
             if (m_cancel)
@@ -3454,10 +3457,13 @@ void ImportManager::runJob(qint64 trackId, const ImportSettings &cfg)
             // B13: not a failure of the lookup, which goes on without it.
             if (!mbError.isEmpty())
                 uploads.clear();
-            m_db->setMusicVideos(track, question, uploads, mbError.isEmpty() ? 30 : 1);
-            logMusicBrainz = {{QStringLiteral("by"), how}, {QStringLiteral("recordings"), QJsonArray::fromStringList(recordings)}};
+            // Either not reached (B13, B16): asked again after a day.
+            m_db->setMusicVideos(track, question, uploads, mbError.isEmpty() && acoustidError.isEmpty() ? 30 : 1);
+            logMusicBrainz = {{QStringLiteral("by"), QJsonArray::fromStringList(ways)}, {QStringLiteral("recordings"), QJsonArray::fromStringList(recordings)}};
             if (!mbError.isEmpty())
                 logMusicBrainz.insert(QStringLiteral("error"), mbError);
+            if (!acoustidError.isEmpty())
+                logMusicBrainz.insert(QStringLiteral("acoustidError"), acoustidError);
         }
         logMusicBrainz.insert(QStringLiteral("uploads"), QJsonArray::fromStringList(uploads));
         QJsonArray passed;

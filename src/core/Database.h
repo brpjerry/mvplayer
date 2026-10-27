@@ -134,6 +134,8 @@ public:
         bool current = false;
     };
     QHash<qint64, StoredPrint> fingerprints();
+    // One track's (packed; empty where it has none).
+    QByteArray fingerprintOf(qint64 trackId);
     void setFingerprint(qint64 trackId, const QByteArray &packed, qint64 fileSize);
     qint64 newRecording();
     void resetTracks(const QStringList &fromStates);

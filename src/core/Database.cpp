@@ -914,6 +914,14 @@ QHash<qint64, Database::StoredPrint> Database::fingerprints()
     return out;
 }
 
+QByteArray Database::fingerprintOf(qint64 trackId)
+{
+    QSqlQuery q(conn());
+    q.prepare(QStringLiteral("SELECT fingerprint FROM tracks WHERE id = ?"));
+    q.addBindValue(trackId);
+    return run(q) && q.next() ? q.value(0).toByteArray() : QByteArray();
+}
+
 void Database::setFingerprint(qint64 trackId, const QByteArray &packed, qint64 fileSize)
 {
     QSqlQuery q(conn());

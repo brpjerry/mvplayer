@@ -157,8 +157,10 @@ outline, for every track without a video
    whole title or a tag) and the track also sounds like it: full of pauses
    and without a pulse. Either alone is not enough.
    Beside the search, MusicBrainz is asked for the music video of the
-   track's recording, found by the recording id or ISRC its file carries, or
-   else by its title and artist. An upload it links as that music video is
+   track's recording, found every way there is: by the recording id or ISRC
+   its file carries, by its title and artist, and by its sound on AcoustID
+   (the fingerprint the library made of the file, which finds the recording
+   where a romanised tag does not). An upload it links as that music video is
    listened to first, whether or not the search returned it, and counts as
    on the artist's own channel: a label's upload of the artist's video can
    be taken outright, and a small channel is no reason against it. What it

@@ -1040,15 +1040,26 @@ echo "== MusicBrainz"
 # found (B11, C9). A YouTube link on the recording itself is the song's audio
 # and is not taken (B12). The answer is kept with the recording (B14): a
 # re-import with MusicBrainz gone goes by it. MusicBrainz not reached is no
-# failure of the lookup (B13). A server of our own stands in for it.
+# failure of the lookup (B13). AcoustID finds the recording by the file's
+# fingerprint where its title does not (B15), sure of it at 0.9 and only of
+# the track's length; not reached, the other ways count, and the answer is
+# kept a day (B16). A server of our own stands in for both.
 cat > "$WORK/fake-mb.py" <<'PY'
 import http.server, json, sys, urllib.parse
-routes, log, portfile = json.load(open(sys.argv[1])), sys.argv[2], sys.argv[3]
+log, portfile = sys.argv[2], sys.argv[3]
 class Handler(http.server.BaseHTTPRequestHandler):
+    # The routes are read afresh for every request: a test may change them.
     def do_GET(self):
         with open(log, "a") as f:
             f.write(self.path + "\n")
-        body = routes.get(urllib.parse.urlsplit(self.path).path)
+        self.answer(urllib.parse.urlsplit(self.path).path)
+    def do_POST(self):
+        form = urllib.parse.parse_qs(self.rfile.read(int(self.headers["Content-Length"])).decode())
+        with open(log, "a") as f:
+            f.write("POST %s client=%s duration=%s fingerprint=%d\n" % (self.path, form["client"][0], form["duration"][0], len(form["fingerprint"][0])))
+        self.answer(self.path)
+    def answer(self, path):
+        body = json.load(open(sys.argv[1])).get(path)
         if body is None:
             self.send_response(404)
             self.end_headers()
@@ -1070,6 +1081,7 @@ server.serve_forever()
 PY
 cat > "$WORK/mb-routes.json" <<'JSON'
 {"/ws/2/artist/": {"artists": []},
+ "/v2/lookup": {"status": "ok", "results": []},
  "/ws/2/recording": {"recordings": [{"id": "rec-ten", "score": 100, "title": "Ten", "length": 50000, "video": false},
                                     {"id": "rec-tenth", "score": 100, "title": "Ten", "length": 95000, "video": false},
                                     {"id": "rec-near", "score": 80, "title": "Ten Ten", "length": 50000, "video": false}]},
@@ -1085,7 +1097,7 @@ MBPID=$!
 trap 'kill "$MBPID" 2>/dev/null; rm -rf "$WORK"' EXIT
 for _ in $(seq 100); do [[ -s "$WORK/mb-port" ]] && break; sleep 0.1; done
 MB="http://127.0.0.1:$(cat "$WORK/mb-port")/ws/2/"
-mbrun() { local url=$1; shift; rm -f "$WORK/site-args"; env -u MVPLAYER_NO_MUSICBRAINZ MVPLAYER_MUSICBRAINZ_URL="$url" MVPLAYER_YTDLP="$CHAN" timeout 120 "$BUILD/mvplayer-import" --allow-still-images --jobs 1 "$@" 2>&1 | grep -E "^\[import\]|^done:" | cut -c1-200; }
+mbrun() { local url=$1; shift; rm -f "$WORK/site-args"; env -u MVPLAYER_NO_MUSICBRAINZ MVPLAYER_MUSICBRAINZ_URL="$url" MVPLAYER_ACOUSTID_URL="${ACOUSTID:-${url%/ws/2/}/v2/lookup}" MVPLAYER_YTDLP="$CHAN" timeout 120 "$BUILD/mvplayer-import" --allow-still-images --jobs 1 "$@" 2>&1 | grep -E "^\[import\]|^done:" | cut -c1-200; }
 lastlookup() { python3 -c "import json, sys; print(json.dumps([e for e in map(json.loads, open(sys.argv[1])) if e.get('event') == 'lookup'][-1].get(sys.argv[2])))" "$WORK/$1/.mvplayer/import-log.jsonl" "$2"; }
 echo '{"abr": 96, "acodec": "opus", "channel": "Label Works", "channel_id": "UClabel", "channel_follower_count": 120}' > "$WORK/site-info.json"
 echo '{"id": "mbvideo0001", "title": "Ten (Music Video)", "channel": "Label Works", "channel_id": "UClabel", "duration": 50, "channel_follower_count": 120}' > "$WORK/site-page.json"
@@ -1095,9 +1107,38 @@ OUT=$(mbrun "$MB" --music-dir "$WORK/lib17" --mv-dir "$WORK/mvlib-mb"); echo "$O
 # song's own link was never asked about, nor the recording 45 s too long.
 [[ $(grep -v ytsearch "$WORK/site-args" | grep -c -- " -J ") -eq 1 ]] && ! grep -q topicaudio1 "$WORK/site-args"
 grep -q "^/ws/2/recording/rec-ten?" "$WORK/mb-requests" && grep -q "^/ws/2/recording/vid-ten?" "$WORK/mb-requests" && ! grep -q "rec-tenth\|rec-near" "$WORK/mb-requests"
-[[ "$(lastlookup mvlib-mb musicbrainz)" == '{"by": "title", "recordings": ["rec-ten"], "uploads": ["mbvideo0001"]}' ]]
+[[ "$(lastlookup mvlib-mb musicbrainz)" == '{"by": ["title"], "recordings": ["rec-ten"], "uploads": ["mbvideo0001"]}' ]]
+# AcoustID was asked too, with the app's key and the file's fingerprint (it knew nothing).
+grep -q "^POST /v2/lookup client=CgMnrZM9J6 duration=50 fingerprint=[1-9]" "$WORK/mb-requests"
 python3 -c "import json, sys; c = [e for e in map(json.loads, open(sys.argv[1])) if e.get('event') == 'lookup'][-1]['candidates']; assert [x['id'] for x in c if x.get('musicbrainz')] == ['mbvideo0001'], c" "$WORK/mvlib-mb/.mvplayer/import-log.jsonl"
 [[ "$(ask mvlib-mb "SELECT uploads, checked_until > strftime('%s', 'now') + 29 * 86400 FROM music_videos")" == "[('mbvideo0001', 1)]" ]]
+# Its title finds nothing, but AcoustID knows the sound: of what it names,
+# the recording it is sure of and of the track's length (not one under 0.9,
+# nor one 70 s too long) leads to the same music video.
+python3 - "$WORK/mb-routes.json" <<'PY'
+import json, os, sys
+routes = json.load(open(sys.argv[1]))
+os.replace(sys.argv[1], sys.argv[1] + ".title")
+routes["/ws/2/recording"] = {"recordings": []}
+routes["/v2/lookup"] = {"status": "ok", "results": [
+    {"id": "a1", "score": 0.97, "recordings": [{"id": "rec-ten", "duration": 50, "title": "Ten"}]},
+    {"id": "a2", "score": 0.99, "recordings": [{"id": "rec-long", "duration": 120, "title": "Ten (Extended)"}]},
+    {"id": "a3", "score": 0.5, "recordings": [{"id": "rec-low", "duration": 50, "title": "Another"}]}]}
+json.dump(routes, open(sys.argv[1] + ".tmp", "w"))
+os.replace(sys.argv[1] + ".tmp", sys.argv[1])
+PY
+: > "$WORK/mb-requests"
+OUT=$(mbrun "$MB" --music-dir "$WORK/lib17" --mv-dir "$WORK/mvlib-mb3"); echo "$OUT"
+[[ "$(ask mvlib-mb3 "$STATES")" == "[('Ten', 'done', 'mbvideo0001')]" ]]
+[[ "$(lastlookup mvlib-mb3 musicbrainz)" == '{"by": ["acoustid"], "recordings": ["rec-ten"], "uploads": ["mbvideo0001"]}' ]]
+! grep -q "rec-long\|rec-low" "$WORK/mb-requests"
+mv "$WORK/mb-routes.json.title" "$WORK/mb-routes.json"
+# AcoustID not reached: its title finds the recording all the same, and what
+# MusicBrainz said is kept for a day, so that AcoustID is asked again.
+OUT=$(ACOUSTID="http://127.0.0.1:9/v2/lookup" mbrun "$MB" --music-dir "$WORK/lib17" --mv-dir "$WORK/mvlib-mb4"); echo "$OUT"
+[[ "$(ask mvlib-mb4 "$STATES")" == "[('Ten', 'done', 'mbvideo0001')]" ]]
+python3 -c "import json, sys; m = json.loads(sys.argv[1]); assert m['by'] == ['title'] and m['acoustidError'] and 'error' not in m, m" "$(lastlookup mvlib-mb4 musicbrainz)"
+[[ "$(ask mvlib-mb4 "SELECT uploads, checked_until < strftime('%s', 'now') + 2 * 86400 FROM music_videos")" == "[('mbvideo0001', 1)]" ]]
 # MusicBrainz gone: a re-import goes by what was kept, and the video stays.
 kill "$MBPID"; wait "$MBPID" 2>/dev/null || true
 trap 'rm -rf "$WORK"' EXIT

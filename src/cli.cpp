@@ -327,7 +327,7 @@ int main(int argc, char **argv)
 
     if (pos.value(0) == QLatin1String("music-videos")) {
         // What MusicBrainz links as the music video of a file's recording
-        // (docs/import-rules.html, B7–B12), asked now, nothing kept.
+        // (docs/import-rules.html, B7–B12, B15), asked now, nothing kept.
         if (pos.size() != 2)
             parser.showHelp(2);
         TrackInfo t;
@@ -336,14 +336,23 @@ int main(int argc, char **argv)
             out << "error: not readable audio: " << pos[1] << Qt::endl;
             return 1;
         }
-        QString how, err;
-        const QStringList recordings = MusicBrainz::recordingsOf(t, &how, &err);
+        // AcoustID hears the file as the library does (B15).
+        AudioPrint::Print print;
+        QString err, acoustidErr;
+        if (!AudioPrint::ofFile(t.path, &print, nullptr, &err)) {
+            out << "error: " << err << Qt::endl;
+            return 1;
+        }
+        QStringList ways;
+        const QStringList recordings = MusicBrainz::recordingsOf(t, AudioPrint::pack(print), &ways, &err, &acoustidErr);
         const QStringList uploads = err.isEmpty() && !recordings.isEmpty() ? MusicBrainz::musicVideosOf(recordings, &err) : QStringList();
         if (!err.isEmpty()) {
             out << "error: " << err << Qt::endl;
             return 1;
         }
-        out << "recordings" << (how.isEmpty() ? QString() : QStringLiteral(" (by %1)").arg(how)) << ": "
+        if (!acoustidErr.isEmpty())
+            out << "AcoustID could not be asked: " << acoustidErr << Qt::endl;
+        out << "recordings" << (ways.isEmpty() ? QString() : QStringLiteral(" (by %1)").arg(ways.join(QStringLiteral(", ")))) << ": "
             << (recordings.isEmpty() ? QStringLiteral("none") : recordings.join(QStringLiteral(", "))) << Qt::endl
             << "music videos on YouTube: " << (uploads.isEmpty() ? QStringLiteral("none") : uploads.join(QStringLiteral(", "))) << Qt::endl;
         return 0;

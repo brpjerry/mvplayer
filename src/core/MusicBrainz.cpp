@@ -1,8 +1,10 @@
 #include "core/MusicBrainz.h"
 
+#include "core/AcoustID.h"
 #include "core/Types.h"
 
 #include <QCoreApplication>
+#include <QCryptographicHash>
 #include <QElapsedTimer>
 #include <QEventLoop>
 #include <QJsonArray>
@@ -104,49 +106,58 @@ QByteArray get(const QString &path, QUrlQuery query, QString *error, bool *missi
     return out;
 }
 
-QString question(const TrackInfo &track)
+QString question(const TrackInfo &track, const QByteArray &packedPrint)
 {
     return QStringList{firstValue(track, "MUSICBRAINZ_TRACKID"), firstValue(track, "ISRC"), track.title,
-                       track.artist.isEmpty() ? track.albumArtist : track.artist, QString::number(qRound(track.duration))}
+                       track.artist.isEmpty() ? track.albumArtist : track.artist, QString::number(qRound(track.duration)),
+                       QString::fromLatin1(QCryptographicHash::hash(packedPrint, QCryptographicHash::Sha1).toHex().left(12))}
         .join(QLatin1Char('|'));
 }
 
-QStringList recordingsOf(const TrackInfo &track, QString *how, QString *error)
+QStringList recordingsOf(const TrackInfo &track, const QByteArray &packedPrint, QStringList *ways, QString *error, QString *acoustidError)
 {
+    QStringList out;
+    const auto found = [&](const QString &way, const QStringList &recordings) {
+        for (const QString &id : recordings) {
+            if (!out.contains(id))
+                out << id;
+        }
+        if (!recordings.isEmpty())
+            *ways << way;
+    };
     // B7: as MusicBrainz Picard tags a file.
     static const QRegularExpression mbid(QStringLiteral("^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$"));
     const QString id = firstValue(track, "MUSICBRAINZ_TRACKID").toLower();
-    if (mbid.match(id).hasMatch()) {
-        *how = QStringLiteral("id");
-        return {id};
-    }
+    if (mbid.match(id).hasMatch())
+        found(QStringLiteral("id"), {id});
+    // B15: by the file's sound. B16: without it where AcoustID cannot be asked.
+    if (AcoustID::enabled() && !packedPrint.isEmpty())
+        found(QStringLiteral("acoustid"), AcoustID::recordingsOf(packedPrint, track.duration, acoustidError));
     // B8: an ISRC that MusicBrainz knows.
     static const QRegularExpression isrcForm(QStringLiteral("^[A-Z]{2}[A-Z0-9]{3}[0-9]{7}$"));
     const QString isrc = firstValue(track, "ISRC").toUpper().remove(QLatin1Char('-')).remove(QLatin1Char(' '));
     if (isrcForm.match(isrc).hasMatch()) {
         bool missing = false;
-        const QByteArray found = get(QStringLiteral("isrc/") + isrc, {}, error, &missing);
+        const QByteArray answer = get(QStringLiteral("isrc/") + isrc, {}, error, &missing);
         if (!error->isEmpty())
             return {};
-        if (!missing) {
-            *how = QStringLiteral("isrc");
-            return audioRecordings(QJsonDocument::fromJson(found).object().value(QLatin1String("recordings")).toArray(), track.duration, 0);
-        }
+        if (!missing)
+            found(QStringLiteral("isrc"), audioRecordings(QJsonDocument::fromJson(answer).object().value(QLatin1String("recordings")).toArray(), track.duration, 0));
     }
     // B9: the sure matches of its title and artist, a phrase each.
     const auto phrase = [](QString s) { return s.remove(QLatin1Char('"')).remove(QLatin1Char('\\')).trimmed(); };
     const QString title = phrase(track.title);
     const QString artist = phrase((track.artist.isEmpty() ? track.albumArtist : track.artist).section(QStringLiteral("; "), 0, 0));
-    if (title.isEmpty() || artist.isEmpty())
-        return {};
-    QUrlQuery q;
-    q.addQueryItem(QStringLiteral("query"), QStringLiteral("recording:\"%1\" AND (artist:\"%2\" OR artistname:\"%2\")").arg(title, artist));
-    q.addQueryItem(QStringLiteral("limit"), QStringLiteral("10"));
-    const QByteArray found = get(QStringLiteral("recording"), q, error);
-    if (!error->isEmpty())
-        return {};
-    *how = QStringLiteral("title");
-    return audioRecordings(QJsonDocument::fromJson(found).object().value(QLatin1String("recordings")).toArray(), track.duration, 100);
+    if (!title.isEmpty() && !artist.isEmpty()) {
+        QUrlQuery q;
+        q.addQueryItem(QStringLiteral("query"), QStringLiteral("recording:\"%1\" AND (artist:\"%2\" OR artistname:\"%2\")").arg(title, artist));
+        q.addQueryItem(QStringLiteral("limit"), QStringLiteral("10"));
+        const QByteArray answer = get(QStringLiteral("recording"), q, error);
+        if (!error->isEmpty())
+            return {};
+        found(QStringLiteral("title"), audioRecordings(QJsonDocument::fromJson(answer).object().value(QLatin1String("recordings")).toArray(), track.duration, 100));
+    }
+    return out;
 }
 
 QStringList musicVideosOf(const QStringList &recordings, QString *error)
