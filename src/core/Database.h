@@ -226,6 +226,13 @@ public:
     // Whether MusicBrainz has been asked about the artist lately.
     bool artistChannelsKnown(const QString &artist);
     void setArtistChannelsKnown(const QString &artist, int days);
+    // The uploads MusicBrainz links as the music video of a track's recording
+    // (docs/import-rules.html, B11), kept with the recording (B14). Known:
+    // asked lately, by the same `question` (MusicBrainz::question). Kept:
+    // whatever was kept, however long ago; for what must not wait.
+    bool musicVideosKnown(const TrackInfo &track, const QString &question, QStringList *uploads);
+    QStringList musicVideosKept(const TrackInfo &track);
+    void setMusicVideos(const TrackInfo &track, const QString &question, const QStringList &uploads, int days);
     // The channels the user allowed (each an artist's channel for every
     // track, and never ignored as a small one) and the ones the user denied
     // (their uploads are never taken), by id.

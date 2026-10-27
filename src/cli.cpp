@@ -20,6 +20,7 @@
 #include <QProcess>
 #include <QTimer>
 #include "core/Muxer.h"
+#include "core/MusicBrainz.h"
 #include "core/Subtitles.h"
 #include "core/LibraryScanner.h"
 #include "core/TagReader.h"
@@ -102,7 +103,7 @@ int main(int argc, char **argv)
         {QStringLiteral("reimport-before"), QStringLiteral("Likewise every track with a video whose last lookup was before this time (ISO 8601, e.g. 2026-10-05T16:35 or 2026-10-05)."), QStringLiteral("time")},
         {QStringLiteral("lookup-album"), QStringLiteral("Look an album of the music library up wherever its files are, as <album artist>/<album> (repeatable)."), QStringLiteral("album")},
     });
-    parser.addPositionalArgument(QStringLiteral("command"), QStringLiteral("Optional: align <track> <video> | mux <track> <video> <out.mkv> | check-video <video> [keyframes] | same-recording <file> <file> | same-version <track title> <album> <video title> [own] | check-cookies [video id] | convert-subs <file.srv3> <out without extension> | talk-check <file>... | rank-check <track title> <artist> <video title> <channel> [verified] | artist-channels <artist> | tags <file> [KEY=value ...] [PICTURE=<image>]"));
+    parser.addPositionalArgument(QStringLiteral("command"), QStringLiteral("Optional: align <track> <video> | mux <track> <video> <out.mkv> | check-video <video> [keyframes] | same-recording <file> <file> | same-version <track title> <album> <video title> [own] | check-cookies [video id] | convert-subs <file.srv3> <out without extension> | talk-check <file>... | rank-check <track title> <artist> <video title> <channel> [verified] | artist-channels <artist> | music-videos <file> | tags <file> [KEY=value ...] [PICTURE=<image>]"));
     parser.process(app);
 
     const QString authFile = parser.isSet(QStringLiteral("chatgpt-auth-file"))
@@ -321,6 +322,30 @@ int main(int argc, char **argv)
             return 1;
         }
         out << (ids.isEmpty() ? QStringLiteral("MusicBrainz lists no YouTube channel") : QStringLiteral("MusicBrainz: ") + ids.join(QStringLiteral(", "))) << Qt::endl;
+        return 0;
+    }
+
+    if (pos.value(0) == QLatin1String("music-videos")) {
+        // What MusicBrainz links as the music video of a file's recording
+        // (docs/import-rules.html, B7–B12), asked now, nothing kept.
+        if (pos.size() != 2)
+            parser.showHelp(2);
+        TrackInfo t;
+        t.path = pos[1];
+        if (!TagReader::read(t)) {
+            out << "error: not readable audio: " << pos[1] << Qt::endl;
+            return 1;
+        }
+        QString how, err;
+        const QStringList recordings = MusicBrainz::recordingsOf(t, &how, &err);
+        const QStringList uploads = err.isEmpty() && !recordings.isEmpty() ? MusicBrainz::musicVideosOf(recordings, &err) : QStringList();
+        if (!err.isEmpty()) {
+            out << "error: " << err << Qt::endl;
+            return 1;
+        }
+        out << "recordings" << (how.isEmpty() ? QString() : QStringLiteral(" (by %1)").arg(how)) << ": "
+            << (recordings.isEmpty() ? QStringLiteral("none") : recordings.join(QStringLiteral(", "))) << Qt::endl
+            << "music videos on YouTube: " << (uploads.isEmpty() ? QStringLiteral("none") : uploads.join(QStringLiteral(", "))) << Qt::endl;
         return 0;
     }
 

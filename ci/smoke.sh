@@ -1032,6 +1032,86 @@ OUT=$(chan mvlib27 --music-dir "$WORK/lib17" --reimport "$WORK/lib17"); echo "$O
 [[ "$(ask mvlib27 "$STATES")" == "[('Ten', 'not_found', None)]" && "$(ask mvlib27 "SELECT COUNT(*) FROM videos")" == "[(0,)]" ]]
 rm -f "$WORK/site-page.json"
 
+echo "== MusicBrainz"
+# MusicBrainz links the recording of Jay's "Ten" to its music video: an
+# upload the search does not return, on a label's channel of 120 subscribers.
+# Linked so, it counts as on the artist's channel (R5) and is not dropped as
+# a small channel's (D7): it is taken outright, before anything the search
+# found (B11, C9). A YouTube link on the recording itself is the song's audio
+# and is not taken (B12). The answer is kept with the recording (B14): a
+# re-import with MusicBrainz gone goes by it. MusicBrainz not reached is no
+# failure of the lookup (B13). A server of our own stands in for it.
+cat > "$WORK/fake-mb.py" <<'PY'
+import http.server, json, sys, urllib.parse
+routes, log, portfile = json.load(open(sys.argv[1])), sys.argv[2], sys.argv[3]
+class Handler(http.server.BaseHTTPRequestHandler):
+    def do_GET(self):
+        with open(log, "a") as f:
+            f.write(self.path + "\n")
+        body = routes.get(urllib.parse.urlsplit(self.path).path)
+        if body is None:
+            self.send_response(404)
+            self.end_headers()
+            return
+        data = json.dumps(body).encode()
+        self.send_response(200)
+        self.send_header("Content-Type", "application/json")
+        self.send_header("Content-Length", str(len(data)))
+        self.end_headers()
+        self.wfile.write(data)
+    def log_message(self, *args):
+        pass
+server = http.server.HTTPServer(("127.0.0.1", 0), Handler)
+with open(portfile + ".tmp", "w") as f:
+    f.write(str(server.server_address[1]))
+import os
+os.replace(portfile + ".tmp", portfile)
+server.serve_forever()
+PY
+cat > "$WORK/mb-routes.json" <<'JSON'
+{"/ws/2/artist/": {"artists": []},
+ "/ws/2/recording": {"recordings": [{"id": "rec-ten", "score": 100, "title": "Ten", "length": 50000, "video": false},
+                                    {"id": "rec-tenth", "score": 100, "title": "Ten", "length": 95000, "video": false},
+                                    {"id": "rec-near", "score": 80, "title": "Ten Ten", "length": 50000, "video": false}]},
+ "/ws/2/recording/rec-ten": {"id": "rec-ten", "video": false, "relations": [
+     {"type": "music video", "target-type": "recording", "recording": {"id": "vid-ten", "title": "Ten", "video": true}},
+     {"type": "free streaming", "target-type": "url", "url": {"resource": "https://www.youtube.com/watch?v=topicaudio1"}}]},
+ "/ws/2/recording/vid-ten": {"id": "vid-ten", "video": true, "relations": [
+     {"type": "free streaming", "target-type": "url", "url": {"resource": "https://www.youtube.com/watch?v=mbvideo0001"}}]}}
+JSON
+rm -f "$WORK/mb-port" "$WORK/mb-requests"
+python3 "$WORK/fake-mb.py" "$WORK/mb-routes.json" "$WORK/mb-requests" "$WORK/mb-port" > "$WORK/mb-server.log" 2>&1 &
+MBPID=$!
+trap 'kill "$MBPID" 2>/dev/null; rm -rf "$WORK"' EXIT
+for _ in $(seq 100); do [[ -s "$WORK/mb-port" ]] && break; sleep 0.1; done
+MB="http://127.0.0.1:$(cat "$WORK/mb-port")/ws/2/"
+mbrun() { local url=$1; shift; rm -f "$WORK/site-args"; env -u MVPLAYER_NO_MUSICBRAINZ MVPLAYER_MUSICBRAINZ_URL="$url" MVPLAYER_YTDLP="$CHAN" timeout 120 "$BUILD/mvplayer-import" --allow-still-images --jobs 1 "$@" 2>&1 | grep -E "^\[import\]|^done:" | cut -c1-200; }
+lastlookup() { python3 -c "import json, sys; print(json.dumps([e for e in map(json.loads, open(sys.argv[1])) if e.get('event') == 'lookup'][-1].get(sys.argv[2])))" "$WORK/$1/.mvplayer/import-log.jsonl" "$2"; }
+echo '{"abr": 96, "acodec": "opus", "channel": "Label Works", "channel_id": "UClabel", "channel_follower_count": 120}' > "$WORK/site-info.json"
+echo '{"id": "mbvideo0001", "title": "Ten (Music Video)", "channel": "Label Works", "channel_id": "UClabel", "duration": 50, "channel_follower_count": 120}' > "$WORK/site-page.json"
+OUT=$(mbrun "$MB" --music-dir "$WORK/lib17" --mv-dir "$WORK/mvlib-mb"); echo "$OUT"
+[[ "$(ask mvlib-mb "$STATES")" == "[('Ten', 'done', 'mbvideo0001')]" && "$(ask mvlib-mb "SELECT review, yt_channel FROM videos")" == "[(0, 'Label Works')]" ]]
+# Its page was read, the one upload not among the search results; the
+# song's own link was never asked about, nor the recording 45 s too long.
+[[ $(grep -v ytsearch "$WORK/site-args" | grep -c -- " -J ") -eq 1 ]] && ! grep -q topicaudio1 "$WORK/site-args"
+grep -q "^/ws/2/recording/rec-ten?" "$WORK/mb-requests" && grep -q "^/ws/2/recording/vid-ten?" "$WORK/mb-requests" && ! grep -q "rec-tenth\|rec-near" "$WORK/mb-requests"
+[[ "$(lastlookup mvlib-mb musicbrainz)" == '{"by": "title", "recordings": ["rec-ten"], "uploads": ["mbvideo0001"]}' ]]
+python3 -c "import json, sys; c = [e for e in map(json.loads, open(sys.argv[1])) if e.get('event') == 'lookup'][-1]['candidates']; assert [x['id'] for x in c if x.get('musicbrainz')] == ['mbvideo0001'], c" "$WORK/mvlib-mb/.mvplayer/import-log.jsonl"
+[[ "$(ask mvlib-mb "SELECT uploads, checked_until > strftime('%s', 'now') + 29 * 86400 FROM music_videos")" == "[('mbvideo0001', 1)]" ]]
+# MusicBrainz gone: a re-import goes by what was kept, and the video stays.
+kill "$MBPID"; wait "$MBPID" 2>/dev/null || true
+trap 'rm -rf "$WORK"' EXIT
+OUT=$(mbrun "$MB" --music-dir "$WORK/lib17" --mv-dir "$WORK/mvlib-mb" --reimport "$WORK/lib17"); echo "$OUT"
+[[ "$(ask mvlib-mb "$STATES")" == "[('Ten', 'done', 'mbvideo0001')]" && "$(lastlookup mvlib-mb musicbrainz)" == '{"kept": true, "uploads": ["mbvideo0001"]}' ]]
+# Not reached at all, in a new library: the search goes on without it, and
+# MusicBrainz is asked again after a day.
+echo '{"abr": 96, "acodec": "opus", "channel": "Reup Music", "channel_id": "UCreup", "channel_follower_count": 120}' > "$WORK/site-info.json"
+OUT=$(mbrun "$MB" --music-dir "$WORK/lib17" --mv-dir "$WORK/mvlib-mb2"); echo "$OUT"
+[[ "$OUT" == *"is from a small channel (120 subscribers)"* && "$(ask mvlib-mb2 "$STATES")" == "[('Ten', 'not_found', None)]" ]]
+[[ "$(lastlookup mvlib-mb2 musicbrainz)" == *'"error": '* ]]
+[[ "$(ask mvlib-mb2 "SELECT uploads, checked_until < strftime('%s', 'now') + 2 * 86400 FROM music_videos")" == "[('', 1)]" ]]
+rm -f "$WORK/site-page.json"
+
 echo "== channels you allow"
 # "Reup Music" has 120 subscribers and is not Jay's by its name: under a
 # lower limit its upload comes in for review, on the one question of whose

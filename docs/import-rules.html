@@ -180,7 +180,7 @@ del { background: var(--bad-soft); color: var(--bad); text-decoration: line-thro
   <p>How a track in the music library comes to have a music video, to wait for your verdict on one, or to have none. One decision tree per stage of a lookup. This page is the reference, and a rule changes here first. A change is proposed in a copy of this page, additions in green and removals in red; once it is approved the marks come off, it becomes this page, and the code in <code>src/core</code> follows. Where the two disagree, that is a bug in one of them.</p>
   <p class="proposal" hidden>Proposed changes to the rules: <ins>additions</ins> and <del>removals</del>. Not approved yet; the code has not changed.</p>
   <p class="lede">These are the rules in <b>rules mode</b>. With the judge on (Settings → Judge), <a href="import-rules-judge.html">its own page</a> says what runs the lookup in its place (judge mode) or what the advice on a card is (advice mode); what stays of this page is listed there.</p>
-  <div class="stamp">Transcribed from the code on 2026-10-15 · every rule names where it lives · ids (A2, D5.2) are stable, for pointing at</div>
+  <div class="stamp">Transcribed from the code on 2026-10-26 · every rule names where it lives · ids (A2, D5.2) are stable, for pointing at</div>
   <div class="legend" aria-label="Legend">
     <span><span class="q">A question</span> its answers hang below</span>
     <span><span class="out ok">has its video</span></span>
@@ -195,7 +195,7 @@ del { background: var(--bad-soft); color: var(--bad); text-decoration: line-thro
 <nav aria-label="Stages of a lookup">
   <ol class="flow">
     <li><a href="#A"><b>A</b> Is the track looked up?</a></li>
-    <li><a href="#B"><b>B</b> Search</a></li>
+    <li><a href="#B"><b>B</b> Search, MusicBrainz</a></li>
     <li><a href="#C"><b>C</b> On sight</a></li>
     <li><a href="#D"><b>D</b> Listening</a></li>
     <li><a href="#E"><b>E</b> What the track gets</a></li>
@@ -261,9 +261,9 @@ del { background: var(--bad-soft); color: var(--bad); text-decoration: line-thro
 <!-- ===================================================================== B -->
 <section id="B">
   <header>
-    <h2><span class="tag">B</span> Search</h2>
-    <p>Four queries, tried in order, ten results each: <code>artist title</code>, then with <code>MV</code>, <code>music video</code>, <code>official video</code> added. The artist is the first album artist. Results are remembered for a day.</p>
-    <div class="where">Matcher::searchQueries · YtDlp::search · ImportManager::runJob</div>
+    <h2><span class="tag">B</span> Search and MusicBrainz</h2>
+    <p>Four queries, tried in order, ten results each: <code>artist title</code>, then with <code>MV</code>, <code>music video</code>, <code>official video</code> added. The artist is the first album artist. Results are remembered for a day. Beside them, MusicBrainz is asked for the music video of the track's recording (B7–B14).</p>
+    <div class="where">Matcher::searchQueries · YtDlp::search · ImportManager::runJob · MusicBrainz::recordingsOf · MusicBrainz::musicVideosOf</div>
   </header>
   <div class="scroll">
   <ul class="tree">
@@ -277,12 +277,42 @@ del { background: var(--bad-soft); color: var(--bad); text-decoration: line-thro
           <span class="why">An empty answer to a guest is how YouTube refuses one it has had enough of; it is not "no video". After about a hundred searches in a few minutes it answers every query so for an hour or more, and 143 tracks in one library have "none of 0 search results" to show for it. The query is asked again after the pause. But a query can match nothing too: a title tag with its first character missing ("ラネタリー・メッセージ"), a live tour's name in brackets. The probe tells the two apart: a search for <i>official music video</i>, asked fresh (never answered from the cache), whose answer is empty only when YouTube refuses. Its results are not looked at.</span></div></li>
         <li id="B6"><div class="row"><a class="id" href="#B6">B6</a><span class="when">A query YouTube answers with nothing at all, and the probe after it is answered</span><span class="out go">the query counts as answered; the next query</span>
           <span class="why">Nothing matched it. Asked again it would find nothing again.</span></div></li>
-        <li id="B4"><div class="row"><a class="id" href="#B4">B4</a><span class="when">All four asked, nothing usable (and at least one was answered, B5)</span><span class="out none">no video: A6</span>
+        <li id="B4"><div class="row"><a class="id" href="#B4">B4</a><span class="when">All four asked, nothing usable (and at least one was answered, B5), and no upload MusicBrainz linked is on the shortlist (B11)</span><span class="out none">no video: A6</span>
           <span class="why">"None of N search results looked like an official video."</span></div></li>
       </ul>
     </li>
   </ul>
   </div>
+  <h3>MusicBrainz</h3>
+  <div class="scroll">
+  <ul class="tree">
+    <li><div class="row"><span class="q order">Which recording on MusicBrainz is the track's?</span></div>
+      <ul>
+        <li id="B7"><div class="row"><a class="id" href="#B7">B7</a><span class="when">The file carries a MusicBrainz recording id</span><span class="out go">that recording</span>
+          <span class="why">As MusicBrainz Picard tags a file (<code>MUSICBRAINZ_TRACKID</code>).</span></div></li>
+        <li id="B8"><div class="row"><a class="id" href="#B8">B8</a><span class="when">The file carries an ISRC that MusicBrainz knows</span><span class="out go">its recordings of the track's length</span>
+          <span class="why">Within <span class="num">10 s</span> of it.</span></div></li>
+        <li id="B9"><div class="row"><a class="id" href="#B9">B9</a><span class="when">Otherwise: by the track's title and artist</span><span class="out go">every sure match</span>
+          <span class="why">Sure: MusicBrainz's search gives it the full score, it is a recording of audio, and it is within <span class="num">10 s</span> of the track's length where MusicBrainz knows that. MusicBrainz can hold one recording more than once, so there can be several, and a music video may be linked to only one of them. Of the recordings found for 105 tracks in one library, 76 were within 3 s of the track's length and 7 more within 10 s; 12 were 14 s to 4 minutes off, too far to be the same audio. A video found by the song's title is not taken: of 15 such, 8 were a concert's, and none had an upload linked.</span></div></li>
+        <li id="B10"><div class="row"><a class="id" href="#B10">B10</a><span class="when">None</span><span class="out go">nothing from MusicBrainz</span>
+          <span class="why">A romanised tag where MusicBrainz knows the artist in another script, a title spelled otherwise.</span></div></li>
+      </ul>
+    </li>
+    <li><div class="row"><span class="q order">What those recordings link to</span></div>
+      <ul>
+        <li id="B11"><div class="row"><a class="id" href="#B11">B11</a><span class="when">A music video of them, linked to an upload on YouTube</span><span class="out go"><a href="#C9">on the shortlist, first: C9</a></span>
+          <span class="why">Each such upload, whether or not the search returns it, and not one of the search's best 4. It is judged on sight like a search result (C), as on the artist's channel (<a href="#R5">R5</a>): its length can still rule it out (C3, C4), and so can a channel you denied (C10). One the search does not return has its page read for its title, channel and length, one request with nothing downloaded: YouTube refuses, pause, track postponed (I5); the upload is gone or private, passed over.</span></div></li>
+        <li id="B12"><div class="row"><a class="id" href="#B12">B12</a><span class="when">No music video, or none with an upload on YouTube</span><span class="out go">nothing from MusicBrainz</span>
+          <span class="why">A YouTube link on the recording itself is not taken: that is the song's audio there (the "<i>Artist</i> - Topic" upload, a lyric video), not its music video. Of 5 such links on tracks that had their video, none was that video.</span></div></li>
+        <li id="B13"><div class="row"><a class="id" href="#B13">B13</a><span class="when">MusicBrainz cannot be reached</span><span class="out go">nothing from MusicBrainz, this time</span>
+          <span class="why">Not a failure of the lookup: the search is enough to go on. MusicBrainz is asked again after a day (B14).</span></div></li>
+      </ul>
+    </li>
+    <li id="B14"><div class="row"><a class="id" href="#B14">B14</a><span class="q">What MusicBrainz says is kept</span>
+      <span class="why">In the library, with the track's recording, for <span class="num">30 days</span>: a lookup in that time, a re-import too, goes by what was kept, and the first one after it asks again. After MusicBrainz could not be reached (B13), for a day. One request a second, as MusicBrainz asks, the artist's channels (R5) included.</span></div></li>
+  </ul>
+  </div>
+  <p class="lede">Measured on 105 tracks of one library (45 with their video, 20 waiting for a verdict, 40 with none): MusicBrainz knew the recording of 63, 37 by title and artist, 24 by ISRC, 2 by a recording id. It linked a music video to 6 of them, and an upload on YouTube to 4. For the 2 tracks with their video it was that video. For the 2 waiting for a verdict it was the upload under review, one of them on "ryo (supercell)", a channel that neither its name nor supercell's record on MusicBrainz makes the artist's. For the 40 with no video it linked nothing.</p>
   <p class="lede">On a re-import the track's own video is on the shortlist whether or not the search returns it (<a href="#H4">H4</a>), and so is every video under review that the track is a candidate of (<a href="#H8">H8</a>).</p>
 </section>
 
@@ -328,7 +358,7 @@ del { background: var(--bad-soft); color: var(--bad); text-decoration: line-thro
       </ul>
     </li>
     <li id="C9"><div class="row"><a class="id" href="#C9">C9</a><span class="q">The shortlist</span>
-      <span class="why">The usable results by score, the best <span class="num">4</span>. On a re-import the track's own video as well, whether it looks official or not (D2.1), and every video under review that the track is a candidate of, whether or not the search returns it (D3). Such a video is not dropped on sight: its length and its channel's size are what can rule it out for the track, and H2 has done that by then. In score order. A cut of the song can only be a candidate (R1), and a full one that fits outright comes before any candidate (E1), so the order decides what is downloaded first and nothing else.</span></div>
+      <span class="why">The usable results by score, the best <span class="num">4</span>. Every upload MusicBrainz links to the track (B11) as well, whether or not the search returns it. On a re-import the track's own video as well, whether it looks official or not (D2.1), and every video under review that the track is a candidate of, whether or not the search returns it (D3). Such a video is not dropped on sight: its length and its channel's size are what can rule it out for the track, and H2 has done that by then. In score order, MusicBrainz's first. A cut of the song can only be a candidate (R1), and a full one that fits outright comes before any candidate (E1), so the order decides what is downloaded first and nothing else.</span></div>
       <ul><li><div class="row"><span class="when last"></span><span class="out go"><a href="#D">each is listened to, in that order: D</a></span></div></li></ul>
     </li>
   </ul>
@@ -362,8 +392,8 @@ del { background: var(--bad-soft); color: var(--bad); text-decoration: line-thro
         <li id="D0"><div class="row"><a class="id" href="#D0">D0</a><span class="when">You turned it down for this track</span><span class="out no">not offered again</span></div></li>
         <li id="D6"><div class="row"><a class="id" href="#D6">D6</a><span class="when">Only on a re-import: it is the track's own video, or one under review it is a candidate of, and the library did not keep its channel's id or its subscriber count</span><span class="out go">the upload's page is read for them, once</span>
           <span class="why">Videos from before these were kept. One request, nothing downloaded, and what it says is kept from then on. The id is how a channel is known as the artist's by MusicBrainz or because you allowed it (R5), and how a channel you denied is told (D8): without it, a channel under a name the track's tags do not carry was not recognised, and the video was not the track's own recording by today's rules. YouTube refuses: pause, track postponed (I5). The upload is gone from YouTube: judged on what is known.</span></div></li>
-        <li id="D7"><div class="row"><a class="id" href="#D7">D7</a><span class="when">"Ignore small channels" is on, and its channel is known to have fewer subscribers than the limit, and is neither verified nor one you allowed (<a href="#G7">G7</a>)</span><span class="out no">dropped: a small channel</span>
-          <span class="why"><span class="num">5,000</span>, unless you set another limit; the switch and the limit are in Settings. Somebody's re-upload of a song comes from a small channel. The count is on the upload's page, not in the search results: a new upload's is read with its audio (D1.12), the library keeps it for every video it brings in, and D6 reads it for older ones. Not known, or hidden by the channel: not dropped. A verified channel is not dropped whatever its size: an artist's own channel can be a small one. Nor is an upload that YouTube lists under several channels ("A and B"): it is enough that one of them meets the limit, and for such an upload the page gives no count to go by (the first channel's "7.43 million" is read as 743, the others' are not given). Nor is an upload from a channel you allowed (G7): a label's channel, or an artist's own, can be small and not verified. Allowing a channel answers both questions at once: whose it is, and whether its size counts against it. On a re-import the track's own video goes (H4), and the track is no longer a candidate of such a video under review.</span></div></li>
+        <li id="D7"><div class="row"><a class="id" href="#D7">D7</a><span class="when">"Ignore small channels" is on, and its channel is known to have fewer subscribers than the limit, and is neither verified nor one you allowed (<a href="#G7">G7</a>), and MusicBrainz does not link the upload to the track (B11)</span><span class="out no">dropped: a small channel</span>
+          <span class="why"><span class="num">5,000</span>, unless you set another limit; the switch and the limit are in Settings. Somebody's re-upload of a song comes from a small channel. The count is on the upload's page, not in the search results: a new upload's is read with its audio (D1.12), the library keeps it for every video it brings in, and D6 reads it for older ones. Not known, or hidden by the channel: not dropped. A verified channel is not dropped whatever its size: an artist's own channel can be a small one. Nor is an upload that YouTube lists under several channels ("A and B"): it is enough that one of them meets the limit, and for such an upload the page gives no count to go by (the first channel's "7.43 million" is read as 743, the others' are not given). Nor is an upload from a channel you allowed (G7): a label's channel, or an artist's own, can be small and not verified. Allowing a channel answers both questions at once: whose it is, and whether its size counts against it. So does MusicBrainz, for the one upload it links as the track's music video (B11): a small artist's channel is where a small artist's video is. On a re-import the track's own video goes (H4), and the track is no longer a candidate of such a video under review.</span></div></li>
         <li id="D8"><div class="row"><a class="id" href="#D8">D8</a><span class="when">It is in the library, and its channel turns out to be one you denied</span><span class="out no">dropped: a channel you denied</span>
           <span class="why">When a channel is denied, the videos the library has from it go at once (G8): the ones it knows by the channel's id. A video from before ids were kept is told when its page is read (D6), at a re-import. The track's own video goes (H4), and the track is no longer a candidate of such a video under review; one left with no candidate is deleted.</span></div></li>
         <li><div class="row"><span class="when">It is not in the library</span><span class="out go"><a href="#D1">D1: a new upload</a></span></div></li>
@@ -526,10 +556,11 @@ del { background: var(--bad-soft); color: var(--bad); text-decoration: line-thro
       <ul>
         <li><b>By its name:</b> a name of the artist and nothing else but official, channel, music, YouTube, VEVO, TV, records, 公式, チャンネル. A channel named twice over ("A / B", or "A and B", as YouTube names an upload listed under several channels) counts by either name; spaces and case do not ("DJGenki", "DJ Genki"). "Producer feat. Singer": the producer's channel. In one library 41 official uploads on "YOASOBI and Echoes" waited for a verdict as from a channel not known to be the artist's.</li>
         <li><b>By MusicBrainz:</b> its artist record links to the channel. Asked once per artist; only a sure match counts.</li>
+        <li><b>For one upload, by MusicBrainz:</b> an upload that MusicBrainz links as the music video of the track's recording (<a href="#B11">B11</a>) counts as on the artist's channel, as that track's video. A label's upload of the artist's video is the usual case. That says nothing of its channel's other uploads.</li>
         <li><b>Because you allowed it:</b> a channel you allowed (<a href="#G7">G7</a>) is an artist's channel for every track, whoever the artist. A label's channel has the videos of many.</li>
         <li><b>For one upload, by your verdict:</b> a video you accepted (<a href="#G1">G1</a>) counts as on the artist's channel, as the video of the track that has it. That says nothing of its channel's other uploads.</li>
       </ul>
-      <p style="margin-top:.4rem">The last three are "vouched": as good as the artist's name on the upload.</p>
+      <p style="margin-top:.4rem">The last four are "vouched": as good as the artist's name on the upload.</p>
       <p style="margin-top:.4rem">A channel you denied (<a href="#G8">G8</a>) is nobody's: C10. From before: accepting a video vouched for its channel, for the artists of the track. Those channels no longer count by that. The videos that are in the library on the strength of it keep it, each as an upload you accepted.</p></div>
 
     <div class="def" id="R6"><h3><span class="id">R6</span>The track is the better audio</h3>
@@ -768,6 +799,9 @@ del { background: var(--bad-soft); color: var(--bad); text-decoration: line-thro
     <tr><td class="n">40% · 0.26</td><td>pauses and pulse that make a track talk</td><td>A4</td><td><code>TalkCheck::measure</code></td></tr>
     <tr><td class="n">14 days</td><td>before a track without a video is searched for again</td><td>A6</td><td><code>retryNotFoundDays</code></td></tr>
     <tr><td class="n">30 min ×2</td><td>before a failed lookup is tried again</td><td>A7</td><td><code>requeueStale</code></td></tr>
+    <tr><td class="n">10 s</td><td>a MusicBrainz recording's length against the track's, for it to be the track's recording</td><td>B8, B9</td><td><code>MusicBrainz kLengthSlack</code></td></tr>
+    <tr><td class="n">30 days · 1 day</td><td>before MusicBrainz is asked again about a recording; after it could not be reached</td><td>B14</td><td><code>Database musicVideosKnown</code></td></tr>
+    <tr><td class="n">1 a second</td><td>requests to MusicBrainz, the artist's channels included</td><td>B14, R5</td><td><code>MusicBrainz::get</code></td></tr>
     <tr><td class="n">10</td><td>results asked of each query</td><td>B</td><td><code>YtDlp::search</code></td></tr>
     <tr><td class="n">0.5 · 2 · 4 min</td><td>an upload's length against the track's</td><td>C3, C4</td><td><code>Matcher::lengthMismatch</code></td></tr>
     <tr><td class="n">4</td><td>uploads listened to</td><td>C9</td><td><code>runJob shortlist</code></td></tr>

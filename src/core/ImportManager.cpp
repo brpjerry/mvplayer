@@ -1,6 +1,7 @@
 #include "core/ImportManager.h"
 
 #include "core/ArtistChannels.h"
+#include "core/MusicBrainz.h"
 #include "core/Judge.h"
 
 #include "core/TalkCheck.h"
@@ -2097,11 +2098,14 @@ bool ImportManager::dropOutdatedOptions(const TrackInfo &track)
     // keep it; with none left it goes.
     // Likewise one from a small channel, by what the library kept of its
     // channel.
+    // Not the upload MusicBrainz links to the track, by what was kept of its
+    // answer (D7).
     const ImportSettings cfg = settings();
+    const QStringList linked = m_db->musicVideosKept(track);
     bool dropped = false;
     for (const VideoInfo &was : m_db->candidacies(track)) {
         QString why = Matcher::lengthMismatch(track, was.duration);
-        if (why.isEmpty() && smallChannel(was.ytChannelSubs, was.ytChannelVerified, m_db->channelAllowed(was.ytChannelId), cfg))
+        if (why.isEmpty() && smallChannel(was.ytChannelSubs, was.ytChannelVerified, m_db->channelAllowed(was.ytChannelId) || linked.contains(was.ytId), cfg))
             why = smallChannelReason(was.ytChannelSubs, cfg);
         if (why.isEmpty())
             continue;
@@ -2885,6 +2889,7 @@ void ImportManager::runJob(qint64 trackId, const ImportSettings &cfg)
     int nSearch = 0, nAudio = 0, nPreview = 0, nVideo = 0, nSubs = 0, nPage = 0;
     const YtDlp *ytForLog = nullptr;
     QJsonArray logQueries, logCandidates, logChecked;
+    QJsonObject logMusicBrainz; // B7–B14: how the recordings were found, what they link to
     std::optional<VideoInfo> prior; // re-import: the video the track had going in (set below)
     QString priorFate;              // and what became of it: kept | review | removed | released | unjudged
     QJsonArray logVideos; // what was brought into the library
@@ -2922,6 +2927,7 @@ void ImportManager::runJob(qint64 trackId, const ImportSettings &cfg)
             {QStringLiteral("requests"), QJsonObject{{QStringLiteral("search"), nSearch}, {QStringLiteral("audio"), nAudio},
                                                       {QStringLiteral("preview"), nPreview}, {QStringLiteral("video"), nVideo}, {QStringLiteral("subtitles"), nSubs}, {QStringLiteral("page"), nPage}, {QStringLiteral("fromCache"), ytForLog ? ytForLog->cacheHits() : 0}}},
             {QStringLiteral("queries"), logQueries},
+            {QStringLiteral("musicbrainz"), logMusicBrainz.isEmpty() ? QJsonValue() : QJsonValue(logMusicBrainz)},
             {QStringLiteral("candidates"), logCandidates},
             {QStringLiteral("checked"), logChecked},
         });
@@ -3194,6 +3200,8 @@ void ImportManager::runJob(qint64 trackId, const ImportSettings &cfg)
     ytForLog = &yt;
     QVector<YtCandidate> candidates;
     QSet<QString> seen;
+    // The uploads MusicBrainz links as the track's music video (B11).
+    QSet<QString> linked;
     bool searched = false;
     QString error;
     auto usable = [&](const YtCandidate &c) {
@@ -3201,11 +3209,12 @@ void ImportManager::runJob(qint64 trackId, const ImportSettings &cfg)
     };
     // On sight. Whose channel an upload is on: the artist's by its name, by
     // MusicBrainz or because the user allowed it; and the track's own video
-    // counts as on it where the user accepted that upload. An upload from a
+    // counts as on it where the user accepted that upload, as does an upload
+    // MusicBrainz links as the track's music video (R5). An upload from a
     // channel the user denied is dropped.
     const auto rankAll = [&] {
         Matcher::rank(track, candidates, [&](const YtCandidate &c) {
-            return (prior && prior->vouched && c.id == prior->ytId)
+            return (prior && prior->vouched && c.id == prior->ytId) || linked.contains(c.id)
                 || ArtistChannels::isArtistChannel(*m_db, Matcher::artistNames(track), c.channelId, c.channel);
         });
         for (YtCandidate &c : candidates) {
@@ -3426,6 +3435,77 @@ void ImportManager::runJob(qint64 trackId, const ImportSettings &cfg)
             putBeside(v);
         }
     }
+    // B7–B14: the uploads MusicBrainz links as the music video of the
+    // track's recording, beside whatever the search returned. Not in judge
+    // mode: there the judge picks what is listened to (judge page, S3).
+    if (!judging && MusicBrainz::enabled()) {
+        const QString question = MusicBrainz::question(track);
+        QStringList uploads;
+        if (m_db->musicVideosKnown(track, question, &uploads)) {
+            logMusicBrainz.insert(QStringLiteral("kept"), true);
+        } else {
+            report(QStringLiteral("Asking MusicBrainz"));
+            QString how, mbError;
+            const QStringList recordings = MusicBrainz::recordingsOf(track, &how, &mbError);
+            if (mbError.isEmpty() && !recordings.isEmpty())
+                uploads = MusicBrainz::musicVideosOf(recordings, &mbError);
+            if (m_cancel)
+                return cleanup();
+            // B13: not a failure of the lookup, which goes on without it.
+            if (!mbError.isEmpty())
+                uploads.clear();
+            m_db->setMusicVideos(track, question, uploads, mbError.isEmpty() ? 30 : 1);
+            logMusicBrainz = {{QStringLiteral("by"), how}, {QStringLiteral("recordings"), QJsonArray::fromStringList(recordings)}};
+            if (!mbError.isEmpty())
+                logMusicBrainz.insert(QStringLiteral("error"), mbError);
+        }
+        logMusicBrainz.insert(QStringLiteral("uploads"), QJsonArray::fromStringList(uploads));
+        QJsonArray passed;
+        for (const QString &id : std::as_const(uploads)) {
+            if (seen.contains(id)) {
+                linked.insert(id);
+                continue;
+            }
+            // One the search did not return: its page says what a search
+            // result would. One request, nothing downloaded.
+            QJsonObject page;
+            QString why;
+            const int fromCache = yt.cacheHits(), signedIn = yt.accountRequests();
+            ++nPage;
+            if (!yt.pageInfo(id, &page, &why)) {
+                if (m_cancel)
+                    return cleanup();
+                // Refused: the lookup waits. Gone or private, or not to be
+                // had for another reason: passed over.
+                if (!YtDlp::looksUnavailable(why) && noteFailure(why))
+                    return postpone();
+                passed.append(QJsonObject{{QStringLiteral("id"), id}, {QStringLiteral("error"), why.left(160)}});
+                continue;
+            }
+            if (yt.cacheHits() == fromCache && yt.accountRequests() == signedIn)
+                noteSuccess();
+            const YtDlp::Channel channel = YtDlp::channelOf(page);
+            // Listed under several channels: named as the search names it, "A and B".
+            QStringList creators;
+            for (const QJsonValue &v : page.value(QLatin1String("creators")).toArray())
+                creators << v.toString();
+            YtCandidate c;
+            c.id = id;
+            c.title = page.value(QLatin1String("title")).toString();
+            c.channel = creators.size() >= 2 && creators.first() == channel.name ? creators.join(QStringLiteral(" and ")) : channel.name;
+            c.channelId = channel.id;
+            c.verified = channel.verified;
+            c.duration = page.value(QLatin1String("duration")).toDouble();
+            c.views = page.value(QLatin1String("view_count")).toVariant().toLongLong();
+            c.rank = candidates.size();
+            seen.insert(id);
+            candidates.append(c);
+            linked.insert(id);
+        }
+        if (!passed.isEmpty())
+            logMusicBrainz.insert(QStringLiteral("passedOver"), passed);
+        beside |= !linked.isEmpty();
+    }
     if (beside)
         rankAll();
     QVector<YtCandidate> shortlisted;
@@ -3434,7 +3514,8 @@ void ImportManager::runJob(qint64 trackId, const ImportSettings &cfg)
     int best = 0; // usable search results taken
     for (const YtCandidate &c : std::as_const(candidates)) {
         const bool isPrior = prior && c.id == prior->ytId;
-        const bool result = judging ? picked.contains(c.id) : (returned.contains(c.id) && usable(c) && best < 4);
+        const bool fromMusicBrainz = linked.contains(c.id) && usable(c);
+        const bool result = judging ? picked.contains(c.id) : (!fromMusicBrainz && returned.contains(c.id) && usable(c) && best < 4);
         if (result)
             ++best;
         // The track's own video is listened to whether it looks official or
@@ -3443,7 +3524,7 @@ void ImportManager::runJob(qint64 trackId, const ImportSettings &cfg)
         // candidate of is not dropped on sight at all: its length and its
         // channel's size are what rule one out, and that was done when the
         // re-import began (dropOutdatedOptions).
-        if (result || heldUploads.contains(c.id) || (isPrior && c.rejectReason.isEmpty())) {
+        if (result || fromMusicBrainz || heldUploads.contains(c.id) || (isPrior && c.rejectReason.isEmpty())) {
             shortlisted.append(c);
             shortlist.insert(c.id);
         } else if (isPrior) {
@@ -3458,6 +3539,8 @@ void ImportManager::runJob(qint64 trackId, const ImportSettings &cfg)
                       {QStringLiteral("trusted"), c.trusted},
                       // examined by listening: the best four that look official
                       {QStringLiteral("shortlisted"), shortlist.contains(c.id)}};
+        if (linked.contains(c.id))
+            o.insert(QStringLiteral("musicbrainz"), true);
         if (!c.rejectReason.isEmpty())
             o.insert(QStringLiteral("rejected"), c.rejectReason);
         logCandidates.append(o);
@@ -3472,10 +3555,14 @@ void ImportManager::runJob(qint64 trackId, const ImportSettings &cfg)
             const int ia = picked.indexOf(a.id), ib = picked.indexOf(b.id);
             return (ia < 0 ? 1000 : ia) < (ib < 0 ? 1000 : ib);
         });
-    } else if (track.duration > 0) {
-        std::stable_partition(shortlisted.begin(), shortlisted.end(), [&track](const YtCandidate &c) {
-            return c.duration <= 0 || c.duration >= 0.6 * track.duration;
-        });
+    } else {
+        // MusicBrainz's first (C9).
+        std::stable_partition(shortlisted.begin(), shortlisted.end(), [&linked](const YtCandidate &c) { return linked.contains(c.id); });
+        if (track.duration > 0) {
+            std::stable_partition(shortlisted.begin(), shortlisted.end(), [&track](const YtCandidate &c) {
+                return c.duration <= 0 || c.duration >= 0.6 * track.duration;
+            });
+        }
     }
     const auto hearTrack = [&] {
         if (heardTrack)
@@ -3629,7 +3716,8 @@ void ImportManager::runJob(qint64 trackId, const ImportSettings &cfg)
             // A channel the user denied (known by now, where the library had
             // not kept its id when it was denied), or a small one.
             const bool denied = m_db->channelDenied(existing->ytChannelId);
-            if (denied || (!judging && smallChannel(existing->ytChannelSubs, existing->ytChannelVerified, m_db->channelAllowed(existing->ytChannelId), cfg))) {
+            if (denied || (!judging && smallChannel(existing->ytChannelSubs, existing->ytChannelVerified,
+                                                    m_db->channelAllowed(existing->ytChannelId) || linked.contains(c.id), cfg))) {
                 const QString small = denied ? QStringLiteral("its channel is one you denied") : smallChannelReason(existing->ytChannelSubs, cfg);
                 const QString result = denied ? QStringLiteral("denied-channel") : QStringLiteral("small-channel");
                 anyChecked = true;
@@ -4030,7 +4118,7 @@ void ImportManager::runJob(qint64 trackId, const ImportSettings &cfg)
             QDir(dir).removeRecursively();
             continue;
         }
-        if (!judging && smallChannel(channel.subscribers, channel.verified || c.verified, m_db->channelAllowed(channelId), cfg)) {
+        if (!judging && smallChannel(channel.subscribers, channel.verified || c.verified, m_db->channelAllowed(channelId) || linked.contains(c.id), cfg)) {
             anyChecked = true;
             checked(c, QStringLiteral("small-channel"), smallChannelReason(channel.subscribers, cfg), nullptr,
                     {{QStringLiteral("subscribers"), channel.subscribers}});
