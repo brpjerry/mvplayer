@@ -24,13 +24,18 @@ bool enabled();
 QByteArray get(const QString &path, QUrlQuery query, QString *error, bool *missing = nullptr);
 
 // What the recordings are found by: when it changes (the tags were
-// corrected), what was kept of an earlier answer no longer holds.
-QString question(const TrackInfo &track);
+// corrected, the file is another), what was kept of an earlier answer no
+// longer holds. `packedPrint`: the file's fingerprint (AudioPrint::pack).
+QString question(const TrackInfo &track, const QByteArray &packedPrint);
 
-// B7–B10: the recordings that are the track's. By the recording id its file
-// carries; else by its ISRC; else the sure matches of its title and artist.
-// `how` says which: "id", "isrc" or "title". None, without an error: B10.
-QStringList recordingsOf(const TrackInfo &track, QString *how, QString *error);
+// B7–B10, B15, B16: the recordings that are the track's, all found in any of
+// these ways: the recording id its file carries, AcoustID by the file's
+// fingerprint (none where `packedPrint` is empty), its ISRC, the sure
+// matches of its title and artist. `ways` names those that found one ("id",
+// "acoustid", "isrc", "title"). `error`: MusicBrainz could not be asked, and
+// nothing is found. `acoustidError`: AcoustID could not be, and the other
+// ways count (B16). None, without an error: B10.
+QStringList recordingsOf(const TrackInfo &track, const QByteArray &packedPrint, QStringList *ways, QString *error, QString *acoustidError);
 
 // B11, B12: the YouTube uploads (video ids) linked to the music videos of
 // those recordings, in MusicBrainz's order, each once. Not a link on the

@@ -180,7 +180,7 @@ del { background: var(--bad-soft); color: var(--bad); text-decoration: line-thro
   <p>How a track in the music library comes to have a music video, to wait for your verdict on one, or to have none. One decision tree per stage of a lookup. This page is the reference, and a rule changes here first. A change is proposed in a copy of this page, additions in green and removals in red; once it is approved the marks come off, it becomes this page, and the code in <code>src/core</code> follows. Where the two disagree, that is a bug in one of them.</p>
   <p class="proposal" hidden>Proposed changes to the rules: <ins>additions</ins> and <del>removals</del>. Not approved yet; the code has not changed.</p>
   <p class="lede">These are the rules in <b>rules mode</b>. With the judge on (Settings → Judge), <a href="import-rules-judge.html">its own page</a> says what runs the lookup in its place (judge mode) or what the advice on a card is (advice mode); what stays of this page is listed there.</p>
-  <div class="stamp">Transcribed from the code on 2026-10-26 · every rule names where it lives · ids (A2, D5.2) are stable, for pointing at</div>
+  <div class="stamp">Transcribed from the code on 2026-10-27 · every rule names where it lives · ids (A2, D5.2) are stable, for pointing at</div>
   <div class="legend" aria-label="Legend">
     <span><span class="q">A question</span> its answers hang below</span>
     <span><span class="out ok">has its video</span></span>
@@ -262,8 +262,8 @@ del { background: var(--bad-soft); color: var(--bad); text-decoration: line-thro
 <section id="B">
   <header>
     <h2><span class="tag">B</span> Search and MusicBrainz</h2>
-    <p>Four queries, tried in order, ten results each: <code>artist title</code>, then with <code>MV</code>, <code>music video</code>, <code>official video</code> added. The artist is the first album artist. Results are remembered for a day. Beside them, MusicBrainz is asked for the music video of the track's recording (B7–B14).</p>
-    <div class="where">Matcher::searchQueries · YtDlp::search · ImportManager::runJob · MusicBrainz::recordingsOf · MusicBrainz::musicVideosOf</div>
+    <p>Four queries, tried in order, ten results each: <code>artist title</code>, then with <code>MV</code>, <code>music video</code>, <code>official video</code> added. The artist is the first album artist. Results are remembered for a day. Beside them, MusicBrainz is asked for the music video of the track's recording (B7–B16). The recordings are found by the file's tags, its title and, on AcoustID, its sound.</p>
+    <div class="where">Matcher::searchQueries · YtDlp::search · ImportManager::runJob · MusicBrainz::recordingsOf · MusicBrainz::musicVideosOf · AcoustID::recordingsOf</div>
   </header>
   <div class="scroll">
   <ul class="tree">
@@ -286,16 +286,20 @@ del { background: var(--bad-soft); color: var(--bad); text-decoration: line-thro
   <h3>MusicBrainz</h3>
   <div class="scroll">
   <ul class="tree">
-    <li><div class="row"><span class="q order">Which recording on MusicBrainz is the track's?</span></div>
+    <li><div class="row"><span class="q">Which recordings on MusicBrainz are the track's? All found in any of these ways</span></div>
       <ul>
         <li id="B7"><div class="row"><a class="id" href="#B7">B7</a><span class="when">The file carries a MusicBrainz recording id</span><span class="out go">that recording</span>
           <span class="why">As MusicBrainz Picard tags a file (<code>MUSICBRAINZ_TRACKID</code>).</span></div></li>
+        <li id="B15"><div class="row"><a class="id" href="#B15">B15</a><span class="when">AcoustID knows the sound of the file</span><span class="out go">the recordings it names, where it is sure, of the track's length</span>
+          <span class="why">By the fingerprint the library made of the file (A1), against the fingerprints people have submitted: AcoustID names the recordings on MusicBrainz that sound so. Sure: a score of at least <span class="num">0.9</span>, in every result that has one; within <span class="num">10 s</span> of the track's length where it knows that. Of 105 tracks in one library AcoustID knew 92, every best answer scoring 0.95 or more, and for 35 of them nothing else found a recording: mostly a romanised tag where MusicBrainz names the artist in Japanese ("Mizuki Nana", 水樹奈々). An answer can name a wrong recording beside the right ones (one named a Bing Crosby song beside Marty Robbins's "Cool Water"): what is listened to for it is then not the song (R0).</span></div></li>
+        <li id="B16"><div class="row"><a class="id" href="#B16">B16</a><span class="when">AcoustID cannot be reached</span><span class="out go">the other ways, this time</span>
+          <span class="why">Not a failure of the lookup. What MusicBrainz then says is kept for a day (B14), so that AcoustID is asked again.</span></div></li>
         <li id="B8"><div class="row"><a class="id" href="#B8">B8</a><span class="when">The file carries an ISRC that MusicBrainz knows</span><span class="out go">its recordings of the track's length</span>
           <span class="why">Within <span class="num">10 s</span> of it.</span></div></li>
-        <li id="B9"><div class="row"><a class="id" href="#B9">B9</a><span class="when">Otherwise: by the track's title and artist</span><span class="out go">every sure match</span>
-          <span class="why">Sure: MusicBrainz's search gives it the full score, it is a recording of audio, and it is within <span class="num">10 s</span> of the track's length where MusicBrainz knows that. MusicBrainz can hold one recording more than once, so there can be several, and a music video may be linked to only one of them. Of the recordings found for 105 tracks in one library, 76 were within 3 s of the track's length and 7 more within 10 s; 12 were 14 s to 4 minutes off, too far to be the same audio. A video found by the song's title is not taken: of 15 such, 8 were a concert's, and none had an upload linked.</span></div></li>
+        <li id="B9"><div class="row"><a class="id" href="#B9">B9</a><span class="when">By the track's title and artist</span><span class="out go">every sure match</span>
+          <span class="why">Sure: MusicBrainz's search gives it the full score, it is a recording of audio, and it is within <span class="num">10 s</span> of the track's length where MusicBrainz knows that. MusicBrainz can hold one recording more than once, so there can be several, and a music video may be linked to only one of them. Of the recordings found for 105 tracks in one library, 76 were within 3 s of the track's length and 7 more within 10 s; 12 were 14 s to 4 minutes off, too far to be the same audio. A video found by the song's title is not taken: of 15 such, 8 were a concert's, and none had an upload linked. Every way counts, not the first that finds one: the music video of supercell's うたかた花火 is linked to the recording its title finds, which AcoustID does not name.</span></div></li>
         <li id="B10"><div class="row"><a class="id" href="#B10">B10</a><span class="when">None</span><span class="out go">nothing from MusicBrainz</span>
-          <span class="why">A romanised tag where MusicBrainz knows the artist in another script, a title spelled otherwise.</span></div></li>
+          <span class="why">7 of 105 tracks in one library; 42 without AcoustID.</span></div></li>
       </ul>
     </li>
     <li><div class="row"><span class="q order">What those recordings link to</span></div>
@@ -309,10 +313,10 @@ del { background: var(--bad-soft); color: var(--bad); text-decoration: line-thro
       </ul>
     </li>
     <li id="B14"><div class="row"><a class="id" href="#B14">B14</a><span class="q">What MusicBrainz says is kept</span>
-      <span class="why">In the library, with the track's recording, for <span class="num">30 days</span>: a lookup in that time, a re-import too, goes by what was kept, and the first one after it asks again. After MusicBrainz could not be reached (B13), for a day. One request a second, as MusicBrainz asks, the artist's channels (R5) included.</span></div></li>
+      <span class="why">In the library, with the track's recording, for <span class="num">30 days</span>: a lookup in that time, a re-import too, goes by what was kept, and the first one after it asks again. After MusicBrainz or AcoustID could not be reached (B13, B16), for a day. One request a second, as MusicBrainz asks, the artist's channels (R5) included; to AcoustID three a second, as it asks.</span></div></li>
   </ul>
   </div>
-  <p class="lede">Measured on 105 tracks of one library (45 with their video, 20 waiting for a verdict, 40 with none): MusicBrainz knew the recording of 63, 37 by title and artist, 24 by ISRC, 2 by a recording id. It linked a music video to 6 of them, and an upload on YouTube to 4. For the 2 tracks with their video it was that video. For the 2 waiting for a verdict it was the upload under review, one of them on "ryo (supercell)", a channel that neither its name nor supercell's record on MusicBrainz makes the artist's. For the 40 with no video it linked nothing.</p>
+  <p class="lede">Measured on 105 tracks of one library (45 with their video, 20 waiting for a verdict, 40 with none): without AcoustID, MusicBrainz knew the recording of 63, 37 by title and artist, 24 by ISRC, 2 by a recording id. It linked a music video to 6 of them, and an upload on YouTube to 4. For the 2 tracks with their video it was that video. For the 2 waiting for a verdict it was the upload under review, one of them on "ryo (supercell)", a channel that neither its name nor supercell's record on MusicBrainz makes the artist's. For the 40 with no video it linked nothing. With AcoustID (B15) the recordings of 98 were known, and an upload on YouTube was linked to 7: for the 3 tracks with their video, that video; for the 4 waiting for a verdict, the upload under review; for the 40 with no video, still nothing.</p>
   <p class="lede">On a re-import the track's own video is on the shortlist whether or not the search returns it (<a href="#H4">H4</a>), and so is every video under review that the track is a candidate of (<a href="#H8">H8</a>).</p>
 </section>
 
@@ -799,9 +803,11 @@ del { background: var(--bad-soft); color: var(--bad); text-decoration: line-thro
     <tr><td class="n">40% · 0.26</td><td>pauses and pulse that make a track talk</td><td>A4</td><td><code>TalkCheck::measure</code></td></tr>
     <tr><td class="n">14 days</td><td>before a track without a video is searched for again</td><td>A6</td><td><code>retryNotFoundDays</code></td></tr>
     <tr><td class="n">30 min ×2</td><td>before a failed lookup is tried again</td><td>A7</td><td><code>requeueStale</code></td></tr>
-    <tr><td class="n">10 s</td><td>a MusicBrainz recording's length against the track's, for it to be the track's recording</td><td>B8, B9</td><td><code>MusicBrainz kLengthSlack</code></td></tr>
+    <tr><td class="n">10 s</td><td>a MusicBrainz recording's length against the track's, for it to be the track's recording</td><td>B8, B9, B15</td><td><code>MusicBrainz kLengthSlack</code></td></tr>
     <tr><td class="n">30 days · 1 day</td><td>before MusicBrainz is asked again about a recording; after it could not be reached</td><td>B14</td><td><code>Database musicVideosKnown</code></td></tr>
     <tr><td class="n">1 a second</td><td>requests to MusicBrainz, the artist's channels included</td><td>B14, R5</td><td><code>MusicBrainz::get</code></td></tr>
+    <tr><td class="n">0.9</td><td>AcoustID's score, for a recording it names to be the track's</td><td>B15</td><td><code>AcoustID kSureScore</code></td></tr>
+    <tr><td class="n">3 a second</td><td>requests to AcoustID</td><td>B14</td><td><code>AcoustID::get</code></td></tr>
     <tr><td class="n">10</td><td>results asked of each query</td><td>B</td><td><code>YtDlp::search</code></td></tr>
     <tr><td class="n">0.5 · 2 · 4 min</td><td>an upload's length against the track's</td><td>C3, C4</td><td><code>Matcher::lengthMismatch</code></td></tr>
     <tr><td class="n">4</td><td>uploads listened to</td><td>C9</td><td><code>runJob shortlist</code></td></tr>
