@@ -803,6 +803,8 @@ the words is tried against what the judge once saw.
 | A | Your library's audio / YouTube's, where a video has both |
 | N / P | Next / previous |
 | F, F11, double-click | Fullscreen |
+| Click on the video | Play / pause, once the moment for a double-click has passed |
+| Page Up / Page Down | Page through the list under the pointer (else the library's grid) |
 | Esc | Leave fullscreen, then back to the library |
 | Ctrl+F, / | Search |
 | Ctrl+, | Settings |

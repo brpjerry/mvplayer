@@ -45,20 +45,26 @@ WheelHandler {
         return Math.max(minY, Math.min(maxY, y))
     }
 
+    // A glide `dy` pixels down (up when negative), on from where a glide
+    // under way was going: wheel notches, and Page Up and Page Down
+    // (PageKeys), which find the view's wheel by this function.
+    function glideBy(dy) {
+        const from = glide.running ? goal : view.contentY
+        goal = clampY(from + dy)
+        view.cancelFlick()
+        glide.stop()
+        glide.from = view.contentY
+        glide.to = goal
+        glide.start()
+    }
+
     // One scroll event. `pixelDy` is the precise delta (touchpads), `angleDy`
     // the wheel angle in eighths of a degree, `phase` a Qt.ScrollPhase.
     function scroll(pixelDy, angleDy, phase) {
         const precise = phase !== Qt.NoScrollPhase || pixelDy !== 0
         if (!precise) {
-            if (angleDy === 0)
-                return
-            const from = glide.running ? goal : view.contentY
-            goal = clampY(from - angleDy / 120 * wheelStep)
-            view.cancelFlick()
-            glide.stop()
-            glide.from = view.contentY
-            glide.to = goal
-            glide.start()
+            if (angleDy !== 0)
+                glideBy(-angleDy / 120 * wheelStep)
             return
         }
 

@@ -103,6 +103,7 @@ Popup {
     property string keyError: ""
     onOpened: App.folderTree.refresh()
     // For automation: how far down the settings are shown.
+    readonly property real scrollY: flick.contentY
     function scrollTo(y) { flick.contentY = Math.max(0, Math.min(y, flick.contentHeight - flick.height)) }
 
     component FolderRow: Item {

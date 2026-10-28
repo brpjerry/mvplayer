@@ -125,6 +125,7 @@ qt_add_executable(mvplayer
     src/ui/YtDlpUpdater.h src/ui/YtDlpUpdater.cpp
     src/ui/WindowFrame.h src/ui/WindowFrame.cpp
     src/ui/PointerPacer.h src/ui/PointerPacer.cpp
+    src/ui/PageKeys.h src/ui/PageKeys.cpp
     src/ui/SystemVolume.h src/ui/SystemVolume.cpp
     src/ui/SingleInstance.h src/ui/SingleInstance.cpp
     ${MV_WINDOWS_RC}
