@@ -341,13 +341,20 @@ Item {
                 if (root.collapsed)
                     root.expandRequested()
                 else if (root.expanded)
-                    root.togglePauseRequested()
+                    pauseClick.restart()
             }
+            // A click pauses once no second click has followed it: the
+            // first click of a double click going full screen left the
+            // picture stopped for a moment, and the sound cut in and out.
             onDoubleClicked: {
-                if (!root.expanded)
-                    return
-                root.togglePauseRequested() // undo the pause from the first click
-                root.toggleFullscreenRequested()
+                pauseClick.stop()
+                if (root.expanded)
+                    root.toggleFullscreenRequested()
+            }
+            Timer {
+                id: pauseClick
+                interval: Qt.styleHints.mouseDoubleClickInterval
+                onTriggered: if (root.expanded) root.togglePauseRequested()
             }
         }
 

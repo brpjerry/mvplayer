@@ -937,6 +937,14 @@ ApplicationWindow {
                 window.showGrid()
         }
     }
+    // Page Up and Page Down go to the list under the pointer (PageKeys), and
+    // over no list to this one: the library on show, not behind the player.
+    function pageList() {
+        if (window.view === "player")
+            return null
+        const library = App.mode === "music" ? albumGrid : grid
+        return library.visible ? library.view : null
+    }
     Shortcut { sequence: "F11"; onActivated: window.setFullscreen(!window.fullscreen) }
     Shortcut { sequence: "F12"; onActivated: FrameStats.visible = !FrameStats.visible }
     Shortcut { sequence: "Ctrl+,"; onActivated: settings.open() }
@@ -1233,7 +1241,7 @@ ApplicationWindow {
                 panelCandidates: reviewPanel.candidates.length, panelCandidate: reviewPanel.shown, panelTitle: reviewPanel.title,
                 panelFile: reviewPanel.file ? reviewPanel.file.path : null, panelYt: reviewPanel.ytTitle,
                 undo: App.undoAvailable, undoLabel: App.undoLabel,
-                settingsOpen: settings.opened, settingsTab: settings.tab, coverOverlay: coverOverlay.open, loading: playerView.loading, width: window.width, height: window.height, windowActive: window.active,
+                settingsOpen: settings.opened, settingsTab: settings.tab, settingsY: settings.scrollY, coverOverlay: coverOverlay.open, loading: playerView.loading, width: window.width, height: window.height, windowActive: window.active,
                 judgeKey: App.judgeKeySet, judgeKeyHint: App.judgeKeyHint, judgeChecking: App.judgeChecking, judgeState: App.judgeState, judgeStatus: App.judgeStatus, adviceLeft: App.adviceLeft, judgeThreads: App.judgeThreads, keepEverything: App.keepEverything,
                 replacing: App.replacing, replaceStage: App.replaceStage, replaceDialog: replaceDialog.opened, replaceOptions: replaceDialog.options.length, replaceMode: replaceDialog.mode,
                 accent: "" + Theme.accent, accentColour: App.accent, autoAccent: App.autoAccent, accentSource: "" + Theme.accentSource, theme: App.themeMode, dark: Theme.dark,

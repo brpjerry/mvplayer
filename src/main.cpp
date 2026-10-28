@@ -4,6 +4,7 @@
 #include "ui/IpcServer.h"
 #include "ui/MediaSession.h"
 #include "ui/MpvItem.h"
+#include "ui/PageKeys.h"
 #include "ui/PointerPacer.h"
 #include "ui/SingleInstance.h"
 #include "ui/WindowFrame.h"
@@ -100,6 +101,7 @@ int main(int argc, char **argv)
     YtDlpUpdater ytDlpUpdater;
     WindowFrame windowFrame;
     PointerPacer pointerPacer;
+    PageKeys pageKeys;
 
     const char *uri = "MvPlayer.Core";
     qmlRegisterType<MpvItem>(uri, 1, 0, "MpvItem");
@@ -129,6 +131,7 @@ int main(int argc, char **argv)
             frameStats.attach(window);
             windowFrame.attach(window);
             pointerPacer.attach(window);
+            pageKeys.attach(window);
             mediaSession.attach(window);
         }
 
