@@ -30,6 +30,11 @@ Rectangle {
     signal playModeCycled()
     signal fullscreenToggled()
     signal nowPlayingClicked()  // the thumbnail; the title and artist open the popup below
+    // The seek bar's handle taken hold of, moved and let go: the player
+    // fades, pauses and seeks around it (PlayerView).
+    signal scrubStarted()
+    signal scrubMoved(real seconds)
+    signal scrubEnded(real seconds)
 
     implicitHeight: 96
     color: overlay ? Qt.rgba(Theme.surface.r, Theme.surface.g, Theme.surface.b, 0.92) : Theme.surface
@@ -452,7 +457,10 @@ Rectangle {
             position: root.mpv.position
             duration: root.hasMedia ? root.mpv.duration : 0
             spans: root.audios.length > 1 ? root.libSpans : []
-            onSeekRequested: (seconds, exact) => root.mpv.seek(seconds, exact)
+            onScrubStarted: root.scrubStarted()
+            onScrubMoved: (seconds) => root.scrubMoved(seconds)
+            onScrubEnded: (seconds) => root.scrubEnded(seconds)
+            onSeekRequested: (seconds) => root.mpv.seek(seconds, true)
         }
         Text {
             id: total
