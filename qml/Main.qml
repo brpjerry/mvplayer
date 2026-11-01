@@ -692,26 +692,14 @@ ApplicationWindow {
             anchors.right: nowPlaying.left
             anchors.top: parent.top
             anchors.bottom: controlBar.top
-
-            TopBar {
-                id: topBar
-                width: parent.width
-                playerView: window.view === "player"
-                current: player.current
-                onBackRequested: window.showGrid()
-                onSectionRequested: (section) => window.showSection(section)
-                onAcceptJudgedRequested: window.acceptJudged()
-                onSearchTextChanged: {
-                    App.videos.searchText = searchText
-                    App.albums.searchText = searchText
-                    if (searchText.length > 0 && window.view === "player")
-                        window.showGrid()
-                }
-            }
+            // The cards scroll on under the top bar (drawn over them, further
+            // down): the main area's edges are where they end.
+            clip: true
 
             Item {
                 id: pane
-                anchors.top: topBar.bottom
+                anchors.top: parent.top
+                anchors.topMargin: topBar.height
                 anchors.bottom: parent.bottom
                 width: parent.width
 
@@ -719,6 +707,7 @@ ApplicationWindow {
                     id: grid
                     anchors.fill: parent
                     room: frame.gridRoom
+                    underlap: topBar.height
                     // Recedes as the player grows over it, and fades
                     // across to the albums with the mode (and back).
                     property real shown: App.mode === "video" ? 1 : 0
@@ -741,6 +730,7 @@ ApplicationWindow {
                     id: albumGrid
                     anchors.fill: parent
                     room: frame.gridRoom
+                    underlap: topBar.height
                     property real shown: App.mode === "music" ? 1 : 0
                     Behavior on shown { NumberAnimation { duration: Theme.normal } }
                     opacity: shown
@@ -784,30 +774,81 @@ ApplicationWindow {
             onEditRequested: (ids, subject) => tagEditor.openFor(ids, ids.length > 1, subject)
         }
 
-        PlayerView {
-            id: playerView
+        // The player's edges: the main area with the top bar's strip, so
+        // that a video playing in its card passes under the bar with the
+        // card; the whole window in full screen, over the bar.
+        Item {
+            id: playerArea
             x: window.fullscreen ? 0 : mainArea.x
-            y: window.fullscreen ? 0 : topBar.height
             width: window.fullscreen ? window.width : mainArea.width
-            height: window.fullscreen ? window.height : pane.height
+            height: window.fullscreen ? window.height : mainArea.height
+            z: window.fullscreen ? 1 : 0
+            clip: true
+
+            PlayerView {
+                id: playerView
+                y: window.fullscreen ? 0 : topBar.height
+                width: parent.width
+                height: window.fullscreen ? window.height : pane.height
+                current: player.current
+                fullscreen: window.fullscreen
+                // The grid occupies the same rectangle, so its coordinates carry over.
+                anchorRect: grid.currentThumbRect
+                anchorAvailable: grid.currentThumbAvailable && grid.visible && grid.enabled
+                onExpandRequested: window.showPlayer()
+                onCloseRequested: player.stop()
+                onReviewApproved: window.approveVideo(player.current.videoId)
+                onReviewRejected: window.rejectVideo(player.current.videoId)
+                onReviewChannelRequested: (allow) => channelDialog.openFor(player.current.videoId, allow)
+                candidates: controlBar.candidates.length
+                candidateTitle: controlBar.candidate ? controlBar.candidate.title : ""
+                onTogglePauseRequested: window.togglePause()
+                onToggleFullscreenRequested: window.setFullscreen(!window.fullscreen)
+            }
+        }
+
+        // Behind the top bar, which has no background of its own: the
+        // window's colour, nearly solid behind the bar's text and buttons
+        // and fading out below it, over the cards that scroll on under it.
+        // Dark in dark mode, light in light mode. Gone as the player grows
+        // over the grid.
+        Rectangle {
+            id: barScrim
+            function bg(alpha) { return Qt.rgba(Theme.bg.r, Theme.bg.g, Theme.bg.b, alpha) }
+            x: mainArea.x
+            width: mainArea.width
+            height: topBar.height + 32
+            opacity: 1 - playerView.cover
+            visible: opacity > 0
+            gradient: Gradient {
+                GradientStop { position: 0; color: barScrim.bg(0.95) }
+                GradientStop { position: 0.55; color: barScrim.bg(0.9) }
+                GradientStop { position: 0.7; color: barScrim.bg(0.6) }
+                GradientStop { position: 0.85; color: barScrim.bg(0.22) }
+                GradientStop { position: 1; color: barScrim.bg(0) }
+            }
+        }
+
+        TopBar {
+            id: topBar
+            x: mainArea.x
+            width: mainArea.width
+            playerView: window.view === "player"
             current: player.current
-            fullscreen: window.fullscreen
-            // The grid occupies the same rectangle, so its coordinates carry over.
-            anchorRect: grid.currentThumbRect
-            anchorAvailable: grid.currentThumbAvailable && grid.visible && grid.enabled
-            onExpandRequested: window.showPlayer()
-            onCloseRequested: player.stop()
-            onReviewApproved: window.approveVideo(player.current.videoId)
-            onReviewRejected: window.rejectVideo(player.current.videoId)
-            onReviewChannelRequested: (allow) => channelDialog.openFor(player.current.videoId, allow)
-            candidates: controlBar.candidates.length
-            candidateTitle: controlBar.candidate ? controlBar.candidate.title : ""
-            onTogglePauseRequested: window.togglePause()
-            onToggleFullscreenRequested: window.setFullscreen(!window.fullscreen)
+            onBackRequested: window.showGrid()
+            onSectionRequested: (section) => window.showSection(section)
+            onAcceptJudgedRequested: window.acceptJudged()
+            onSearchTextChanged: {
+                App.videos.searchText = searchText
+                App.albums.searchText = searchText
+                if (searchText.length > 0 && window.view === "player")
+                    window.showGrid()
+            }
         }
 
         ControlBar {
             id: controlBar
+            z: 2 // over the player in full screen
             onReplaceRequested: (videoId) => replaceDialog.openFor(videoId)
             onRevealRequested: (videoId) => window.revealVideo(videoId)
             width: parent.width

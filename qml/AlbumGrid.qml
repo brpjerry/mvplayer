@@ -23,6 +23,9 @@ Item {
     readonly property alias view: grid
     readonly property alias wheel: wheel
     readonly property bool menuOpen: menu.opened
+    // How far above its top the covers are still drawn: they scroll on
+    // under the top bar there, and whatever holds the grid clips them.
+    property real underlap: 0
 
     // Albums picked with Ctrl+click, each {key, albumArtist, album}: a right
     // click on one of them edits the tags of all of them. A plain click, or
@@ -177,7 +180,7 @@ Item {
         model: App.albums
         topMargin: 2
         bottomMargin: 24
-        clip: true
+        displayMarginBeginning: root.underlap
         cacheBuffer: 800
         boundsBehavior: Flickable.StopAtBounds
         maximumFlickVelocity: 16000

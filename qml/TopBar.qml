@@ -3,6 +3,8 @@ import QtQuick.Controls.Basic
 import MvPlayer.Core
 
 // Heading on the left; import activity, sort order and search on the right.
+// No background: the cards scroll on under it, and what is behind it (in
+// Main) keeps it legible.
 Item {
     id: root
 
@@ -46,6 +48,13 @@ Item {
         return n + noun
     }
 
+    // A press or the pointer on the bar's empty space stops here, not at the
+    // card underneath.
+    MouseArea {
+        anchors.fill: parent
+        hoverEnabled: true
+        acceptedButtons: Qt.AllButtons
+    }
     WindowDrag { anchors.fill: parent }
 
     // Back button, only in the player view

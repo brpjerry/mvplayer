@@ -51,7 +51,8 @@ Item {
     readonly property rect fallbackRect: Qt.rect(width * 0.04, height * 0.04, width * 0.92, height * 0.92)
     readonly property rect restRect: anchorAvailable ? anchorRect : fallbackRect
 
-    clip: true
+    // Not clipped here: resting on a thumbnail, the video goes where the
+    // card goes, under the top bar too. Whatever holds the view clips it.
 
     // ---- Motion ------------------------------------------------------------
     NumberAnimation {
