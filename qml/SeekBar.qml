@@ -13,8 +13,14 @@ Item {
     // beside the bar shows it, where a bubble would cover the transport.
     readonly property real hoverSeconds: engaged && duration > 0 && !dragging ? fractionAt(mouse.mouseX) * duration : -1
 
-    // exact=false while scrubbing (fast keyframe seeks), true on release
-    signal seekRequested(real seconds, bool exact)
+    // The handle taken hold of, moved (the second under it, as it goes) and
+    // let go (the second to seek to; -1 when the hold was lost instead).
+    // What plays meanwhile is the player's affair (PlayerView).
+    signal scrubStarted()
+    signal scrubMoved(real seconds)
+    signal scrubEnded(real seconds)
+    // A seek asked for outright (the wheel): no scrub.
+    signal seekRequested(real seconds)
 
     implicitHeight: 20
 
@@ -84,24 +90,32 @@ Item {
         preventStealing: true
 
         property real lastSent: -1
-        function scrub(exact) {
+        // Where the handle is; told on, once it has moved a quarter second.
+        function scrub() {
             root.dragFraction = root.fractionAt(mouseX)
             const t = root.dragFraction * root.duration
-            if (exact || Math.abs(t - lastSent) > 0.25) {
+            if (Math.abs(t - lastSent) > 0.25) {
                 lastSent = t
-                root.seekRequested(t, exact)
+                root.scrubMoved(t)
             }
         }
-        onPressed: { lastSent = -1; scrub(false) }
-        onPositionChanged: if (pressed) scrub(false)
+        onPressed: {
+            lastSent = -1
+            root.scrubStarted()
+            scrub()
+        }
+        onPositionChanged: if (pressed) scrub()
         onReleased: {
-            scrub(true)
+            root.dragFraction = root.fractionAt(mouseX)
+            root.scrubEnded(root.dragFraction * root.duration)
             root.holding = true
             holdTimer.restart()
         }
+        // The hold taken away (the file stopped under it): let go of nothing.
+        onCanceled: root.scrubEnded(-1)
         onWheel: (wheel) => {
             const step = (wheel.angleDelta.y > 0 ? 5 : -5)
-            root.seekRequested(Math.max(0, Math.min(root.duration, root.position + step)), true)
+            root.seekRequested(Math.max(0, Math.min(root.duration, root.position + step)))
         }
     }
 }

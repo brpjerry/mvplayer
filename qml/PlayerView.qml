@@ -107,6 +107,7 @@ Item {
         animateTo(0)
     }
     function close() {
+        cancelScrub()
         cancelLoad()
         shown = false
     }
@@ -140,6 +141,7 @@ Item {
     // in on its first frame.
     property var pendingAt: null
     function beginLoad(path, at) {
+        cancelScrub() // a new file: whatever the handle held of this one is moot
         reveal.stop()
         posterShown = true
         fadeOut.stop()
@@ -181,6 +183,130 @@ Item {
     }
     NumberAnimation { id: fadeIn; target: mpvItem; property: "fade"; to: 1; duration: 200 }
 
+    // ---- Scrubbing ---------------------------------------------------------
+    // The seek bar's handle, taken hold of while the file plays: its sound
+    // fades out and, once that has been heard, the file pauses under the
+    // handle. From then on it shows the picture at the handle once the
+    // pointer has rested a moment, and nothing plays until the handle is
+    // let go: then it seeks there exactly and, after a beat, plays on with
+    // its sound fading back in. A file that was paused shows the picture
+    // the same way and stays paused. A track played from its file goes
+    // through the same item, so it scrubs the same.
+    property bool scrubbing: false  // the handle is held
+    // Playing when the handle was taken: plays on when it is let go. Space
+    // meanwhile turns that round (toggleScrubResume).
+    property bool resumeAfterScrub: false
+    // Paused only under the handle, from the handle taken until the sound
+    // is back: no pause to anyone outside (Main.playingNow).
+    property bool scrubHold: false
+    readonly property bool resuming: resume.running // let go, the sound not back yet
+    property real scrubTarget: -1   // the second under the handle, not shown yet
+
+    function beginScrub() {
+        if (!mpvItem.active || loading)
+            return
+        // Taken again while the sound was still coming back from the last
+        // scrub: the file plays, as far as anyone knows.
+        const playsOn = !mpvItem.paused || scrubHold
+        cancelScrub()
+        fadeIn.stop() // a file just opened, its sound still coming up: the scrub takes it from here
+        scrubbing = true
+        resumeAfterScrub = playsOn
+        scrubHold = playsOn
+        if (playsOn && !mpvItem.paused)
+            scrubOut.start()
+        else if (playsOn)
+            mpvItem.paused = true // still paused from the last scrub: kept so
+    }
+    function scrubTo(seconds) {
+        if (!scrubbing)
+            return
+        scrubTarget = seconds
+        if (!scrubOut.running) // else shown once the sound has gone
+            settle.restart()
+    }
+    // seconds < 0: the hold was lost rather than let go; nothing to seek to.
+    function endScrub(seconds) {
+        if (seconds >= 0)
+            mpvItem.seek(seconds, true)
+        if (!scrubbing)
+            return
+        scrubbing = false
+        settle.stop()
+        scrubTarget = -1
+        if (!resumeAfterScrub) {
+            // Paused before, or by Space meanwhile: stays so, at full gain
+            // for when it plays again.
+            scrubOut.stop()
+            mpvItem.fade = 1
+            return
+        }
+        if (scrubOut.running) {
+            // Let go before its sound had gone (a click): never paused, and
+            // the sound comes back from where it is.
+            scrubOut.stop()
+            scrubHold = false
+            scrubIn.restart()
+            return
+        }
+        resume.restart()
+    }
+    // Space while the handle is held, or in the beat after: whether the file
+    // plays on when it is let go, turned round.
+    function toggleScrubResume() {
+        resumeAfterScrub = !resumeAfterScrub
+        scrubHold = resumeAfterScrub
+        if (resumeAfterScrub)
+            return
+        resume.stop()
+        if (scrubOut.running) {
+            // Its sound was still going: stopped now.
+            scrubOut.stop()
+            mpvItem.paused = true
+            preview()
+        }
+        if (!scrubbing)
+            mpvItem.fade = 1 // let go already: stays paused, its gain back for later
+    }
+    function cancelScrub() {
+        scrubbing = false
+        scrubHold = false
+        scrubTarget = -1
+        settle.stop()
+        scrubOut.stop()
+        scrubIn.stop()
+        resume.stop()
+    }
+    // The picture at the handle: a keyframe near it, which is quick.
+    function preview() {
+        if (scrubTarget < 0)
+            return
+        mpvItem.seek(scrubTarget, false)
+        scrubTarget = -1
+    }
+    SequentialAnimation {
+        id: scrubOut
+        NumberAnimation { target: mpvItem; property: "fade"; to: 0; duration: 150 }
+        PauseAnimation { duration: 250 } // the fade through the buffer, as above
+        onFinished: {
+            mpvItem.paused = true
+            root.preview()
+        }
+    }
+    NumberAnimation { id: scrubIn; target: mpvItem; property: "fade"; to: 1; duration: 200 }
+    // The pointer has rested this long: the picture follows it.
+    Timer { id: settle; interval: 100; onTriggered: root.preview() }
+    // Let go: the picture lands first, then the sound comes back.
+    Timer {
+        id: resume
+        interval: 200
+        onTriggered: {
+            mpvItem.fade = 0
+            mpvItem.paused = false
+            scrubIn.restart()
+        }
+    }
+
     Timer {
         id: reveal
         interval: 60 // give mpv a couple of frames to draw before uncovering it
@@ -195,6 +321,16 @@ Item {
             // that cut one short): back up for the new one.
             if (mpvItem.fade < 1)
                 fadeIn.restart()
+        }
+        function onPausedChanged() {
+            // The sound back after a scrub (or any change once the handle
+            // is let go and the beat over): the hold is done with.
+            if (!root.scrubbing && !resume.running)
+                root.scrubHold = false
+        }
+        function onActiveChanged() {
+            if (!mpvItem.active)
+                root.cancelScrub()
         }
     }
 

@@ -668,6 +668,13 @@ the words is tried against what the judge once saw.
 - Clicking a video grows its thumbnail into the player. `Esc` (or the back
   arrow) returns to the library with the video still playing inside its own
   thumbnail; click it to bring the player back.
+- Dragging the seek bar's handle scrubs: the sound fades out and the video
+  pauses under the handle, which then shows the picture wherever it rests,
+  and nothing plays until it is let go; the video then seeks there exactly
+  and, after a beat, plays on with its sound fading back in. A paused video
+  shows the picture the same way and stays paused; Space while the handle
+  is held decides which of the two happens. A click seeks at once. Tracks
+  played from their files scrub the same way.
 - In the bottom bar, the playing video's picture switches between the player
   and the library. Its title shows the music file the video was found for —
   where it is, how long it plays, its format and every tag in it, with arrows

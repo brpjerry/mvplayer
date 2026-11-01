@@ -77,7 +77,7 @@ ApplicationWindow {
                 }
                 Platform.MenuSeparator {}
                 Platform.MenuItem {
-                    text: window.mpv.paused ? "Play" : "Pause"
+                    text: window.playingNow ? "Pause" : "Play"
                     enabled: player.current !== null
                     onTriggered: window.togglePause()
                 }
@@ -132,12 +132,20 @@ ApplicationWindow {
         if (player.current)
             playerView.collapse()
     }
-    // True while something is playing or about to (a video is being opened).
-    readonly property bool playingNow: player.current !== null && (!mpv.paused || playerView.loading)
+    // True while something is playing or about to (a video is being opened,
+    // or is paused only under the seek bar's handle).
+    readonly property bool playingNow: player.current !== null && (!mpv.paused || playerView.loading || playerView.scrubHold)
 
     function togglePause() {
         if (!player.current || playerView.loading)
             return
+        if (playerView.scrubbing || playerView.resuming) {
+            // Under the seek bar's handle nothing plays either way: this
+            // decides whether the file plays on when it is let go.
+            playerView.toggleScrubResume()
+            playerView.flashState(!playerView.resumeAfterScrub)
+            return
+        }
         playerView.flashState(!mpv.paused)
         mpv.togglePause()
     }
@@ -599,8 +607,8 @@ ApplicationWindow {
     Binding { target: MediaSession; property: "fullscreen"; value: window.fullscreen }
     Connections {
         target: MediaSession
-        function onPlayRequested() { if (window.mpv.paused) window.togglePause() }
-        function onPauseRequested() { if (!window.mpv.paused) window.togglePause() }
+        function onPlayRequested() { if (!window.playingNow) window.togglePause() }
+        function onPauseRequested() { if (window.playingNow) window.togglePause() }
         function onPlayPauseRequested() { window.togglePause() }
         function onStopRequested() { player.stop() }
         function onNextRequested() { player.next(false) }
@@ -820,6 +828,9 @@ ApplicationWindow {
             onShuffleToggled: App.shuffle = !player.shuffle
             onPlayModeCycled: App.playMode = player.playMode === "autoplay" ? "repeat" : player.playMode === "repeat" ? "none" : "autoplay"
             onFullscreenToggled: window.setFullscreen(!window.fullscreen)
+            onScrubStarted: playerView.beginScrub()
+            onScrubMoved: (seconds) => playerView.scrubTo(seconds)
+            onScrubEnded: (seconds) => playerView.endScrub(seconds)
             onNowPlayingClicked: {
                 if (player.current && player.current.kind === "track" && !player.videoUp) {
                     // The album of the playing track, in the music library.
@@ -976,6 +987,13 @@ ApplicationWindow {
         case "previous": player.previous(); return "ok"
         case "stop": player.stop(); return "ok"
         case "seek": mpv.seek(parseFloat(arg), true); return "ok"
+        case "scrub": { // scrub <seconds>: the seek bar's handle taken (unless it is held) and moved there
+            if (!playerView.scrubbing)
+                playerView.beginScrub()
+            playerView.scrubTo(parseFloat(arg))
+            return "ok"
+        }
+        case "scrub-end": playerView.endScrub(arg === "" ? -1 : parseFloat(arg)); return "ok" // scrub-end [seconds]: the handle let go there (with no second: the hold lost)
         case "play-mode": if (arg) App.playMode = arg; return player.playMode // play-mode [autoplay|repeat|none]: what follows the album, or the video
         case "shuffle": if (arg) App.shuffle = arg !== "off"; return player.shuffle ? "on" : "off" // shuffle [on|off]
         case "audio": mpv.audioTrack = parseInt(arg); return "ok"
@@ -1219,6 +1237,7 @@ ApplicationWindow {
                 originY: grid.view.originY, contentHeight: grid.view.contentHeight, albumOriginY: albumGrid.view.originY, albumContentHeight: albumGrid.view.contentHeight,
                 playing: player.current ? player.current.title : null, index: player.index,
                 position: mpv.position, duration: mpv.duration, paused: mpv.paused, active: mpv.active, muted: mpv.muted, fade: mpv.fade,
+                scrubbing: playerView.scrubbing, scrubHold: playerView.scrubHold, resuming: playerView.resuming,
                 hwdec: mpv.hwdec, videoSize: mpv.videoSize.width + "x" + mpv.videoSize.height,
                 audioTrack: mpv.audioTrack, audioTracks: mpv.audioTracks.length, libraryHere: controlBar.libraryHere, librarySpans: controlBar.libSpans.length,
                 busy: App.busy, scanning: App.scanning, status: App.statusText, counts: App.trackCounts,
