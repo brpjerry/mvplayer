@@ -46,6 +46,15 @@ int main(int argc, char **argv)
 
     // libmpv renders through OpenGL, so the scene graph has to as well.
     QQuickWindow::setGraphicsApi(QSGRendererInterface::OpenGL);
+#ifdef Q_OS_WIN
+    // The threaded render loop's default animation driver can hand animations
+    // to a system timer: for good once it judges that frames don't wait for
+    // vsync, and while no window is shown. A copy left running for hours was
+    // found stuck on that timer, choppy until a restart. This driver advances
+    // animations by the clock, once a frame, and never uses that timer.
+    if (!qEnvironmentVariableIsSet("QSG_USE_SIMPLE_ANIMATION_DRIVER"))
+        qputenv("QSG_USE_SIMPLE_ANIMATION_DRIVER", "1");
+#endif
 
     QGuiApplication app(argc, argv);
     QGuiApplication::setApplicationName(QStringLiteral("mvplayer"));
