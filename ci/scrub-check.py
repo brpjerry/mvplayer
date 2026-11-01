@@ -59,8 +59,11 @@ def main():
             failed.append(name)
 
     player("mode music")
-    s = player.wait(lambda s: s["albumsShown"] >= 1 and not s["scanning"], 60)
-    check("the library is up", s, s["albumsShown"] >= 1)
+    # The library is scanned as the player starts, slowly on a small runner
+    # (each track is fingerprinted); the album needs both its tracks before
+    # it plays, since the first runs into the second below.
+    s = player.wait(lambda s: s["albumsShown"] >= 1 and s["libraryTracks"] >= 2 and not s["scanning"], 180)
+    check("the library is up, both tracks in", s, s["albumsShown"] >= 1 and s["libraryTracks"] >= 2)
     player("play-album 0")
     s = player.wait(lambda s: s["active"] and s["queueKind"] == "track" and s["position"] > 0.5 and not s["paused"], 30)
     check("a track plays from its file", s, s["active"] and not s["paused"] and s["position"] > 0.5 and s["fade"] == 1)
