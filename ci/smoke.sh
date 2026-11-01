@@ -1785,14 +1785,18 @@ echo "== binaries start"
 "$BUILD/mvplayer-import" --help >/dev/null
 QT_QPA_PLATFORM=offscreen "$BUILD/mvplayer$EXE" --help >/dev/null
 
-# The player itself, offscreen and muted, on the first library, driven over
-# its control socket: the seek bar's scrub (see ci/scrub-check.py). Not on
-# Windows, where the socket is a named pipe the script does not speak. Its
-# imports go to the stand-in that finds nothing, so no network is touched.
+# The player itself, offscreen and muted, on an album of two 40 s songs,
+# driven over its control socket: the seek bar's scrub (see
+# ci/scrub-check.py). Not on Windows, where the socket is a named pipe the
+# script does not speak. Its imports go to the stand-in that finds nothing,
+# so no network is touched.
 if [[ -z "$EXE" ]]; then
     echo "== scrubbing the seek bar"
+    mkdir -p "$WORK/lib-ui/S" "$WORK/mvlib-ui"
+    ffmpeg -v error -y -f lavfi -i "$(song 247 29)" -metadata title="First" -metadata artist=Sam -metadata album=Scrub -metadata track=1 "$WORK/lib-ui/S/01.flac"
+    ffmpeg -v error -y -f lavfi -i "$(song 329 41)" -metadata title="Second" -metadata artist=Sam -metadata album=Scrub -metadata track=2 "$WORK/lib-ui/S/02.flac"
     MVPLAYER_YTDLP="$EMPTY" MVPLAYER_NO_ACOUSTID=1 QT_QPA_PLATFORM=offscreen \
-        "$BUILD/mvplayer" --music-dir "$WORK/lib" --mv-dir "$WORK/mvlib" --ipc "$WORK/ui.sock" --mute > "$WORK/ui.log" 2>&1 &
+        "$BUILD/mvplayer" --music-dir "$WORK/lib-ui" --mv-dir "$WORK/mvlib-ui" --ipc "$WORK/ui.sock" --mute > "$WORK/ui.log" 2>&1 &
     UI_PID=$!
     if ! python3 "$(dirname "$0")/scrub-check.py" "$WORK/ui.sock"; then
         kill "$UI_PID" 2>/dev/null || true
