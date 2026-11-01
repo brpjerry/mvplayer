@@ -20,6 +20,7 @@ class Player:
         while True:
             try:
                 self.sock = socket.socket(socket.AF_UNIX, socket.SOCK_STREAM)
+                self.sock.settimeout(5)  # a reply that never comes fails the check rather than hang it
                 self.sock.connect(path)
                 break
             except OSError:
