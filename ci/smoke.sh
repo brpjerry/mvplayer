@@ -1784,4 +1784,22 @@ echo "$OUT" | grep "^PICTURE="
 echo "== binaries start"
 "$BUILD/mvplayer-import" --help >/dev/null
 QT_QPA_PLATFORM=offscreen "$BUILD/mvplayer$EXE" --help >/dev/null
+
+# The player itself, offscreen and muted, on the first library, driven over
+# its control socket: the seek bar's scrub (see ci/scrub-check.py). Not on
+# Windows, where the socket is a named pipe the script does not speak. Its
+# imports go to the stand-in that finds nothing, so no network is touched.
+if [[ -z "$EXE" ]]; then
+    echo "== scrubbing the seek bar"
+    MVPLAYER_YTDLP="$EMPTY" MVPLAYER_NO_ACOUSTID=1 QT_QPA_PLATFORM=offscreen \
+        "$BUILD/mvplayer" --music-dir "$WORK/lib" --mv-dir "$WORK/mvlib" --ipc "$WORK/ui.sock" --mute > "$WORK/ui.log" 2>&1 &
+    UI_PID=$!
+    if ! python3 "$(dirname "$0")/scrub-check.py" "$WORK/ui.sock"; then
+        kill "$UI_PID" 2>/dev/null || true
+        cat "$WORK/ui.log"
+        exit 1
+    fi
+    for _ in $(seq 1 100); do kill -0 "$UI_PID" 2>/dev/null || break; sleep 0.2; done # it quits itself
+    kill "$UI_PID" 2>/dev/null || true
+fi
 echo "smoke ok"

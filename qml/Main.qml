@@ -132,9 +132,13 @@ ApplicationWindow {
         if (player.current)
             playerView.collapse()
     }
-    // True while something is playing or about to (a video is being opened,
-    // or is paused only under the seek bar's handle).
-    readonly property bool playingNow: player.current !== null && (!mpv.paused || playerView.loading || playerView.scrubHold)
+    // True while something is playing or about to: a video is being opened,
+    // or the seek bar's handle holds a file that plays on when it is let go
+    // (under the handle what counts is what it will do, not what mpv has
+    // reported: its pause and unpause take a moment to come back).
+    readonly property bool playingNow: player.current !== null
+        && (playerView.loading || (playerView.scrubbing || playerView.resuming
+            ? playerView.resumeAfterScrub : !mpv.paused || playerView.scrubHold))
 
     function togglePause() {
         if (!player.current || playerView.loading)
@@ -146,8 +150,11 @@ ApplicationWindow {
             playerView.flashState(!playerView.resumeAfterScrub)
             return
         }
-        playerView.flashState(!mpv.paused)
-        mpv.togglePause()
+        // Set outright, from what it plays as, rather than toggled from what
+        // mpv last reported: right after a scrub that can lag a moment.
+        const pause = window.playingNow
+        playerView.flashState(pause)
+        mpv.paused = pause
     }
 
     // Another video under review that a candidate track of this one is a
@@ -991,7 +998,7 @@ ApplicationWindow {
             if (!playerView.scrubbing)
                 playerView.beginScrub()
             playerView.scrubTo(parseFloat(arg))
-            return "ok"
+            return playerView.scrubbing ? "ok" : "not scrubbing" // nothing loaded, or still loading
         }
         case "scrub-end": playerView.endScrub(arg === "" ? -1 : parseFloat(arg)); return "ok" // scrub-end [seconds]: the handle let go there (with no second: the hold lost)
         case "play-mode": if (arg) App.playMode = arg; return player.playMode // play-mode [autoplay|repeat|none]: what follows the album, or the video
@@ -1237,7 +1244,7 @@ ApplicationWindow {
                 originY: grid.view.originY, contentHeight: grid.view.contentHeight, albumOriginY: albumGrid.view.originY, albumContentHeight: albumGrid.view.contentHeight,
                 playing: player.current ? player.current.title : null, index: player.index,
                 position: mpv.position, duration: mpv.duration, paused: mpv.paused, active: mpv.active, muted: mpv.muted, fade: mpv.fade,
-                scrubbing: playerView.scrubbing, scrubHold: playerView.scrubHold, resuming: playerView.resuming,
+                scrubbing: playerView.scrubbing, scrubHold: playerView.scrubHold, resuming: playerView.resuming, playingNow: window.playingNow,
                 hwdec: mpv.hwdec, videoSize: mpv.videoSize.width + "x" + mpv.videoSize.height,
                 audioTrack: mpv.audioTrack, audioTracks: mpv.audioTracks.length, libraryHere: controlBar.libraryHere, librarySpans: controlBar.libSpans.length,
                 busy: App.busy, scanning: App.scanning, status: App.statusText, counts: App.trackCounts,

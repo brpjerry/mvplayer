@@ -671,7 +671,7 @@ the words is tried against what the judge once saw.
 - Dragging the seek bar's handle scrubs: the sound fades out and the video
   pauses under the handle, which then shows the picture wherever it rests,
   and nothing plays until it is let go; the video then seeks there exactly
-  and, after a beat, plays on with its sound fading back in. A paused video
+  and, once the picture has landed, plays on with its sound fading back in. A paused video
   shows the picture the same way and stays paused; Space while the handle
   is held decides which of the two happens. A click seeks at once. Tracks
   played from their files scrub the same way.

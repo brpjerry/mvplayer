@@ -111,7 +111,8 @@ Item {
             root.holding = true
             holdTimer.restart()
         }
-        // The hold taken away (the file stopped under it): let go of nothing.
+        // The hold taken away (the file stopped or changed under it, or the
+        // grab was lost): let go of nothing; the player plays on from where it is.
         onCanceled: root.scrubEnded(-1)
         onWheel: (wheel) => {
             const step = (wheel.angleDelta.y > 0 ? 5 : -5)

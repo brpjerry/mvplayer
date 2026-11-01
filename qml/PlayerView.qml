@@ -188,10 +188,10 @@ Item {
     // fades out and, once that has been heard, the file pauses under the
     // handle. From then on it shows the picture at the handle once the
     // pointer has rested a moment, and nothing plays until the handle is
-    // let go: then it seeks there exactly and, after a beat, plays on with
-    // its sound fading back in. A file that was paused shows the picture
-    // the same way and stays paused. A track played from its file goes
-    // through the same item, so it scrubs the same.
+    // let go: then it seeks there exactly and, once the picture has landed,
+    // plays on with its sound fading back in. A file that was paused shows
+    // the picture the same way and stays paused. A track played from its
+    // file goes through the same item, so it scrubs the same.
     property bool scrubbing: false  // the handle is held
     // Playing when the handle was taken: plays on when it is let go. Space
     // meanwhile turns that round (toggleScrubResume).
@@ -199,7 +199,11 @@ Item {
     // Paused only under the handle, from the handle taken until the sound
     // is back: no pause to anyone outside (Main.playingNow).
     property bool scrubHold: false
-    readonly property bool resuming: resume.running // let go, the sound not back yet
+    // Let go, the sound not back yet: it comes back once the release seek
+    // has landed (onSeeked), or failing that when the timer runs out.
+    property bool landing: false
+    property real landTarget: -1
+    readonly property bool resuming: landing || resume.running
     property real scrubTarget: -1   // the second under the handle, not shown yet
 
     function beginScrub() {
@@ -227,13 +231,15 @@ Item {
     }
     // seconds < 0: the hold was lost rather than let go; nothing to seek to.
     function endScrub(seconds) {
-        if (seconds >= 0)
-            mpvItem.seek(seconds, true)
+        // Let go of nothing: a load, a stop or a file taking over under the
+        // handle took the scrub away, and its second is of another file.
         if (!scrubbing)
             return
         scrubbing = false
         settle.stop()
         scrubTarget = -1
+        if (seconds >= 0)
+            mpvItem.seek(seconds, true)
         if (!resumeAfterScrub) {
             // Paused before, or by Space meanwhile: stays so, at full gain
             // for when it plays again.
@@ -249,15 +255,33 @@ Item {
             scrubIn.restart()
             return
         }
+        if (seconds < 0) {
+            playOn()
+            return
+        }
+        // The sound once the picture is there: when the seek has landed.
+        landing = true
+        landTarget = seconds
         resume.restart()
     }
-    // Space while the handle is held, or in the beat after: whether the file
-    // plays on when it is let go, turned round.
+    // Paused under the handle and let go: the sound back, from nothing.
+    function playOn() {
+        landing = false
+        landTarget = -1
+        resume.stop()
+        mpvItem.fade = 0
+        mpvItem.paused = false
+        scrubIn.restart()
+    }
+    // Space while the handle is held, or before the sound is back: whether
+    // the file plays on when it is let go, turned round.
     function toggleScrubResume() {
         resumeAfterScrub = !resumeAfterScrub
         scrubHold = resumeAfterScrub
         if (resumeAfterScrub)
             return
+        landing = false
+        landTarget = -1
         resume.stop()
         if (scrubOut.running) {
             // Its sound was still going: stopped now.
@@ -272,6 +296,8 @@ Item {
         scrubbing = false
         scrubHold = false
         scrubTarget = -1
+        landing = false
+        landTarget = -1
         settle.stop()
         scrubOut.stop()
         scrubIn.stop()
@@ -296,16 +322,8 @@ Item {
     NumberAnimation { id: scrubIn; target: mpvItem; property: "fade"; to: 1; duration: 200 }
     // The pointer has rested this long: the picture follows it.
     Timer { id: settle; interval: 100; onTriggered: root.preview() }
-    // Let go: the picture lands first, then the sound comes back.
-    Timer {
-        id: resume
-        interval: 200
-        onTriggered: {
-            mpvItem.fade = 0
-            mpvItem.paused = false
-            scrubIn.restart()
-        }
-    }
+    // Should the release seek never report back, the sound comes back anyway.
+    Timer { id: resume; interval: 1500; onTriggered: root.playOn() }
 
     Timer {
         id: reveal
@@ -318,15 +336,38 @@ Item {
             root.awaitingFrame = false
             reveal.restart()
             // Faded out for a change of file (or left part way by a load
-            // that cut one short): back up for the new one.
-            if (mpvItem.fade < 1)
+            // that cut one short): back up for the new one. Not while a
+            // scrub has the gain (a track taken hold of as soon as it is
+            // open): that brings it back itself.
+            if (mpvItem.fade < 1 && !root.scrubbing && !root.resuming && !scrubIn.running)
                 fadeIn.restart()
+        }
+        function onSeeked() {
+            // The release seek has landed (a preview still in flight lands
+            // elsewhere): the sound comes back.
+            if (root.landing && Math.abs(mpvItem.position - root.landTarget) < 0.5)
+                root.playOn()
         }
         function onPausedChanged() {
             // The sound back after a scrub (or any change once the handle
-            // is let go and the beat over): the hold is done with.
-            if (!root.scrubbing && !resume.running)
+            // is let go and the sound back): the hold is done with.
+            if (!root.scrubbing && !root.resuming)
                 root.scrubHold = false
+        }
+        // A queued file took over (gapless) under the handle, or before the
+        // sound was back: what was held is of the file before. It plays on
+        // as it was going to, at full gain again.
+        function onFileStarted() {
+            if (!root.scrubbing && !root.resuming && !root.scrubHold && !scrubIn.running)
+                return
+            const playsOn = root.scrubHold || scrubIn.running
+            root.cancelScrub()
+            if (playsOn) {
+                mpvItem.paused = false
+                scrubIn.restart()
+            } else {
+                mpvItem.fade = 1
+            }
         }
         function onActiveChanged() {
             if (!mpvItem.active)
