@@ -304,8 +304,12 @@ Item {
             mpvItem.paused = true
             preview()
         }
-        if (!scrubbing)
-            mpvItem.fade = 1 // let go already: stays paused, its gain back for later
+        if (!scrubbing) {
+            // Let go already: stays paused (the fallback may have unpaused
+            // it, its sound still down), its gain back for later.
+            mpvItem.paused = true
+            mpvItem.fade = 1
+        }
     }
     function cancelScrub() {
         if (scrubbing)
