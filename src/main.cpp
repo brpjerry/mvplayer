@@ -46,6 +46,16 @@ int main(int argc, char **argv)
 
     // libmpv renders through OpenGL, so the scene graph has to as well.
     QQuickWindow::setGraphicsApi(QSGRendererInterface::OpenGL);
+#ifdef Q_OS_WIN
+    // The threaded render loop's default animation driver assumes each frame
+    // waits for vsync. If frames ever come at twice the refresh rate (the
+    // display asleep, the window covered), it decides vsync is broken for the
+    // rest of the window's life and moves animations onto a system timer: the
+    // UI turned choppy after a night and stayed so until a restart. This driver
+    // advances animations by the clock and makes no such guess.
+    if (!qEnvironmentVariableIsSet("QSG_USE_SIMPLE_ANIMATION_DRIVER"))
+        qputenv("QSG_USE_SIMPLE_ANIMATION_DRIVER", "1");
+#endif
 
     QGuiApplication app(argc, argv);
     QGuiApplication::setApplicationName(QStringLiteral("mvplayer"));
