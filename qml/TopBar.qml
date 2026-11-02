@@ -48,6 +48,14 @@ Item {
 
     WindowDrag { anchors.fill: parent }
 
+    // Where the bar ends and the cards scrolling up to it are cut off
+    Rectangle {
+        anchors.bottom: parent.bottom
+        width: parent.width
+        height: 1
+        color: Theme.divider
+    }
+
     // Back button, only in the player view
     IconButton {
         id: back

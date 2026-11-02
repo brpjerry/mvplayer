@@ -17,6 +17,7 @@ QtObject {
         readonly property color hover: "#1f232b"
         readonly property color pressed: "#272c36"
         readonly property color line: "#20242c"
+        readonly property color divider: "#1b1e25"
         readonly property color text: "#eef0f4"
         readonly property color textDim: "#9ba2af"
         readonly property color textFaint: "#636a78"
@@ -31,6 +32,7 @@ QtObject {
         readonly property color hover: "#e2e5eb"
         readonly property color pressed: "#d3d7df"
         readonly property color line: "#d9dce3"
+        readonly property color divider: "#e0e2e8"
         readonly property color text: "#15171b"
         readonly property color textDim: "#555c69"
         readonly property color textFaint: "#878e9b"
@@ -46,6 +48,8 @@ QtObject {
     readonly property color hover: mix(darkPalette.hover, lightPalette.hover, lightness)
     readonly property color pressed: mix(darkPalette.pressed, lightPalette.pressed, lightness)
     readonly property color line: mix(darkPalette.line, lightPalette.line, lightness)
+    // Under the top bar, where the cards end: a little fainter than a line
+    readonly property color divider: mix(darkPalette.divider, lightPalette.divider, lightness)
 
     // Text
     readonly property color text: mix(darkPalette.text, lightPalette.text, lightness)
