@@ -1,5 +1,6 @@
 import QtQuick
 import QtQuick.Controls.Basic
+import QtQuick.Shapes
 import MvPlayer.Core
 
 // Library navigation: fixed entries, then the values of one tag at a time.
@@ -188,20 +189,37 @@ Rectangle {
 
         WindowDrag { anchors.fill: parent }
 
-        Rectangle {
+        // The app icon (data/mvplayer.svg) without its tile, in the accent:
+        // a play button sending out a ring. The ring is 44 of the icon's
+        // 64 units tall, and fills the logo's height.
+        Item {
             id: logo
             x: 20
             anchors.verticalCenter: parent.verticalCenter
             width: 28
             height: 28
-            radius: 8
-            color: Theme.accent
-            Icon {
+            Shape {
                 anchors.centerIn: parent
-                anchors.horizontalCenterOffset: 1
-                path: Icons.play
-                size: 18
-                color: Theme.accentInk
+                anchors.horizontalCenterOffset: -1
+                width: 64
+                height: 64
+                scale: logo.height / 44
+                preferredRendererType: Shape.CurveRenderer
+
+                ShapePath {
+                    fillColor: "transparent"
+                    strokeColor: Qt.rgba(Theme.accent.r, Theme.accent.g, Theme.accent.b, 0.3)
+                    strokeWidth: 3
+                    joinStyle: ShapePath.RoundJoin
+                    PathSvg { path: "M16.33 12v40l35-20z" }
+                }
+                ShapePath {
+                    fillColor: Theme.accent
+                    strokeColor: Theme.accent
+                    strokeWidth: 2
+                    joinStyle: ShapePath.RoundJoin
+                    PathSvg { path: "M23.33 24v16l14-8z" }
+                }
             }
         }
         Text {

@@ -66,7 +66,7 @@ QtObject {
 
     // Accent. Set `accentSource`; `accent` and its companions glide after it
     // over `accentFade` milliseconds.
-    readonly property color defaultAccent: "#8b7dff"
+    readonly property color defaultAccent: "#ff7a6b"
     property color accentSource: defaultAccent
     property int accentFade: 300
     // Accents are chosen for a dark background; on a light one they are

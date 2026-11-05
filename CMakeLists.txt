@@ -50,6 +50,9 @@ if(WIN32)
     enable_language(RC)
     configure_file(packaging/windows/mvplayer.rc.in ${CMAKE_CURRENT_BINARY_DIR}/mvplayer.rc @ONLY)
     set(MV_WINDOWS_RC ${CMAKE_CURRENT_BINARY_DIR}/mvplayer.rc)
+    # The resource compiler reports no dependencies: a new icon would
+    # otherwise leave the old one in the programs until a clean build.
+    set_source_files_properties(${MV_WINDOWS_RC} PROPERTIES OBJECT_DEPENDS ${CMAKE_CURRENT_SOURCE_DIR}/data/mvplayer.ico)
 endif()
 
 # Headless importer: same pipeline, no display needed.
