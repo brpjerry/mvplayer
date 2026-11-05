@@ -190,8 +190,8 @@ Rectangle {
         WindowDrag { anchors.fill: parent }
 
         // The app icon (data/mvplayer.svg) without its tile, in the accent:
-        // a play button sending out a ring. The ring is 44 of the icon's
-        // 64 units tall, and fills the logo's height.
+        // a play button sending out a ring. The ring, with its stroke, is
+        // about 44 of the icon's 64 units tall, and fills the logo's height.
         Item {
             id: logo
             x: 20

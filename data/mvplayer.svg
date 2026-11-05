@@ -1,4 +1,5 @@
 <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 64 64">
+  <!-- qml/Sidebar.qml draws the ring and the play button again, without the tile. -->
   <rect width="64" height="64" rx="14" fill="#121419"/>
   <path d="M16.33 12v40l35-20z" fill="none" stroke="#ff7a6b" stroke-opacity=".3" stroke-width="3" stroke-linejoin="round"/>
   <path d="M23.33 24v16l14-8z" fill="#ff7a6b" stroke="#ff7a6b" stroke-width="2" stroke-linejoin="round"/>
