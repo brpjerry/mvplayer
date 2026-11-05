@@ -64,7 +64,7 @@ Popup {
     }
 
     readonly property var accentPresets: [
-        "#8b7dff", "#5b9dff", "#3ec9d6", "#4fd68f", "#c5d94a", "#f5b84a", "#ff8f4d", "#ff6f91", "#f06bd8"
+        "#8b7dff", "#5b9dff", "#3ec9d6", "#4fd68f", "#c5d94a", "#f5b84a", "#ff8f4d", "#ff7a6b", "#ff6f91", "#f06bd8"
     ]
     readonly property bool customAccent: accentPresets.indexOf(App.accent) < 0
 

@@ -175,7 +175,7 @@ class AppController : public QObject
     // there is no account whose cookies work).
     Q_PROPERTY(QString pauseKind READ pauseKind NOTIFY activityChanged)
 
-    // The accent colour, such as "#8b7dff": the interface's colour, or,
+    // The accent colour, such as "#ff7a6b": the interface's colour, or,
     // with autoAccent on, its colour while nothing plays (what plays
     // gives the colour otherwise: a frame of the video, the album's cover).
     Q_PROPERTY(QString accent READ accent WRITE setAccent NOTIFY appearanceChanged)
@@ -579,7 +579,7 @@ private:
     int m_reviewCount = 0;  // videos waiting for review
     int m_reviewVideos = 0;
     int m_orphanCount = 0;
-    QString m_accent = QStringLiteral("#8b7dff");
+    QString m_accent = QStringLiteral("#ff7a6b");
     bool m_autoAccent = true;
     QString m_sidebarFacet = QStringLiteral("albumArtist");
     SystemTheme m_systemTheme;
