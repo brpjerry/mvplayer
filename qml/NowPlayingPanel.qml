@@ -142,14 +142,17 @@ Rectangle {
             anchors.topMargin: 8
             anchors.bottom: details.top
             anchors.bottomMargin: 10
-            width: parent.width
+            // On Windows the window's outer 6 px resize it while it is not
+            // maximised (WindowFrame): the rows and the scroll bar stop
+            // short of them, or a press on the bar would resize the window.
+            width: parent.width - (WindowFrame.custom ? 6 : 0)
             clip: true
             model: root.hasItem ? root.queue : []
             // Set, not bound: the view writes currentIndex itself when a
             // model arrives (to 0), which would break a binding.
             Component.onCompleted: currentIndex = root.index
             boundsBehavior: Flickable.StopAtBounds
-            onCurrentIndexChanged: if (currentIndex >= 0) positionViewAtIndex(currentIndex, ListView.Contain)
+            onCurrentIndexChanged: if (currentIndex >= 0) showCurrent()
             // A queue that arrives with its index already set (a video
             // playing on across the mode switch) scrolls to it as well.
             onCountChanged: { currentIndex = root.index; keepCurrentShown() }
@@ -161,7 +164,13 @@ Rectangle {
             Timer {
                 id: settle
                 interval: 450
-                onTriggered: if (list.currentIndex >= 0 && list.currentIndex < list.count) list.positionViewAtIndex(list.currentIndex, ListView.Contain)
+                onTriggered: if (list.currentIndex >= 0 && list.currentIndex < list.count) list.showCurrent()
+            }
+            // The current row into view. A glide still under way (a wheel
+            // notch, Page Up or Down) would carry the list off it again.
+            function showCurrent() {
+                listWheel.halt()
+                positionViewAtIndex(currentIndex, ListView.Contain)
             }
 
             KineticWheel {

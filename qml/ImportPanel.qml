@@ -82,14 +82,16 @@ Popup {
             deceleration: App.flickDeceleration
         }
 
-        // Clear of the panel's rounded corners.
+        // Clear of the panel's rounded corners, and of the buttons 12 px
+        // from its edge.
         ScrollRail {
             parent: list
             anchors.right: parent.right
-            width: 16
+            width: 12
             height: list.height
             view: list
             wheel: listWheel
+            inset: 4
             margin: 12
             minLength: 24
         }

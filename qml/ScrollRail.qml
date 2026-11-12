@@ -17,7 +17,9 @@ Item {
     // The view's wheel, which glides it and carries the wheel's motion on.
     required property KineticWheel wheel
 
-    property real inset: 5         // from the strip's right edge to the bar
+    // From the strip's right edge to the bar. 6 keeps a strip at the
+    // window's edge clear of the 6 px that resize it on Windows (WindowFrame).
+    property real inset: 6
     property real thickness: 4     // the bar's width
     property real hoverThickness: thickness * 2
     property real minLength: 32
