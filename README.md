@@ -675,6 +675,10 @@ the words is tried against what the judge once saw.
   shows the picture the same way and stays paused; Space while the handle
   is held decides which of the two happens. A click seeks at once. Tracks
   played from their files scrub the same way.
+- A list's scroll bar shows while the list moves or the pointer is over the
+  strip along its right edge (for the two grids, the margin right of the
+  cards). The bar can be dragged, a press beside it takes the list there,
+  and the wheel over the strip scrolls the list.
 - In the bottom bar, the playing video's picture switches between the player
   and the library. Its title shows the music file the video was found for —
   where it is, how long it plays, its format and every tag in it, with arrows
@@ -812,6 +816,7 @@ the words is tried against what the judge once saw.
 | F, F11, double-click | Fullscreen |
 | Click on the video | Play / pause, once the moment for a double-click has passed |
 | Page Up / Page Down | Page through the list under the pointer (else the library's grid) |
+| Home / End | Go to the top / the end of the list under the pointer (else the library's grid); in a text field they move the cursor |
 | Esc | Leave fullscreen, then back to the library |
 | Ctrl+F, / | Search |
 | Ctrl+, | Settings |

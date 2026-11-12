@@ -49,13 +49,26 @@ WheelHandler {
     // under way was going: wheel notches, and Page Up and Page Down
     // (PageKeys), which find the view's wheel by this function.
     function glideBy(dy) {
-        const from = glide.running ? goal : view.contentY
-        goal = clampY(from + dy)
+        glideTo((glide.running ? goal : view.contentY) + dy)
+    }
+
+    // A glide to the contentY `y`: Home and End (PageKeys), and a press on
+    // the scroll bar's track (ScrollRail).
+    function glideTo(y) {
+        goal = clampY(y)
         view.cancelFlick()
         glide.stop()
         glide.from = view.contentY
         glide.to = goal
         glide.start()
+    }
+
+    // Stops whatever moves the view: the scroll bar has it in hand.
+    function halt() {
+        view.cancelFlick()
+        glide.stop()
+        tracking = false
+        velocity = 0
     }
 
     // One scroll event. `pixelDy` is the precise delta (touchpads), `angleDy`

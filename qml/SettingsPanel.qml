@@ -467,24 +467,25 @@ Popup {
             boundsBehavior: Flickable.StopAtBounds
 
             KineticWheel {
+                id: flickWheel
                 view: flick
                 touchpadGain: App.touchpadGain
                 wheelStep: App.wheelStep * 0.6
                 deceleration: App.flickDeceleration
             }
 
-            // Where there is more below.
-            Rectangle {
+            // Where there is more below, and the bar to drag through it.
+            ScrollRail {
                 parent: flick
                 anchors.right: parent.right
-                anchors.rightMargin: 5
-                y: flick.visibleArea.yPosition * flick.height + 4
-                width: 4
-                height: Math.max(24, flick.visibleArea.heightRatio * flick.height - 8)
-                radius: 2
-                color: Theme.textFaint
-                opacity: flick.contentHeight > flick.height + 1 ? (flick.moving ? 0.9 : 0.45) : 0
-                Behavior on opacity { NumberAnimation { duration: Theme.normal } }
+                width: 16
+                height: flick.height
+                view: flick
+                wheel: flickWheel
+                margin: 4
+                minLength: 24
+                restOpacity: 0.45
+                activeOpacity: 0.9
             }
 
             Column {

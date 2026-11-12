@@ -166,10 +166,22 @@ Item {
         boundsBehavior: Flickable.StopAtBounds
 
         KineticWheel {
+            id: flickWheel
             view: flick
             touchpadGain: App.touchpadGain
             wheelStep: App.wheelStep * 0.6
             deceleration: App.flickDeceleration
+        }
+
+        ScrollRail {
+            parent: flick
+            anchors.right: parent.right
+            width: 16
+            height: flick.height
+            view: flick
+            wheel: flickWheel
+            margin: 2
+            minLength: 24
         }
 
         Column {

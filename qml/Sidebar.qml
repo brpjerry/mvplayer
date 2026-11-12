@@ -419,7 +419,7 @@ Rectangle {
             }
 
             KineticWheel {
-                id: wheel
+                id: listWheel
                 view: list
                 touchpadGain: App.touchpadGain
                 wheelStep: App.wheelStep * 0.6
@@ -436,18 +436,18 @@ Rectangle {
             font.pixelSize: 12
         }
 
-        // Thin scroll indicator
-        Rectangle {
-            visible: list.contentHeight > list.height
+        // The scroll bar, in the margin right of the rows' highlight.
+        ScrollRail {
+            parent: list
             anchors.right: parent.right
-            anchors.rightMargin: 2
-            y: list.visibleArea.yPosition * list.height
-            width: 3
-            height: Math.max(24, list.visibleArea.heightRatio * list.height)
-            radius: 1.5
-            color: Theme.textFaint
-            opacity: list.moving || wheel.active ? 0.7 : 0
-            Behavior on opacity { NumberAnimation { duration: Theme.slow } }
+            width: 8
+            height: list.height
+            view: list
+            wheel: listWheel
+            inset: 2
+            thickness: 3
+            minLength: 24
+            activeOpacity: 0.7
         }
     }
 
