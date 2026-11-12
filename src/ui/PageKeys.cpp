@@ -99,11 +99,20 @@ bool PageKeys::eventFilter(QObject *watched, QEvent *event)
         break;
     case QEvent::KeyPress: {
         const auto *key = static_cast<QKeyEvent *>(event);
-        const int pages = key->key() == Qt::Key_PageDown ? 1 : key->key() == Qt::Key_PageUp ? -1 : 0;
-        if (pages == 0 || (key->modifiers() & ~Qt::KeypadModifier) != Qt::NoModifier)
+        if ((key->modifiers() & ~Qt::KeypadModifier) != Qt::NoModifier)
+            break;
+        const bool paging = key->key() == Qt::Key_PageDown || key->key() == Qt::Key_PageUp;
+        const bool ending = key->key() == Qt::Key_Home || key->key() == Qt::Key_End;
+        if (!paging && !ending)
+            break;
+        // Home and End move the cursor in a text field.
+        if (ending && typing())
             break;
         if (QQuickItem *view = target()) {
-            page(view, pages);
+            if (paging)
+                page(view, key->key() == Qt::Key_PageDown ? 1 : -1);
+            else
+                toEnd(view, key->key() == Qt::Key_End);
             return true;
         }
         break;
@@ -112,6 +121,12 @@ bool PageKeys::eventFilter(QObject *watched, QEvent *event)
         break;
     }
     return QObject::eventFilter(watched, event);
+}
+
+bool PageKeys::typing() const
+{
+    const QQuickItem *focus = m_window->activeFocusItem();
+    return focus && (focus->inherits("QQuickTextInput") || focus->inherits("QQuickTextEdit"));
 }
 
 QQuickItem *PageKeys::target() const
@@ -152,10 +167,26 @@ void PageKeys::page(QQuickItem *view, int pages)
         QMetaObject::invokeMethod(wheel, "glideBy", Q_ARG(QVariant, dy));
         return;
     }
-    // A list without one glides as the wheel would glide it.
-    const auto [topY, bottomY] = range(view);
     const bool gliding = m_glide && m_glide->targetObject() == view && m_glide->state() == QAbstractAnimation::Running;
-    m_goal = std::clamp((gliding ? m_goal : view->property("contentY").toReal()) + dy, topY, bottomY);
+    glideTo(view, (gliding ? m_goal : view->property("contentY").toReal()) + dy);
+}
+
+void PageKeys::toEnd(QQuickItem *view, bool end)
+{
+    const auto [topY, bottomY] = range(view);
+    const qreal y = end ? bottomY : topY;
+    if (QObject *wheel = wheelOf(view)) {
+        QMetaObject::invokeMethod(wheel, "glideTo", Q_ARG(QVariant, y));
+        return;
+    }
+    glideTo(view, y);
+}
+
+// A list without a wheel of its own glides as the wheel would glide it.
+void PageKeys::glideTo(QQuickItem *view, qreal y)
+{
+    const auto [topY, bottomY] = range(view);
+    m_goal = std::clamp(y, topY, bottomY);
     if (m_glide)
         m_glide->stop(); // deleted as it stops
     QMetaObject::invokeMethod(view, "cancelFlick");

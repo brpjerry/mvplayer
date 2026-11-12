@@ -170,6 +170,7 @@ set(MV_QML_FILES
     qml/FolderTree.qml
     qml/Tooltip.qml
     qml/KineticWheel.qml
+    qml/ScrollRail.qml
     qml/WindowControls.qml
     qml/WindowDrag.qml
     qml/ReviewControls.qml

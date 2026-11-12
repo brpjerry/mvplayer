@@ -164,6 +164,27 @@ Rectangle {
                 onTriggered: if (list.currentIndex >= 0 && list.currentIndex < list.count) list.positionViewAtIndex(list.currentIndex, ListView.Contain)
             }
 
+            KineticWheel {
+                id: listWheel
+                view: list
+                touchpadGain: App.touchpadGain
+                wheelStep: App.wheelStep * 0.6
+                deceleration: App.flickDeceleration
+            }
+
+            // The scroll bar, in the margin right of the rows' highlight.
+            ScrollRail {
+                parent: list
+                anchors.right: parent.right
+                width: 8
+                height: list.height
+                view: list
+                wheel: listWheel
+                inset: 2
+                thickness: 3
+                minLength: 24
+            }
+
             delegate: Item {
                 id: row
                 required property int index

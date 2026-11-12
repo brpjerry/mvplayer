@@ -10,8 +10,9 @@ class QQuickWindow;
 
 // Page Up and Page Down page through the list under the pointer, as the wheel
 // scrolls it, or through the library on show while the pointer is over no
-// list. No list takes the keyboard (they are scrolled and clicked, never
-// focused), so the keys reach the window and are handed on from here.
+// list; Home and End take it to its top and its end. No list takes the
+// keyboard (they are scrolled and clicked, never focused), so the keys reach
+// the window and are handed on from here.
 class PageKeys : public QObject
 {
     Q_OBJECT
@@ -24,7 +25,10 @@ public:
 
 private:
     QQuickItem *target() const;
+    bool typing() const;
     void page(QQuickItem *view, int pages);
+    void toEnd(QQuickItem *view, bool end);
+    void glideTo(QQuickItem *view, qreal y);
 
     QQuickWindow *m_window = nullptr;
     QPointF m_pointer; // in the window, while m_pointerIn

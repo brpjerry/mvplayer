@@ -19,6 +19,7 @@ ListView {
     boundsBehavior: Flickable.StopAtBounds
 
     KineticWheel {
+        id: treeWheel
         view: root
         enabled: root.interactive
         touchpadGain: App.touchpadGain
@@ -26,17 +27,23 @@ ListView {
         deceleration: App.flickDeceleration
     }
 
-    // Where there is more below.
-    Rectangle {
+    // Where there is more below, and the bar to drag through it. On the
+    // view itself: declared plainly, it would go into the content and
+    // scroll away with the rows.
+    ScrollRail {
+        parent: root
         anchors.right: parent.right
-        anchors.rightMargin: 1
-        y: root.visibleArea.yPosition * root.height + 2
-        width: 3
-        height: Math.max(20, root.visibleArea.heightRatio * root.height - 4)
-        radius: 1.5
-        color: Theme.textFaint
-        opacity: root.interactive ? (root.moving ? 0.9 : 0.45) : 0
-        Behavior on opacity { NumberAnimation { duration: Theme.normal } }
+        width: 8
+        height: root.height
+        view: root
+        wheel: treeWheel
+        visible: root.interactive
+        inset: 1
+        thickness: 3
+        minLength: 20
+        margin: 2
+        restOpacity: 0.45
+        activeOpacity: 0.9
     }
 
     delegate: Item {

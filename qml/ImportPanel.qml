@@ -75,10 +75,23 @@ Popup {
         onOriginYChanged: if (atTop) contentY = originY
 
         KineticWheel {
+            id: listWheel
             view: list
             touchpadGain: App.touchpadGain
             wheelStep: App.wheelStep * 0.6
             deceleration: App.flickDeceleration
+        }
+
+        // Clear of the panel's rounded corners.
+        ScrollRail {
+            parent: list
+            anchors.right: parent.right
+            width: 16
+            height: list.height
+            view: list
+            wheel: listWheel
+            margin: 12
+            minLength: 24
         }
 
         header: Column {

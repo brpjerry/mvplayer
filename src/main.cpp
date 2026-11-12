@@ -19,6 +19,7 @@
 #include <QQuickStyle>
 #include <QKeySequence>
 #include <QMouseEvent>
+#include <QWheelEvent>
 #include <QQuickItem>
 #include <QPainter>
 #include <QQuickWindow>
@@ -297,6 +298,21 @@ int main(int argc, char **argv)
                     if (!window || at.size() != 2)
                         return QStringLiteral("failed");
                     window->resize(at[0].toInt(), at[1].toInt());
+                    return QStringLiteral("ok");
+                }
+                // wheel-at <x> <y> <angle>: the mouse wheel turned with the
+                // pointer there, in eighths of a degree as the wheel sends
+                // them (120 a notch, up when positive), to whatever is under
+                // the pointer.
+                if (line.startsWith(QLatin1String("wheel-at "))) {
+                    auto *window = qobject_cast<QQuickWindow *>(root);
+                    const QStringList at = line.section(QLatin1Char(' '), 1).split(QLatin1Char(' '), Qt::SkipEmptyParts);
+                    if (!window || at.size() != 3)
+                        return QStringLiteral("failed");
+                    const QPointF local(at[0].toDouble(), at[1].toDouble());
+                    QWheelEvent e(local, window->mapToGlobal(local), QPoint(), QPoint(0, at[2].toInt()), Qt::NoButton,
+                                  Qt::NoModifier, Qt::NoScrollPhase, false);
+                    QCoreApplication::sendEvent(window, &e);
                     return QStringLiteral("ok");
                 }
                 // drag <x1> <y1> <x2> <y2>: the left button pressed at the

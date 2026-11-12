@@ -339,18 +339,14 @@ Item {
         }
     }
 
-    // Scroll indicator
-    Rectangle {
+    // The scroll bar, in the margin right of the grid: the whole margin
+    // takes the pointer and the wheel.
+    ScrollRail {
         anchors.right: parent.right
-        anchors.rightMargin: 5
-        visible: grid.contentHeight > grid.height
-        y: grid.visibleArea.yPosition * grid.height
-        width: 4
-        height: Math.max(32, grid.visibleArea.heightRatio * grid.height)
-        radius: 2
-        color: Theme.textFaint
-        opacity: grid.moving || wheel.active ? 0.8 : 0
-        Behavior on opacity { NumberAnimation { duration: Theme.slow } }
+        width: 18
+        height: parent.height
+        view: grid
+        wheel: root.wheel
     }
 
     // Empty states

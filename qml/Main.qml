@@ -955,8 +955,9 @@ ApplicationWindow {
                 window.showGrid()
         }
     }
-    // Page Up and Page Down go to the list under the pointer (PageKeys), and
-    // over no list to this one: the library on show, not behind the player.
+    // Page Up, Page Down, Home and End go to the list under the pointer
+    // (PageKeys), and over no list to this one: the library on show, not
+    // behind the player.
     function pageList() {
         if (window.view === "player")
             return null
