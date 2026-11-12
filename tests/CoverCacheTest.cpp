@@ -139,7 +139,7 @@ private slots:
         QVERIFY(QFile::remove(p(QStringLiteral("E/front.png"))));
         QCOMPARE(cache.lookup(QStringLiteral("e2"), p(QStringLiteral("E/01.flac")), true), QString());
         QTRY_VERIFY_WITH_TIMEOUT(QFile::exists(out + QStringLiteral(".none")), 5000);
-        QVERIFY(!QFile::exists(out));
+        QTRY_VERIFY_WITH_TIMEOUT(!QFile::exists(out), 5000); // the marker is written first, the old cover removed after
         QCOMPARE(cache.lookup(QStringLiteral("e2"), p(QStringLiteral("E/01.flac")), false), QString());
     }
 
