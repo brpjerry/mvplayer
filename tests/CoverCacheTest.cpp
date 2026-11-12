@@ -83,6 +83,32 @@ private slots:
         QVERIFY(!ready.wait(300)); // marked as having none: not tried again
     }
 
+    // A picture put in the folder after the album was marked as having none
+    // (copied in just after its tracks, which keep their old times): the
+    // folder changed, so the cover is looked for again and found.
+    void imageAddedLater()
+    {
+        makeTrack(QStringLiteral("D/01.flac"));
+        QCOMPARE(CoverCache::make(covers(), QStringLiteral("d"), p(QStringLiteral("D/01.flac"))), QString());
+        CoverCache cache;
+        cache.setDir(covers());
+        QCOMPARE(cache.lookup(QStringLiteral("d"), p(QStringLiteral("D/01.flac")), false), QString());
+
+        QTest::qSleep(1100); // past the folder time's resolution on any file system
+        QImage img(400, 400, QImage::Format_RGB32);
+        img.fill(Qt::blue);
+        QVERIFY(img.save(p(QStringLiteral("D/Cover.jpg"))));
+        QSignalSpy ready(&cache, &CoverCache::coverReady);
+        QCOMPARE(cache.lookup(QStringLiteral("d"), p(QStringLiteral("D/01.flac")), true), QString());
+        QVERIFY(ready.wait(5000));
+        const QString out = CoverCache::fileFor(covers(), QStringLiteral("d"));
+        QCOMPARE(ready.first().at(1).toString(), out);
+        QVERIFY(!QFile::exists(out + QStringLiteral(".none")));
+        QVERIFY(qBlue(QImage(out).pixel(10, 10)) > 240);
+        // Made now, it holds: not made again on the next look.
+        QCOMPARE(cache.lookup(QStringLiteral("d"), p(QStringLiteral("D/01.flac")), false), out);
+    }
+
     // A real music file with a picture in its tags, named by
     // MVPLAYER_COVER_FILE (the smoke test makes one with ffmpeg).
     void embedded()
