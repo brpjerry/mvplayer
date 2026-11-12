@@ -22,14 +22,15 @@ public:
     QString dir() const { return m_dir; }
 
     // The album's cached cover, if it is there and no older than the file it
-    // came from; else empty, and with `request` it is made in the background
-    // (coverReady follows), unless the album was found to have none.
+    // came from or that file's folder; else empty, and with `request` it is
+    // made in the background (coverReady follows), unless the album was found
+    // to have none since the file and its folder last changed.
     QString lookup(const QString &key, const QString &trackPath, bool request);
 
     // The pieces, for tests and the worker: where an album's cover file is,
     // making it now (empty when the album has no picture, with a marker so
-    // that it is not tried again until the file changes), and the picture
-    // itself (null when there is none).
+    // that it is not tried again until the file or its folder changes), and
+    // the picture itself (null when there is none).
     static QString fileFor(const QString &dir, const QString &key);
     static QString make(const QString &dir, const QString &key, const QString &trackPath);
     static QImage extract(const QString &trackPath);

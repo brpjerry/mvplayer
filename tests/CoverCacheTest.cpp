@@ -109,6 +109,40 @@ private slots:
         QCOMPARE(cache.lookup(QStringLiteral("d"), p(QStringLiteral("D/01.flac")), false), out);
     }
 
+    // A made cover whose picture is replaced by another file, then taken
+    // away, the track untouched: made again from the new one, then marked
+    // as having none.
+    void imageReplacedThenRemoved()
+    {
+        makeTrack(QStringLiteral("E/01.flac"));
+        QImage red(400, 400, QImage::Format_RGB32);
+        red.fill(Qt::red);
+        QVERIFY(red.save(p(QStringLiteral("E/cover.jpg"))));
+        const QString out = CoverCache::make(covers(), QStringLiteral("e2"), p(QStringLiteral("E/01.flac")));
+        QVERIFY(qRed(QImage(out).pixel(10, 10)) > 240);
+        CoverCache cache;
+        cache.setDir(covers());
+        QCOMPARE(cache.lookup(QStringLiteral("e2"), p(QStringLiteral("E/01.flac")), false), out);
+
+        QTest::qSleep(1100);
+        QVERIFY(QFile::remove(p(QStringLiteral("E/cover.jpg"))));
+        QImage blue(400, 400, QImage::Format_RGB32);
+        blue.fill(Qt::blue);
+        QVERIFY(blue.save(p(QStringLiteral("E/front.png"))));
+        QCOMPARE(cache.lookup(QStringLiteral("e2"), p(QStringLiteral("E/01.flac")), false), QString());
+        QSignalSpy ready(&cache, &CoverCache::coverReady);
+        QCOMPARE(cache.lookup(QStringLiteral("e2"), p(QStringLiteral("E/01.flac")), true), QString());
+        QVERIFY(ready.wait(5000));
+        QVERIFY(qBlue(QImage(out).pixel(10, 10)) > 240);
+
+        QTest::qSleep(1100);
+        QVERIFY(QFile::remove(p(QStringLiteral("E/front.png"))));
+        QCOMPARE(cache.lookup(QStringLiteral("e2"), p(QStringLiteral("E/01.flac")), true), QString());
+        QTRY_VERIFY_WITH_TIMEOUT(QFile::exists(out + QStringLiteral(".none")), 5000);
+        QVERIFY(!QFile::exists(out));
+        QCOMPARE(cache.lookup(QStringLiteral("e2"), p(QStringLiteral("E/01.flac")), false), QString());
+    }
+
     // A real music file with a picture in its tags, named by
     // MVPLAYER_COVER_FILE (the smoke test makes one with ffmpeg).
     void embedded()
