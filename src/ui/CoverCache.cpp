@@ -1,6 +1,7 @@
 #include "ui/CoverCache.h"
 
 #include <QCryptographicHash>
+#include <QDateTime>
 #include <QDir>
 #include <QFile>
 #include <QFileInfo>
@@ -8,6 +9,8 @@
 
 #include <taglib/fileref.h>
 #include <taglib/tvariant.h>
+
+#include <algorithm>
 
 CoverCache::CoverCache(QObject *parent)
     : QObject(parent)
@@ -39,12 +42,17 @@ QString CoverCache::lookup(const QString &key, const QString &trackPath, bool re
     if (m_dir.isEmpty() || trackPath.isEmpty())
         return {};
     const QString file = fileFor(m_dir, key);
+    // A cover found, or found missing, holds until the file changes or its
+    // folder does: a picture put beside the files, taken away or renamed
+    // changes the folder. (One copied in just after its tracks came too late
+    // for the first look, and the tracks kept their old times.)
     const QFileInfo source(trackPath);
+    const QDateTime changed = std::max(source.lastModified(), QFileInfo(source.absolutePath()).lastModified());
     const QFileInfo made(file);
-    if (made.exists() && made.lastModified() >= source.lastModified())
+    if (made.exists() && made.lastModified() >= changed)
         return file;
     const QFileInfo none(file + QStringLiteral(".none"));
-    if (none.exists() && none.lastModified() >= source.lastModified())
+    if (none.exists() && none.lastModified() >= changed)
         return {};
     if (request && !m_inFlight.contains(key)) {
         m_inFlight.insert(key);

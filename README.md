@@ -692,7 +692,9 @@ the words is tried against what the judge once saw.
 - The pill at the left of the top bar's tools switches between the two
   libraries: **Videos**, the music videos, and **Music**, every album under
   the base directory as a grid of covers (the picture beside the album's
-  first file, else the one in its tags). Clicking an album plays it from its
+  first file, else the one in its tags; a picture put beside the files
+  later shows once the folder has been scanned again, a few seconds after).
+  Clicking an album plays it from its
   first track, the rest of the album queued after it, from the music files
   themselves and without a gap between them; the bottom bar's controls work
   as for a video, and in place of

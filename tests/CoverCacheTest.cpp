@@ -83,6 +83,66 @@ private slots:
         QVERIFY(!ready.wait(300)); // marked as having none: not tried again
     }
 
+    // A picture put in the folder after the album was marked as having none
+    // (copied in just after its tracks, which keep their old times): the
+    // folder changed, so the cover is looked for again and found.
+    void imageAddedLater()
+    {
+        makeTrack(QStringLiteral("D/01.flac"));
+        QCOMPARE(CoverCache::make(covers(), QStringLiteral("d"), p(QStringLiteral("D/01.flac"))), QString());
+        CoverCache cache;
+        cache.setDir(covers());
+        QCOMPARE(cache.lookup(QStringLiteral("d"), p(QStringLiteral("D/01.flac")), false), QString());
+
+        QTest::qSleep(1100); // past the folder time's resolution on any file system
+        QImage img(400, 400, QImage::Format_RGB32);
+        img.fill(Qt::blue);
+        QVERIFY(img.save(p(QStringLiteral("D/Cover.jpg"))));
+        QSignalSpy ready(&cache, &CoverCache::coverReady);
+        QCOMPARE(cache.lookup(QStringLiteral("d"), p(QStringLiteral("D/01.flac")), true), QString());
+        QVERIFY(ready.wait(5000));
+        const QString out = CoverCache::fileFor(covers(), QStringLiteral("d"));
+        QCOMPARE(ready.first().at(1).toString(), out);
+        QVERIFY(!QFile::exists(out + QStringLiteral(".none")));
+        QVERIFY(qBlue(QImage(out).pixel(10, 10)) > 240);
+        // Made now, it holds: not made again on the next look.
+        QCOMPARE(cache.lookup(QStringLiteral("d"), p(QStringLiteral("D/01.flac")), false), out);
+    }
+
+    // A made cover whose picture is replaced by another file, then taken
+    // away, the track untouched: made again from the new one, then marked
+    // as having none.
+    void imageReplacedThenRemoved()
+    {
+        makeTrack(QStringLiteral("E/01.flac"));
+        QImage red(400, 400, QImage::Format_RGB32);
+        red.fill(Qt::red);
+        QVERIFY(red.save(p(QStringLiteral("E/cover.jpg"))));
+        const QString out = CoverCache::make(covers(), QStringLiteral("e2"), p(QStringLiteral("E/01.flac")));
+        QVERIFY(qRed(QImage(out).pixel(10, 10)) > 240);
+        CoverCache cache;
+        cache.setDir(covers());
+        QCOMPARE(cache.lookup(QStringLiteral("e2"), p(QStringLiteral("E/01.flac")), false), out);
+
+        QTest::qSleep(1100);
+        QVERIFY(QFile::remove(p(QStringLiteral("E/cover.jpg"))));
+        QImage blue(400, 400, QImage::Format_RGB32);
+        blue.fill(Qt::blue);
+        QVERIFY(blue.save(p(QStringLiteral("E/front.png"))));
+        QCOMPARE(cache.lookup(QStringLiteral("e2"), p(QStringLiteral("E/01.flac")), false), QString());
+        QSignalSpy ready(&cache, &CoverCache::coverReady);
+        QCOMPARE(cache.lookup(QStringLiteral("e2"), p(QStringLiteral("E/01.flac")), true), QString());
+        QVERIFY(ready.wait(5000));
+        QVERIFY(qBlue(QImage(out).pixel(10, 10)) > 240);
+
+        QTest::qSleep(1100);
+        QVERIFY(QFile::remove(p(QStringLiteral("E/front.png"))));
+        QCOMPARE(cache.lookup(QStringLiteral("e2"), p(QStringLiteral("E/01.flac")), true), QString());
+        QTRY_VERIFY_WITH_TIMEOUT(QFile::exists(out + QStringLiteral(".none")), 5000);
+        QTRY_VERIFY_WITH_TIMEOUT(!QFile::exists(out), 5000); // the marker is written first, the old cover removed after
+        QCOMPARE(cache.lookup(QStringLiteral("e2"), p(QStringLiteral("E/01.flac")), false), QString());
+    }
+
     // A real music file with a picture in its tags, named by
     // MVPLAYER_COVER_FILE (the smoke test makes one with ffmpeg).
     void embedded()
